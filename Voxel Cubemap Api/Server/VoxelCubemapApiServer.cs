@@ -1,5 +1,6 @@
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
+using Sandbox.Game.WorldEnvironment;
 using Sandbox.ModAPI;
 
 using System;
@@ -13,6 +14,7 @@ using VoxelCubemapApi.Server.Api;
 
 using VRage.Game;
 using VRage.Game.Components;
+using VRage.Game.Entity;
 using VRage.Game.ObjectBuilders.Definitions;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
@@ -54,16 +56,18 @@ namespace VoxelCubemapApi.Server
             public MyPlanet TargetPlanet;
             public object OriginalStorage;
             public byte[] PatchedStorage;
+            public MyPlanetGeneratorDefinition ReplacementGenerator;
             public string EnvironmentCarrierSubtype;
             public string OperationName;
         }
 
 
-        private sealed class PreparedEnvironmentBinding
+        private sealed class PendingVegetationClear
         {
-            public Type ComponentType;
-            public MyComponentBase Component;
-            public MyEntityComponentBase EntityComponent;
+            public long PlanetEntityId;
+            public List<BoundingBoxD> Boxes;
+            public int Pass;
+            public int TicksUntilNextPass;
         }
 
 
@@ -1447,6 +1451,18 @@ namespace VoxelCubemapApi.Server
         private readonly Random m_bridgeRandom =
             new Random();
 
+        private readonly List<PendingVegetationClear>
+            m_pendingVegetationClears =
+                new List<PendingVegetationClear>();
+
+        private static readonly int[] VegetationClearPassDelays =
+        {
+            0,
+            10,
+            60,
+            180
+        };
+
         private int m_environmentRestoreRetryTicks;
 
         public override void LoadData()
@@ -1454,6 +1470,7 @@ namespace VoxelCubemapApi.Server
             LoadPersistedRuntimeGenerators();
 
             m_restoredEnvironmentBindings.Clear();
+            m_pendingVegetationClears.Clear();
             m_environmentRestoreRetryTicks =
                 0;
 
@@ -1472,6 +1489,9 @@ namespace VoxelCubemapApi.Server
             m_unloading =
                 true;
 
+            m_pendingVegetationClears.Clear();
+
+
             if (m_intermodApi != null)
             {
                 m_intermodApi.Close();
@@ -1486,6 +1506,8 @@ namespace VoxelCubemapApi.Server
         {
             if (MyAPIGateway.Session == null)
                 return;
+
+            ProcessPendingVegetationClears();
 
             // Runtime generator state is owned by the background request while
             // it is active.  Rebinding resumes after its simulation-thread
@@ -1808,6 +1830,11 @@ namespace VoxelCubemapApi.Server
                     absoluteFolder,
                     0,
                     false);
+
+
+            BindRuntimeEnvironmentCarrier(
+                runtimeGenerator,
+                snapshot.EnvironmentCarrierSubtype);
 
 
             var entry =
@@ -4960,12 +4987,18 @@ namespace VoxelCubemapApi.Server
             }
 
 
-            return RegisterRuntimeGeneratorDefinition(
-                builder,
-                entry.Subtype,
-                absoluteFolder,
-                entry.GrassMaterialValue,
-                entry.GrassNoiseVersion > 0);
+            MyPlanetGeneratorDefinition runtimeGenerator =
+                RegisterRuntimeGeneratorDefinition(
+                    builder,
+                    entry.Subtype,
+                    absoluteFolder,
+                    entry.GrassMaterialValue,
+                    entry.GrassNoiseVersion > 0);
+
+
+            return BindRuntimeEnvironmentCarrier(
+                runtimeGenerator,
+                entry.EnvironmentCarrierSubtype);
         }
 
 
@@ -5131,233 +5164,553 @@ namespace VoxelCubemapApi.Server
         }
 
 
-        private PreparedEnvironmentBinding PrepareEnvironmentBindingFromCarrier(
-            MyPlanet sourcePlanet,
-            string environmentCarrierSubtype,
-            byte[] serializedStorage)
+        private static bool TryGetPlanetComponentByInstanceTypeName(
+            MyPlanet planet,
+            string instanceTypeFullName,
+            out Type componentType,
+            out MyComponentBase component,
+            out MyEntityComponentBase entityComponent)
         {
-            if (sourcePlanet == null)
-                throw new ArgumentNullException("sourcePlanet");
+            componentType =
+                null;
 
-            if (sourcePlanet.Storage == null)
-                throw new Exception(
-                    "Cannot prepare planet environment: source storage is null.");
+            component =
+                null;
+
+            entityComponent =
+                null;
+
+
+            if (planet == null ||
+                string.IsNullOrWhiteSpace(instanceTypeFullName))
+            {
+                return false;
+            }
+
+
+            foreach (Type candidateType in
+                planet.Components.GetComponentTypes())
+            {
+                if (candidateType == null)
+                    continue;
+
+
+                MyComponentBase candidate;
+
+                if (!planet.Components.TryGet(
+                    candidateType,
+                    out candidate) ||
+                    candidate == null)
+                {
+                    continue;
+                }
+
+
+                Type instanceType =
+                    candidate.GetType();
+
+                if (instanceType == null ||
+                    !string.Equals(
+                        instanceType.FullName,
+                        instanceTypeFullName,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+
+                componentType =
+                    candidateType;
+
+                component =
+                    candidate;
+
+                entityComponent =
+                    candidate as MyEntityComponentBase;
+
+                return true;
+            }
+
+
+            return false;
+        }
+
+
+        private MyPlanetGeneratorDefinition BindRuntimeEnvironmentCarrier(
+            MyPlanetGeneratorDefinition runtimeGenerator,
+            string environmentCarrierSubtype)
+        {
+            if (runtimeGenerator == null)
+                throw new ArgumentNullException("runtimeGenerator");
+
+            if (string.IsNullOrWhiteSpace(
+                environmentCarrierSubtype))
+            {
+                return runtimeGenerator;
+            }
 
 
             MyPlanetGeneratorDefinition carrier =
                 ResolveEnvironmentCarrierGenerator(
                     environmentCarrierSubtype);
 
+            // Runtime planet definitions are registered after Keen's global
+            // definition postprocessor has already run, so their EnvironmentId
+            // is parsed but EnvironmentDefinition is never resolved. Reuse the
+            // caller's normally-loaded carrier definition and bind its already
+            // prepared environment object directly onto this runtime generator.
+            runtimeGenerator.EnvironmentId =
+                carrier.EnvironmentId;
 
-            byte[] donorStorageBytes =
-                serializedStorage;
+            runtimeGenerator.EnvironmentDefinition =
+                carrier.EnvironmentDefinition;
 
-            if (donorStorageBytes == null)
-            {
-                sourcePlanet.Storage.Save(
-                    out donorStorageBytes);
-            }
-
-            if (donorStorageBytes == null ||
-                donorStorageBytes.Length == 0)
-            {
-                throw new Exception(
-                    "Could not serialize storage for environment initialization.");
-            }
+            runtimeGenerator.EnvironmentSectorType =
+                carrier.EnvironmentSectorType;
 
 
-            VRage.ModAPI.IMyStorage donorStorageApi =
-                MyAPIGateway.Session.VoxelMaps.CreateStorage(
-                    donorStorageBytes);
-
-            if (donorStorageApi == null)
-            {
-                throw new Exception(
-                    "CreateStorage() rejected the environment donor storage.");
-            }
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Bound caller environment to runtime generator. " +
+                "Generator='" +
+                runtimeGenerator.Id.SubtypeName +
+                "', carrier='" +
+                environmentCarrierSubtype +
+                "'.");
 
 
-            MyVoxelMap donorStorageBridge =
-                CreateVoxelStorageBridge(
-                    sourcePlanet,
-                    donorStorageApi,
-                    "EnvironmentDonor");
-
-            MyPlanet environmentDonor =
-                null;
-
-            try
-            {
-                environmentDonor =
-                    new MyPlanet();
-
-                // InitEnvironment() uses Planet.Name for its deterministic
-                // instance hash. Match the live planet without copying EntityId.
-                environmentDonor.Name =
-                    sourcePlanet.Name;
-
-                MyPlanetInitArguments donorArguments =
-                    sourcePlanet.GetInitArguments;
-
-                donorArguments.StorageName =
-                    sourcePlanet.StorageName;
-
-                donorArguments.Storage =
-                    donorStorageBridge.Storage;
-
-                donorArguments.Generator =
-                    carrier;
-
-                donorArguments.MarkAreaEmpty =
-                    false;
-
-                donorArguments.AddGps =
-                    false;
-
-                donorArguments.InitializeComponents =
-                    false;
-
-                donorArguments.FadeIn =
-                    false;
-
-
-                environmentDonor.Init(
-                    donorArguments);
-
-
-                Type environmentComponentType =
-                    null;
-
-                foreach (Type componentType in
-                    environmentDonor.Components.GetComponentTypes())
-                {
-                    if (componentType != null &&
-                        string.Equals(
-                            componentType.FullName,
-                            "Sandbox.Game.Entities.Planet.MyPlanetEnvironmentComponent",
-                            StringComparison.Ordinal))
-                    {
-                        environmentComponentType =
-                            componentType;
-
-                        break;
-                    }
-                }
-
-                if (environmentComponentType == null)
-                {
-                    throw new Exception(
-                        "Environment carrier '" +
-                        environmentCarrierSubtype +
-                        "' did not create a planet environment component.");
-                }
-
-
-                MyComponentBase environmentComponent;
-
-                if (!environmentDonor.Components.TryGet(
-                    environmentComponentType,
-                    out environmentComponent) ||
-                    environmentComponent == null)
-                {
-                    throw new Exception(
-                        "Could not retrieve the initialized planet environment component.");
-                }
-
-                MyEntityComponentBase environmentEntityComponent =
-                    environmentComponent as MyEntityComponentBase;
-
-                if (environmentEntityComponent == null)
-                {
-                    throw new Exception(
-                        "Planet environment component is not an entity component.");
-                }
-
-
-                environmentDonor.Components.Remove(
-                    environmentComponentType);
-
-
-                return new PreparedEnvironmentBinding
-                {
-                    ComponentType =
-                        environmentComponentType,
-
-                    Component =
-                        environmentComponent,
-
-                    EntityComponent =
-                        environmentEntityComponent
-                };
-            }
-            finally
-            {
-                RemoveStorageBridgeFromWorld(
-                    donorStorageBridge,
-                    false);
-
-                // The donor owns only the isolated storage copy, so closing it
-                // cannot affect the live planet. This also releases its temporary
-                // entity identity and storage RangeChanged subscription.
-                if (environmentDonor != null)
-                {
-                    ((IMyEntity)environmentDonor).Close();
-                }
-            }
+            return runtimeGenerator;
         }
 
 
-        private static void AttachPreparedEnvironmentBinding(
+        private static void ReinitializePlanetEnvironmentInPlace(
             MyPlanet sourcePlanet,
-            PreparedEnvironmentBinding binding)
+            MyPlanetGeneratorDefinition replacementGenerator)
         {
             if (sourcePlanet == null)
                 throw new ArgumentNullException("sourcePlanet");
 
-            if (binding == null ||
-                binding.ComponentType == null ||
-                binding.Component == null ||
-                binding.EntityComponent == null)
+            if (replacementGenerator == null)
+                throw new ArgumentNullException("replacementGenerator");
+
+            if (sourcePlanet.Storage == null)
+                throw new Exception(
+                    "Cannot initialize planet environment: live storage is null.");
+
+
+            const string EnvironmentComponentName =
+                "Sandbox.Game.Entities.Planet.MyPlanetEnvironmentComponent";
+
+            const string GravityComponentName =
+                "Sandbox.Game.Entities.MySphericalNaturalGravityComponent";
+
+
+            Type oldEnvironmentType;
+            MyComponentBase oldEnvironmentBase;
+            MyEntityComponentBase oldEnvironment;
+
+            bool hadOldEnvironment =
+                TryGetPlanetComponentByInstanceTypeName(
+                    sourcePlanet,
+                    EnvironmentComponentName,
+                    out oldEnvironmentType,
+                    out oldEnvironmentBase,
+                    out oldEnvironment);
+
+
+            Type gravityComponentType;
+            MyComponentBase gravityComponentBase;
+            MyEntityComponentBase gravityComponent;
+
+            if (!TryGetPlanetComponentByInstanceTypeName(
+                sourcePlanet,
+                GravityComponentName,
+                out gravityComponentType,
+                out gravityComponentBase,
+                out gravityComponent) ||
+                gravityComponentType == null ||
+                gravityComponentBase == null ||
+                gravityComponent == null)
             {
-                throw new ArgumentException(
-                    "Prepared environment binding is incomplete.",
-                    "binding");
+                throw new Exception(
+                    "Could not preserve the live planet gravity component.");
             }
 
 
-            MyComponentBase oldEnvironmentBase;
+            bool oldEnvironmentRemoved =
+                false;
 
-            if (sourcePlanet.Components.TryGet(
-                binding.ComponentType,
-                out oldEnvironmentBase) &&
-                oldEnvironmentBase != null)
+            bool gravityRemoved =
+                false;
+
+            bool newEnvironmentAddedToScene =
+                false;
+
+
+            try
             {
-                MyEntityComponentBase oldEnvironment =
-                    oldEnvironmentBase as MyEntityComponentBase;
+                if (hadOldEnvironment)
+                {
+                    if (oldEnvironment == null)
+                    {
+                        throw new Exception(
+                            "Live planet environment component is not an entity component.");
+                    }
 
-                if (oldEnvironment == null)
+                    if (sourcePlanet.InScene)
+                    {
+                        oldEnvironment.OnRemovedFromScene();
+                    }
+
+                    sourcePlanet.Components.Remove(
+                        oldEnvironmentType);
+
+                    if (oldEnvironment.Entity != null)
+                    {
+                        oldEnvironment.SetContainer(
+                            null);
+                    }
+
+                    oldEnvironmentRemoved =
+                        true;
+                }
+
+
+                // MyPlanet.OnAddedToScene registers the gravity component with
+                // MyGravityProviderSystem. Keep that exact object alive and
+                // registered while MyPlanet.Init creates its temporary replacement.
+                sourcePlanet.Components.Remove(
+                    gravityComponentType);
+
+                if (gravityComponent.Entity != null)
+                {
+                    gravityComponent.SetContainer(
+                        null);
+                }
+
+                gravityRemoved =
+                    true;
+
+
+                MyPlanetInitArguments initArguments =
+                    sourcePlanet.GetInitArguments;
+
+                initArguments.Storage =
+                    sourcePlanet.Storage;
+
+                initArguments.StorageName =
+                    sourcePlanet.StorageName;
+
+                initArguments.Generator =
+                    replacementGenerator;
+
+                initArguments.MarkAreaEmpty =
+                    false;
+
+                initArguments.InitializeComponents =
+                    false;
+
+                initArguments.FadeIn =
+                    false;
+
+
+                // MyVoxelBase.InitVoxelMap() applies the engine's half-voxel
+                // offset by mutating PositionLeftBottomCorner. That mutation is
+                // correct only for first construction; calling MyPlanet.Init() on
+                // an existing planet would otherwise add another (0.5,0.5,0.5)
+                // every time and persist the accumulated shift on save.
+                Vector3D positionLeftBottomCornerBeforeInit =
+                    sourcePlanet.PositionLeftBottomCorner;
+
+                // The planet remains inside MyEntities and in the render scene.
+                // Init() is used only when the environment definition actually
+                // changes (or a barren planet needs its first environment).
+                sourcePlanet.Init(
+                    initArguments);
+
+                Vector3D positionLeftBottomCornerAfterInit =
+                    sourcePlanet.PositionLeftBottomCorner;
+
+                if (positionLeftBottomCornerAfterInit !=
+                    positionLeftBottomCornerBeforeInit)
+                {
+                    sourcePlanet.PositionLeftBottomCorner =
+                        positionLeftBottomCornerBeforeInit;
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Restored planet voxel origin after environment init. " +
+                        "EntityId=" +
+                        sourcePlanet.EntityId +
+                        ", attemptedDelta=" +
+                        (positionLeftBottomCornerAfterInit -
+                            positionLeftBottomCornerBeforeInit) +
+                        ".");
+                }
+
+
+                // Init() always adds a fresh spherical gravity component. It was
+                // never registered with MyGravityProviderSystem because the planet
+                // itself never left/re-entered the scene, so discard it and restore
+                // the original object that is already registered there.
+                MyComponentBase temporaryGravity;
+
+                if (sourcePlanet.Components.TryGet(
+                    gravityComponentType,
+                    out temporaryGravity) &&
+                    temporaryGravity != null &&
+                    !object.ReferenceEquals(
+                        temporaryGravity,
+                        gravityComponentBase))
+                {
+                    sourcePlanet.Components.Remove(
+                        gravityComponentType);
+
+                    MyEntityComponentBase temporaryGravityEntity =
+                        temporaryGravity as MyEntityComponentBase;
+
+                    if (temporaryGravityEntity != null &&
+                        temporaryGravityEntity.Entity != null)
+                    {
+                        temporaryGravityEntity.SetContainer(
+                            null);
+                    }
+                }
+
+
+                sourcePlanet.Components.Add(
+                    gravityComponentType,
+                    gravityComponentBase);
+
+                if (!object.ReferenceEquals(
+                    gravityComponent.Entity,
+                    sourcePlanet))
+                {
+                    gravityComponent.SetContainer(
+                        sourcePlanet.Components);
+                }
+
+                gravityRemoved =
+                    false;
+
+
+                Type newEnvironmentType;
+                MyComponentBase newEnvironmentBase;
+                MyEntityComponentBase newEnvironment;
+
+                if (!TryGetPlanetComponentByInstanceTypeName(
+                    sourcePlanet,
+                    EnvironmentComponentName,
+                    out newEnvironmentType,
+                    out newEnvironmentBase,
+                    out newEnvironment) ||
+                    newEnvironment == null)
                 {
                     throw new Exception(
-                        "Live planet environment component is not an entity component.");
+                        "Runtime generator did not initialize a planet environment component.");
                 }
+
+                if (!object.ReferenceEquals(
+                    newEnvironment.Entity,
+                    sourcePlanet))
+                {
+                    throw new Exception(
+                        "Engine-created environment component is not owned by the live planet.");
+                }
+
 
                 if (sourcePlanet.InScene)
                 {
-                    oldEnvironment.OnRemovedFromScene();
+                    newEnvironment.OnAddedToScene();
+
+                    newEnvironmentAddedToScene =
+                        true;
                 }
 
-                sourcePlanet.Components.Remove(
-                    binding.ComponentType);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Reinitialized live planet environment in place. " +
+                    "EntityId=" +
+                    sourcePlanet.EntityId +
+                    ", Generator='" +
+                    replacementGenerator.Id.SubtypeName +
+                    "'.");
+            }
+            catch
+            {
+                // Gravity is externally registered by MyPlanet.OnAddedToScene, so
+                // restoring the original component is mandatory even on failure.
+                if (gravityRemoved)
+                {
+                    MyComponentBase currentGravity;
+
+                    if (sourcePlanet.Components.TryGet(
+                        gravityComponentType,
+                        out currentGravity) &&
+                        currentGravity != null &&
+                        !object.ReferenceEquals(
+                            currentGravity,
+                            gravityComponentBase))
+                    {
+                        sourcePlanet.Components.Remove(
+                            gravityComponentType);
+
+                        MyEntityComponentBase currentGravityEntity =
+                            currentGravity as MyEntityComponentBase;
+
+                        if (currentGravityEntity != null &&
+                            currentGravityEntity.Entity != null)
+                        {
+                            currentGravityEntity.SetContainer(
+                                null);
+                        }
+                    }
+
+                    sourcePlanet.Components.Add(
+                        gravityComponentType,
+                        gravityComponentBase);
+
+                    if (!object.ReferenceEquals(
+                        gravityComponent.Entity,
+                        sourcePlanet))
+                    {
+                        gravityComponent.SetContainer(
+                            sourcePlanet.Components);
+                    }
+                }
+
+
+                // If Init() failed before a replacement environment became usable,
+                // put the previous component back. Its OnRemovedFromScene() already
+                // cleared sectors, so it can safely regenerate after registration.
+                Type currentEnvironmentType;
+                MyComponentBase currentEnvironmentBase;
+                MyEntityComponentBase currentEnvironment;
+
+                bool hasCurrentEnvironment =
+                    TryGetPlanetComponentByInstanceTypeName(
+                        sourcePlanet,
+                        EnvironmentComponentName,
+                        out currentEnvironmentType,
+                        out currentEnvironmentBase,
+                        out currentEnvironment);
+
+                if (hasCurrentEnvironment &&
+                    currentEnvironment != null &&
+                    !object.ReferenceEquals(
+                        currentEnvironmentBase,
+                        oldEnvironmentBase))
+                {
+                    if (newEnvironmentAddedToScene)
+                    {
+                        currentEnvironment.OnRemovedFromScene();
+                    }
+
+                    sourcePlanet.Components.Remove(
+                        currentEnvironmentType);
+
+                    if (currentEnvironment.Entity != null)
+                    {
+                        currentEnvironment.SetContainer(
+                            null);
+                    }
+                }
+
+                if (oldEnvironmentRemoved &&
+                    oldEnvironmentType != null &&
+                    oldEnvironmentBase != null &&
+                    oldEnvironment != null)
+                {
+                    sourcePlanet.Components.Add(
+                        oldEnvironmentType,
+                        oldEnvironmentBase);
+
+                    if (!object.ReferenceEquals(
+                        oldEnvironment.Entity,
+                        sourcePlanet))
+                    {
+                        oldEnvironment.SetContainer(
+                            sourcePlanet.Components);
+                    }
+
+                    if (sourcePlanet.InScene)
+                    {
+                        oldEnvironment.OnAddedToScene();
+                    }
+                }
+
+                throw;
+            }
+        }
+
+
+        private void RefreshPersistedPlanetEnvironmentInPlace(
+            MyPlanet sourcePlanet,
+            MyPlanetGeneratorDefinition runtimeGenerator)
+        {
+            if (sourcePlanet == null)
+                throw new ArgumentNullException("sourcePlanet");
+
+            if (runtimeGenerator == null)
+                throw new ArgumentNullException("runtimeGenerator");
+
+            if (sourcePlanet.Storage == null)
+                throw new Exception(
+                    "Cannot refresh persisted planet environment: live storage is null.");
+
+
+            byte[] serializedStorage;
+
+            sourcePlanet.Storage.Save(
+                out serializedStorage);
+
+            if (serializedStorage == null ||
+                serializedStorage.Length == 0)
+            {
+                throw new Exception(
+                    "Could not serialize live planet storage for post-init physics refresh.");
             }
 
 
-            sourcePlanet.Components.Add(
-                binding.ComponentType,
-                binding.Component);
+            VRage.ModAPI.IMyStorage storageApi =
+                MyAPIGateway.Session.VoxelMaps.CreateStorage(
+                    serializedStorage);
 
-            if (sourcePlanet.InScene)
+            if (storageApi == null)
             {
-                binding.EntityComponent.OnAddedToScene();
+                throw new Exception(
+                    "CreateStorage() rejected persisted planet storage copy.");
+            }
+
+
+            MyVoxelMap storageBridge =
+                CreateVoxelStorageBridge(
+                    sourcePlanet,
+                    storageApi,
+                    "EnvironmentMigration");
+
+            bool storageTransferred =
+                false;
+
+            try
+            {
+                // Legacy donor-based saves can still require a one-time native
+                // environment initialization. ReinitializePlanetEnvironmentInPlace()
+                // preserves PositionLeftBottomCorner so this migration cannot
+                // accumulate the engine's first-init-only half-voxel offset.
+                ReinitializePlanetEnvironmentInPlace(
+                    sourcePlanet,
+                    runtimeGenerator);
+
+                sourcePlanet.Storage =
+                    storageBridge.Storage;
+
+                storageTransferred =
+                    true;
+            }
+            finally
+            {
+                RemoveStorageBridgeFromWorld(
+                    storageBridge,
+                    !storageTransferred);
             }
         }
 
@@ -5367,19 +5720,55 @@ namespace VoxelCubemapApi.Server
             string environmentCarrierSubtype,
             string providerSubtype)
         {
-            PreparedEnvironmentBinding binding =
-                PrepareEnvironmentBindingFromCarrier(
-                    sourcePlanet,
-                    environmentCarrierSubtype,
-                    null);
+            MyPlanetGeneratorDefinition runtimeGenerator;
 
-            AttachPreparedEnvironmentBinding(
+            if (!m_persistedRuntimeGenerators.TryGetValue(
+                providerSubtype,
+                out runtimeGenerator) ||
+                runtimeGenerator == null)
+            {
+                throw new Exception(
+                    "Runtime generator '" +
+                    providerSubtype +
+                    "' is not registered.");
+            }
+
+
+            BindRuntimeEnvironmentCarrier(
+                runtimeGenerator,
+                environmentCarrierSubtype);
+
+
+            // New saves persist Planet.Generator as PlanetModification_* and are
+            // initialized natively by the engine. This branch only migrates saves
+            // created by the earlier donor-based prototype, where the VX2 provider
+            // was runtime-modified but MyPlanet.Generator still said Mars/Moon.
+            if (sourcePlanet.Generator != null &&
+                (string.Equals(
+                    sourcePlanet.Generator.Id.SubtypeName,
+                    providerSubtype,
+                    StringComparison.OrdinalIgnoreCase) ||
+                 object.ReferenceEquals(
+                    sourcePlanet.Generator.EnvironmentDefinition,
+                    runtimeGenerator.EnvironmentDefinition)))
+            {
+                // The storage provider may advance to a newer PlanetModification_*
+                // revision while the caller environment stays the same. There is
+                // no reason to run MyPlanet.Init() merely to make Generator.Id
+                // match the provider subtype; doing so mutates initialization-only
+                // voxel state. The existing environment component is already bound
+                // to the same prepared environment object.
+                return;
+            }
+
+
+            RefreshPersistedPlanetEnvironmentInPlace(
                 sourcePlanet,
-                binding);
+                runtimeGenerator);
 
 
             MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Restored persisted caller environment. " +
+                "[RuntimePlanetGenerator] Migrated persisted planet to native runtime generator. " +
                 "EntityId=" +
                 sourcePlanet.EntityId +
                 ", provider='" +
@@ -5604,6 +5993,38 @@ namespace VoxelCubemapApi.Server
                     MyAPIGateway.Utilities.GamePaths.ContentPath);
 
 
+            string contextRoot =
+                NormalizePath(
+                    context.ModPath);
+
+
+            // Definition contexts are engine objects and retain native paths,
+            // while LinuxCompat deliberately exposes Windows-shaped GamePaths
+            // to mods. Classify the base-game context before comparing those
+            // two representations; its default ModItem has no Name and cannot
+            // be passed to FileExistsInModLocation.
+            if (context.IsBaseGame &&
+                !string.IsNullOrWhiteSpace(contextRoot) &&
+                currentFile.StartsWith(
+                    contextRoot + "/",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                string relativeFile =
+                    currentFile.Substring(
+                        contextRoot.Length + 1);
+
+
+                ReadGameContentText(
+                    relativeFile,
+                    out xml);
+
+                resolvedFile =
+                    relativeFile;
+
+                return;
+            }
+
+
             // Vanilla + DLC: CurrentFile should resolve under the real game
             // Content directory. Strip only the content root and let ModAPI
             // read the SBC itself.
@@ -5649,8 +6070,7 @@ namespace VoxelCubemapApi.Server
 
             // Mod planets: read the actual source SBC from that mod.
             string modRoot =
-                NormalizePath(
-                    context.ModPath);
+                contextRoot;
 
 
             if (!string.IsNullOrWhiteSpace(modRoot) &&
@@ -7177,6 +7597,9 @@ namespace VoxelCubemapApi.Server
                 PatchedStorage =
                     patchedCompressed,
 
+                ReplacementGenerator =
+                    replacementGenerator,
+
                 OperationName =
                     operationName
             };
@@ -7219,20 +7642,18 @@ namespace VoxelCubemapApi.Server
             }
 
 
-            // Prepare the environment component before mutating the live planet.
-            // The donor uses its own storage copy, so it never subscribes to the
-            // live planet storage during initialization or reload restoration.
-            PreparedEnvironmentBinding environmentBinding =
-                null;
-
             if (!string.IsNullOrWhiteSpace(
                 workResult.EnvironmentCarrierSubtype))
             {
-                environmentBinding =
-                    PrepareEnvironmentBindingFromCarrier(
-                        workResult.TargetPlanet,
-                        workResult.EnvironmentCarrierSubtype,
-                        workResult.PatchedStorage);
+                if (workResult.ReplacementGenerator == null)
+                {
+                    throw new Exception(
+                        "Terraform result is missing its runtime generator.");
+                }
+
+                BindRuntimeEnvironmentCarrier(
+                    workResult.ReplacementGenerator,
+                    workResult.EnvironmentCarrierSubtype);
             }
 
 
@@ -7256,7 +7677,7 @@ namespace VoxelCubemapApi.Server
             SpawnPlanetThroughVoxelMapStorageBridge(
                 workResult.TargetPlanet,
                 patchedStorageApi,
-                environmentBinding,
+                workResult.ReplacementGenerator,
                 workResult.EnvironmentCarrierSubtype);
         }
 
@@ -7405,10 +7826,259 @@ namespace VoxelCubemapApi.Server
         }
 
 
+        private void ScheduleVegetationClearAroundExistingGrids(
+            MyPlanet planet)
+        {
+            if (planet == null ||
+                planet.Closed ||
+                planet.MarkedForClose)
+            {
+                return;
+            }
+
+
+            BoundingBoxD planetBounds =
+                planet.PositionComp.WorldAABB;
+
+            // MyPlanetEnvironmentComponent.UpdatePhysics() considers dynamic
+            // clusters up to 1024 m outside the planet AABB. Use the same
+            // tolerance so near-surface vehicles are included.
+            planetBounds.Inflate(
+                1024.0);
+
+
+            List<BoundingBoxD> boxes =
+                new List<BoundingBoxD>();
+
+
+            foreach (IMyEntity entity in MyEntities.GetEntities())
+            {
+                MyCubeGrid grid =
+                    entity as MyCubeGrid;
+
+                if (grid == null ||
+                    grid.Closed ||
+                    grid.MarkedForClose ||
+                    grid.IsStatic ||
+                    grid.Physics == null)
+                {
+                    continue;
+                }
+
+
+                BoundingBoxD gridBounds =
+                    grid.PositionComp.WorldAABB;
+
+                if (!planetBounds.Intersects(
+                    gridBounds))
+                {
+                    continue;
+                }
+
+
+                // Match MyPlanetSurfacePlacement.ClearVegetation(): the
+                // encounter code uses a sphere whose radius is twice the
+                // prefab bounding-box half-extents length, then converts it
+                // to a world-space AABB for ClearEnvironmentItemsBlocking().
+                double radius =
+                    gridBounds.HalfExtents.Length() *
+                    2.0;
+
+                if (radius <= 0.0)
+                    continue;
+
+
+                Vector3D center =
+                    gridBounds.Center;
+
+                boxes.Add(
+                    new BoundingBoxD(
+                        center - radius,
+                        center + radius));
+            }
+
+
+            if (boxes.Count == 0)
+                return;
+
+
+            PendingVegetationClear pending =
+                new PendingVegetationClear
+                {
+                    PlanetEntityId =
+                        planet.EntityId,
+                    Boxes =
+                        boxes,
+                    Pass =
+                        0,
+                    TicksUntilNextPass =
+                        VegetationClearPassDelays[0]
+                };
+
+            m_pendingVegetationClears.Add(
+                pending);
+
+
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Scheduled vegetation clear around " +
+                boxes.Count +
+                " existing grid(s). EntityId=" +
+                planet.EntityId +
+                ".");
+        }
+
+
+        private void ProcessPendingVegetationClears()
+        {
+            for (int i =
+                    m_pendingVegetationClears.Count - 1;
+                i >= 0;
+                i--)
+            {
+                PendingVegetationClear pending =
+                    m_pendingVegetationClears[i];
+
+                if (pending == null)
+                {
+                    m_pendingVegetationClears.RemoveAt(
+                        i);
+
+                    continue;
+                }
+
+
+                if (pending.TicksUntilNextPass > 0)
+                {
+                    pending.TicksUntilNextPass--;
+
+                    continue;
+                }
+
+
+                MyPlanet planet =
+                    FindPlanetByEntityId(
+                        pending.PlanetEntityId);
+
+                if (planet == null ||
+                    planet.Closed ||
+                    planet.MarkedForClose)
+                {
+                    m_pendingVegetationClears.RemoveAt(
+                        i);
+
+                    continue;
+                }
+
+
+                int sectorsTouched =
+                    ClearEnvironmentItemsInBoxes(
+                        planet,
+                        pending.Boxes);
+
+
+                pending.Pass++;
+
+                if (pending.Pass >=
+                    VegetationClearPassDelays.Length)
+                {
+                    m_pendingVegetationClears.RemoveAt(
+                        i);
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Finished post-terraform vegetation clear. " +
+                        "EntityId=" +
+                        planet.EntityId +
+                        ", lastPassSectors=" +
+                        sectorsTouched +
+                        ".");
+
+                    continue;
+                }
+
+
+                pending.TicksUntilNextPass =
+                    VegetationClearPassDelays[
+                        pending.Pass];
+            }
+        }
+
+
+        private static int ClearEnvironmentItemsInBoxes(
+            MyPlanet planet,
+            List<BoundingBoxD> boxes)
+        {
+            if (planet == null ||
+                boxes == null ||
+                boxes.Count == 0)
+            {
+                return 0;
+            }
+
+
+            int sectorsTouched =
+                0;
+
+            List<MyEntity> entities =
+                new List<MyEntity>();
+
+
+            for (int i = 0;
+                i < boxes.Count;
+                i++)
+            {
+                BoundingBoxD worldBox =
+                    boxes[i];
+
+                entities.Clear();
+
+                planet.Hierarchy.QueryAABB(
+                    ref worldBox,
+                    entities);
+
+
+                for (int j = 0;
+                    j < entities.Count;
+                    j++)
+                {
+                    MyEnvironmentSector sector =
+                        entities[j] as MyEnvironmentSector;
+
+                    if (sector == null ||
+                        sector.Closed ||
+                        sector.MarkedForClose)
+                    {
+                        continue;
+                    }
+
+
+                    if (sector.DataView == null)
+                    {
+                        sector.ForceLoadDataView();
+                    }
+
+                    if (sector.DataView == null)
+                        continue;
+
+
+                    BoundingBoxD clearBox =
+                        boxes[i];
+
+                    sector.DisableItemsInBox(
+                        ref clearBox);
+
+                    sectorsTouched++;
+                }
+            }
+
+
+            return sectorsTouched;
+        }
+
+
         private void SpawnPlanetThroughVoxelMapStorageBridge(
             MyPlanet sourcePlanet,
             VRage.ModAPI.IMyStorage patchedStorageApi,
-            PreparedEnvironmentBinding environmentBinding,
+            MyPlanetGeneratorDefinition replacementGenerator,
             string environmentCarrierSubtype)
         {
             if (sourcePlanet == null)
@@ -7429,20 +8099,70 @@ namespace VoxelCubemapApi.Server
 
             try
             {
-                // Keep the original MyPlanet in-scene. MyPlanet.Storage performs
-                // the normal provider refresh plus voxel render/physics invalidation.
+                if (!string.IsNullOrWhiteSpace(
+                    environmentCarrierSubtype))
+                {
+                    if (replacementGenerator == null)
+                    {
+                        throw new Exception(
+                            "Caller environment requires a runtime generator.");
+                    }
+
+                    Type currentEnvironmentType;
+                    MyComponentBase currentEnvironmentBase;
+                    MyEntityComponentBase currentEnvironmentEntity;
+
+                    bool hasEnvironmentComponent =
+                        TryGetPlanetComponentByInstanceTypeName(
+                            sourcePlanet,
+                            "Sandbox.Game.Entities.Planet.MyPlanetEnvironmentComponent",
+                            out currentEnvironmentType,
+                            out currentEnvironmentBase,
+                            out currentEnvironmentEntity);
+
+                    bool environmentDefinitionChanged =
+                        sourcePlanet.Generator == null ||
+                        !object.ReferenceEquals(
+                            sourcePlanet.Generator.EnvironmentDefinition,
+                            replacementGenerator.EnvironmentDefinition);
+
+                    // MyPlanet.Init() is initialization-only code. Use it only for
+                    // the two cases where there is no alternative: adding the first
+                    // environment to a barren planet, or switching to a different
+                    // prepared caller environment definition. Repeated biome/height
+                    // edits using the same carrier must remain pure storage swaps.
+                    if (!hasEnvironmentComponent ||
+                        environmentDefinitionChanged)
+                    {
+                        ReinitializePlanetEnvironmentInPlace(
+                            sourcePlanet,
+                            replacementGenerator);
+                    }
+                    else
+                    {
+                        MyLog.Default.WriteLineAndConsole(
+                            "[RuntimePlanetGenerator] Reusing existing live planet environment; " +
+                            "caller definition is unchanged. EntityId=" +
+                            sourcePlanet.EntityId +
+                            ".");
+                    }
+                }
+
+
+                // Keep the original MyPlanet in-scene. This setter performs the
+                // provider refresh plus ClearPhysicsShapes()/Clipmap.InvalidateAll().
+                // It intentionally remains the final planet/voxel lifecycle mutation.
                 sourcePlanet.Storage =
                     bridge.Storage;
 
                 storageTransferred =
                     true;
 
-
-                if (environmentBinding != null)
+                if (!string.IsNullOrWhiteSpace(
+                    environmentCarrierSubtype))
                 {
-                    AttachPreparedEnvironmentBinding(
-                        sourcePlanet,
-                        environmentBinding);
+                    ScheduleVegetationClearAroundExistingGrids(
+                        sourcePlanet);
                 }
 
 
@@ -7453,7 +8173,7 @@ namespace VoxelCubemapApi.Server
                     ", StorageName='" +
                     sourcePlanet.StorageName +
                     "', environment=" +
-                    (environmentBinding == null
+                    (string.IsNullOrWhiteSpace(environmentCarrierSubtype)
                         ? "unchanged"
                         : "'" + environmentCarrierSubtype + "'") +
                     ".");
