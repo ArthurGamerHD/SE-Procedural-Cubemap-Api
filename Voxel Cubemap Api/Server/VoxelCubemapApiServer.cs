@@ -36,6 +36,7 @@ namespace VoxelCubemapApi.Server
         public string Subtype;
         public string SourceSubtype;
         public long SourceEntityId;
+        public string EnvironmentCarrierSubtype;
         public string GeneratorFile;
         public string ArchiveFile;
         public byte GrassMaterialValue;
@@ -53,13 +54,16 @@ namespace VoxelCubemapApi.Server
             public MyPlanet TargetPlanet;
             public object OriginalStorage;
             public byte[] PatchedStorage;
-            public string FromMaterial;
-            public string ToMaterial;
-            public int ChangedMaterialId;
-            public bool ReplaceSource;
-            public MyPlanetGeneratorDefinition ReplacementGenerator;
-            public int GrassCoveragePercent;
+            public string EnvironmentCarrierSubtype;
             public string OperationName;
+        }
+
+
+        private sealed class PreparedEnvironmentBinding
+        {
+            public Type ComponentType;
+            public MyComponentBase Component;
+            public MyEntityComponentBase EntityComponent;
         }
 
 
@@ -108,6 +112,7 @@ namespace VoxelCubemapApi.Server
             public List<FractalNoiseOperation> FractalNoiseOperations;
             public List<BiomeReplacementOperation> BiomeReplacementOperations;
             public List<byte> AllocatedComplexMaterialValues;
+            public string EnvironmentCarrierSubtype;
         }
 
 
@@ -143,6 +148,8 @@ namespace VoxelCubemapApi.Server
             private readonly List<byte> m_allocatedComplexMaterialValues =
                 new List<byte>();
 
+            private string m_environmentCarrierSubtype;
+
             private bool m_closed;
             private bool m_pushStarted;
 
@@ -167,7 +174,8 @@ namespace VoxelCubemapApi.Server
                 string sourceArchiveFile,
                 string currentProviderSubtype,
                 long planetSeed,
-                MyObjectBuilder_PlanetGeneratorDefinition builder)
+                MyObjectBuilder_PlanetGeneratorDefinition builder,
+                string environmentCarrierSubtype)
             {
                 m_server =
                     server;
@@ -195,6 +203,15 @@ namespace VoxelCubemapApi.Server
 
                 Builder =
                     builder;
+
+                m_environmentCarrierSubtype =
+                    environmentCarrierSubtype;
+
+                if (!string.IsNullOrWhiteSpace(
+                    m_environmentCarrierSubtype))
+                {
+                    EnsureBiomePlanetMapEnabled();
+                }
 
                 TemplateId =
                     StableFolderId(
@@ -260,6 +277,11 @@ namespace VoxelCubemapApi.Server
                         "AddEnvironmentItems",
                         new Func<PlanetEnvironmentItemMapping[], int>(
                             AddEnvironmentItems)
+                    },
+                    {
+                        "SetEnvironmentDefinition",
+                        new Action<string>(
+                            SetEnvironmentDefinition)
                     },
                     {
                         "RemoveMaterial",
@@ -432,7 +454,8 @@ namespace VoxelCubemapApi.Server
                     ImageTransforms = transforms,
                     FractalNoiseOperations = fractalOperations,
                     BiomeReplacementOperations = biomeReplacements,
-                    AllocatedComplexMaterialValues = allocatedComplexValues
+                    AllocatedComplexMaterialValues = allocatedComplexValues,
+                    EnvironmentCarrierSubtype = m_environmentCarrierSubtype
                 };
             }
 
@@ -739,6 +762,14 @@ namespace VoxelCubemapApi.Server
             {
                 EnsureEditable();
 
+                if (!string.IsNullOrWhiteSpace(
+                    m_environmentCarrierSubtype))
+                {
+                    throw new Exception(
+                        "This template already selected an explicit " +
+                        "WorldEnvironmentDefinition carrier.");
+                }
+
                 if (mappings == null ||
                     mappings.Length == 0)
                 {
@@ -814,6 +845,38 @@ namespace VoxelCubemapApi.Server
                     output;
 
                 return mappings.Length;
+            }
+
+
+            private void SetEnvironmentDefinition(
+                string carrierPlanetGeneratorSubtype)
+            {
+                EnsureEditable();
+
+                MyPlanetGeneratorDefinition carrier =
+                    m_server.ResolveEnvironmentCarrierGenerator(
+                        carrierPlanetGeneratorSubtype);
+
+
+                EnsureBiomePlanetMapEnabled();
+
+                // Persist the actual caller environment id into the generated
+                // planet definition as well. Runtime registrations do not run
+                // MyPlanetGeneratorDefinition.Postprocessor, so the carrier
+                // subtype is persisted separately for live/reload rebinding.
+                Builder.Environment =
+                    new SerializableDefinitionId(
+                        carrier.EnvironmentId.Value.TypeId,
+                        carrier.EnvironmentId.Value.SubtypeName);
+
+                // Explicit procedural definitions and legacy EnvironmentItems are
+                // different engine paths. Selecting an explicit environment
+                // replaces inherited/legacy mappings for this terraform revision.
+                Builder.EnvironmentItems =
+                    null;
+
+                m_environmentCarrierSubtype =
+                    carrier.Id.SubtypeName;
             }
 
 
@@ -944,6 +1007,26 @@ namespace VoxelCubemapApi.Server
             }
 
 
+            private void EnsureBiomePlanetMapEnabled()
+            {
+                var planetMaps =
+                    Builder.PlanetMaps.GetValueOrDefault();
+
+                if (planetMaps.Biome)
+                    return;
+
+                planetMaps.Biome =
+                    true;
+
+                Builder.PlanetMaps =
+                    planetMaps;
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Enabled PlanetMaps.Biome for " +
+                    "runtime biome editing (source generator had Biome=false).");
+            }
+
+
             private void ReplaceBiome(
                 byte sourceBiome,
                 byte targetBiome)
@@ -952,6 +1035,8 @@ namespace VoxelCubemapApi.Server
 
                 if (sourceBiome == targetBiome)
                     return;
+
+                EnsureBiomePlanetMapEnabled();
 
                 m_biomeReplacementOperations.Add(
                     new BiomeReplacementOperation
@@ -975,6 +1060,8 @@ namespace VoxelCubemapApi.Server
                         "Coverage must be from 0 to 100.",
                         "coveragePercent");
                 }
+
+                EnsureBiomePlanetMapEnabled();
 
                 m_fractalNoiseOperations.Add(
                     new FractalNoiseOperation
@@ -1354,9 +1441,21 @@ namespace VoxelCubemapApi.Server
         // again while the session is running.
         private string m_boundSavePath;
 
+        private readonly HashSet<long> m_restoredEnvironmentBindings =
+            new HashSet<long>();
+
+        private readonly Random m_bridgeRandom =
+            new Random();
+
+        private int m_environmentRestoreRetryTicks;
+
         public override void LoadData()
         {
             LoadPersistedRuntimeGenerators();
+
+            m_restoredEnvironmentBindings.Clear();
+            m_environmentRestoreRetryTicks =
+                0;
 
             m_unloading =
                 false;
@@ -1393,6 +1492,33 @@ namespace VoxelCubemapApi.Server
             // completion callback.
             if (m_requestInProgress)
                 return;
+
+            if (m_environmentRestoreRetryTicks <= 0)
+            {
+                try
+                {
+                    bool complete =
+                        RestorePersistedEnvironmentBindings();
+
+                    m_environmentRestoreRetryTicks =
+                        complete
+                            ? int.MaxValue
+                            : 100;
+                }
+                catch (Exception e)
+                {
+                    m_environmentRestoreRetryTicks =
+                        100;
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Persisted environment restore failed: " +
+                        e);
+                }
+            }
+            else if (m_environmentRestoreRetryTicks != int.MaxValue)
+            {
+                m_environmentRestoreRetryTicks--;
+            }
 
             string currentPath =
                 NormalizePath(
@@ -1521,7 +1647,10 @@ namespace VoxelCubemapApi.Server
                     sourceArchiveFile,
                     currentProviderSubtype,
                     planetSeed,
-                    builder);
+                    builder,
+                    currentRuntimeEntry == null
+                        ? null
+                        : currentRuntimeEntry.EnvironmentCarrierSubtype);
 
 
             MyLog.Default.WriteLineAndConsole(
@@ -1687,6 +1816,7 @@ namespace VoxelCubemapApi.Server
                     Subtype = runtimeSubtype,
                     SourceSubtype = snapshot.SourceSubtype,
                     SourceEntityId = snapshot.TargetPlanet.EntityId,
+                    EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
                     GeneratorFile = generatorFile,
                     ArchiveFile = archiveFile,
                     GrassMaterialValue = 0,
@@ -1705,15 +1835,17 @@ namespace VoxelCubemapApi.Server
                 runtimeGenerator;
 
 
-            return PrepareStoredProviderSwap(
-                snapshot.TargetPlanet,
-                string.Empty,
-                string.Empty,
-                true,
-                runtimeGenerator,
-                snapshot.CurrentProviderSubtype,
-                0,
-                "API modification");
+            PlanetModificationWorkResult result =
+                PrepareStoredProviderSwap(
+                    snapshot.TargetPlanet,
+                    runtimeGenerator,
+                    snapshot.CurrentProviderSubtype,
+                    "API modification");
+
+            result.EnvironmentCarrierSubtype =
+                snapshot.EnvironmentCarrierSubtype;
+
+            return result;
         }
 
 
@@ -4784,6 +4916,26 @@ namespace VoxelCubemapApi.Server
         }
 
 
+        private static void EnsureBiomePlanetMapEnabled(
+            MyObjectBuilder_PlanetGeneratorDefinition builder)
+        {
+            if (builder == null)
+                throw new ArgumentNullException("builder");
+
+            var planetMaps =
+                builder.PlanetMaps.GetValueOrDefault();
+
+            if (planetMaps.Biome)
+                return;
+
+            planetMaps.Biome =
+                true;
+
+            builder.PlanetMaps =
+                planetMaps;
+        }
+
+
         private MyPlanetGeneratorDefinition
             LoadAndRegisterPersistedRuntimeGenerator(
                 RuntimePlanetBuilderEntry entry,
@@ -4800,12 +4952,441 @@ namespace VoxelCubemapApi.Server
                     entry.ArchiveFile);
 
 
+            if (!string.IsNullOrWhiteSpace(
+                entry.EnvironmentCarrierSubtype))
+            {
+                EnsureBiomePlanetMapEnabled(
+                    builder);
+            }
+
+
             return RegisterRuntimeGeneratorDefinition(
                 builder,
                 entry.Subtype,
                 absoluteFolder,
                 entry.GrassMaterialValue,
                 entry.GrassNoiseVersion > 0);
+        }
+
+
+        private bool RestorePersistedEnvironmentBindings()
+        {
+            if (m_settings == null ||
+                m_settings.PlanetBuilders == null ||
+                m_settings.PlanetBuilders.Count == 0)
+            {
+                return true;
+            }
+
+
+            bool complete =
+                true;
+
+            var candidatePlanetIds =
+                new HashSet<long>();
+
+
+            for (int i = 0;
+                i < m_settings.PlanetBuilders.Count;
+                i++)
+            {
+                RuntimePlanetBuilderEntry candidate =
+                    m_settings.PlanetBuilders[i];
+
+                if (candidate == null ||
+                    candidate.SourceEntityId == 0 ||
+                    string.IsNullOrWhiteSpace(
+                        candidate.EnvironmentCarrierSubtype))
+                {
+                    continue;
+                }
+
+                candidatePlanetIds.Add(
+                    candidate.SourceEntityId);
+            }
+
+
+            foreach (long planetEntityId in candidatePlanetIds)
+            {
+                if (m_restoredEnvironmentBindings.Contains(
+                    planetEntityId))
+                {
+                    continue;
+                }
+
+
+                MyPlanet planet =
+                    FindPlanetByEntityId(
+                        planetEntityId);
+
+                if (planet == null ||
+                    planet.Storage == null ||
+                    !planet.InScene)
+                {
+                    complete =
+                        false;
+
+                    continue;
+                }
+
+
+                long ignoredProviderSeed;
+                string providerSubtype;
+
+                ReadLivePlanetProviderIdentity(
+                    planet,
+                    out ignoredProviderSeed,
+                    out providerSubtype);
+
+
+                RuntimePlanetBuilderEntry currentEntry =
+                    m_settings.PlanetBuilders
+                        .LastOrDefault(x =>
+                            x != null &&
+                            x.SourceEntityId == planetEntityId &&
+                            !string.IsNullOrWhiteSpace(x.Subtype) &&
+                            string.Equals(
+                                x.Subtype,
+                                providerSubtype,
+                                StringComparison.OrdinalIgnoreCase));
+
+                if (currentEntry == null ||
+                    string.IsNullOrWhiteSpace(
+                        currentEntry.EnvironmentCarrierSubtype))
+                {
+                    m_restoredEnvironmentBindings.Add(
+                        planetEntityId);
+
+                    continue;
+                }
+
+
+                try
+                {
+                    RestorePlanetEnvironmentFromCarrier(
+                        planet,
+                        currentEntry.EnvironmentCarrierSubtype,
+                        providerSubtype);
+                }
+                catch (Exception e)
+                {
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Could not restore caller environment " +
+                        "for planet " +
+                        planetEntityId +
+                        ": " +
+                        e.Message);
+                }
+
+                // A present planet is handled once per load. Missing definitions
+                // are configuration errors and should not cause endless retries.
+                m_restoredEnvironmentBindings.Add(
+                    planetEntityId);
+            }
+
+
+            return complete;
+        }
+
+
+        private MyPlanetGeneratorDefinition ResolveEnvironmentCarrierGenerator(
+            string environmentCarrierSubtype)
+        {
+            if (string.IsNullOrWhiteSpace(
+                environmentCarrierSubtype))
+            {
+                throw new ArgumentException(
+                    "Environment carrier subtype cannot be empty.",
+                    "environmentCarrierSubtype");
+            }
+
+
+            MyPlanetGeneratorDefinition carrier =
+                MyDefinitionManager.Static
+                    .GetPlanetsGeneratorsDefinitions()
+                    .FirstOrDefault(x =>
+                        x != null &&
+                        string.Equals(
+                            x.Id.SubtypeName,
+                            environmentCarrierSubtype,
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (carrier == null)
+            {
+                throw new Exception(
+                    "Environment carrier planet generator '" +
+                    environmentCarrierSubtype +
+                    "' is not registered.");
+            }
+
+            if (!carrier.EnvironmentId.HasValue)
+            {
+                throw new Exception(
+                    "Environment carrier planet generator '" +
+                    environmentCarrierSubtype +
+                    "' has no explicit WorldEnvironmentDefinition.");
+            }
+
+            return carrier;
+        }
+
+
+        private PreparedEnvironmentBinding PrepareEnvironmentBindingFromCarrier(
+            MyPlanet sourcePlanet,
+            string environmentCarrierSubtype,
+            byte[] serializedStorage)
+        {
+            if (sourcePlanet == null)
+                throw new ArgumentNullException("sourcePlanet");
+
+            if (sourcePlanet.Storage == null)
+                throw new Exception(
+                    "Cannot prepare planet environment: source storage is null.");
+
+
+            MyPlanetGeneratorDefinition carrier =
+                ResolveEnvironmentCarrierGenerator(
+                    environmentCarrierSubtype);
+
+
+            byte[] donorStorageBytes =
+                serializedStorage;
+
+            if (donorStorageBytes == null)
+            {
+                sourcePlanet.Storage.Save(
+                    out donorStorageBytes);
+            }
+
+            if (donorStorageBytes == null ||
+                donorStorageBytes.Length == 0)
+            {
+                throw new Exception(
+                    "Could not serialize storage for environment initialization.");
+            }
+
+
+            VRage.ModAPI.IMyStorage donorStorageApi =
+                MyAPIGateway.Session.VoxelMaps.CreateStorage(
+                    donorStorageBytes);
+
+            if (donorStorageApi == null)
+            {
+                throw new Exception(
+                    "CreateStorage() rejected the environment donor storage.");
+            }
+
+
+            MyVoxelMap donorStorageBridge =
+                CreateVoxelStorageBridge(
+                    sourcePlanet,
+                    donorStorageApi,
+                    "EnvironmentDonor");
+
+            MyPlanet environmentDonor =
+                null;
+
+            try
+            {
+                environmentDonor =
+                    new MyPlanet();
+
+                // InitEnvironment() uses Planet.Name for its deterministic
+                // instance hash. Match the live planet without copying EntityId.
+                environmentDonor.Name =
+                    sourcePlanet.Name;
+
+                MyPlanetInitArguments donorArguments =
+                    sourcePlanet.GetInitArguments;
+
+                donorArguments.StorageName =
+                    sourcePlanet.StorageName;
+
+                donorArguments.Storage =
+                    donorStorageBridge.Storage;
+
+                donorArguments.Generator =
+                    carrier;
+
+                donorArguments.MarkAreaEmpty =
+                    false;
+
+                donorArguments.AddGps =
+                    false;
+
+                donorArguments.InitializeComponents =
+                    false;
+
+                donorArguments.FadeIn =
+                    false;
+
+
+                environmentDonor.Init(
+                    donorArguments);
+
+
+                Type environmentComponentType =
+                    null;
+
+                foreach (Type componentType in
+                    environmentDonor.Components.GetComponentTypes())
+                {
+                    if (componentType != null &&
+                        string.Equals(
+                            componentType.FullName,
+                            "Sandbox.Game.Entities.Planet.MyPlanetEnvironmentComponent",
+                            StringComparison.Ordinal))
+                    {
+                        environmentComponentType =
+                            componentType;
+
+                        break;
+                    }
+                }
+
+                if (environmentComponentType == null)
+                {
+                    throw new Exception(
+                        "Environment carrier '" +
+                        environmentCarrierSubtype +
+                        "' did not create a planet environment component.");
+                }
+
+
+                MyComponentBase environmentComponent;
+
+                if (!environmentDonor.Components.TryGet(
+                    environmentComponentType,
+                    out environmentComponent) ||
+                    environmentComponent == null)
+                {
+                    throw new Exception(
+                        "Could not retrieve the initialized planet environment component.");
+                }
+
+                MyEntityComponentBase environmentEntityComponent =
+                    environmentComponent as MyEntityComponentBase;
+
+                if (environmentEntityComponent == null)
+                {
+                    throw new Exception(
+                        "Planet environment component is not an entity component.");
+                }
+
+
+                environmentDonor.Components.Remove(
+                    environmentComponentType);
+
+
+                return new PreparedEnvironmentBinding
+                {
+                    ComponentType =
+                        environmentComponentType,
+
+                    Component =
+                        environmentComponent,
+
+                    EntityComponent =
+                        environmentEntityComponent
+                };
+            }
+            finally
+            {
+                RemoveStorageBridgeFromWorld(
+                    donorStorageBridge,
+                    false);
+
+                // The donor owns only the isolated storage copy, so closing it
+                // cannot affect the live planet. This also releases its temporary
+                // entity identity and storage RangeChanged subscription.
+                if (environmentDonor != null)
+                {
+                    ((IMyEntity)environmentDonor).Close();
+                }
+            }
+        }
+
+
+        private static void AttachPreparedEnvironmentBinding(
+            MyPlanet sourcePlanet,
+            PreparedEnvironmentBinding binding)
+        {
+            if (sourcePlanet == null)
+                throw new ArgumentNullException("sourcePlanet");
+
+            if (binding == null ||
+                binding.ComponentType == null ||
+                binding.Component == null ||
+                binding.EntityComponent == null)
+            {
+                throw new ArgumentException(
+                    "Prepared environment binding is incomplete.",
+                    "binding");
+            }
+
+
+            MyComponentBase oldEnvironmentBase;
+
+            if (sourcePlanet.Components.TryGet(
+                binding.ComponentType,
+                out oldEnvironmentBase) &&
+                oldEnvironmentBase != null)
+            {
+                MyEntityComponentBase oldEnvironment =
+                    oldEnvironmentBase as MyEntityComponentBase;
+
+                if (oldEnvironment == null)
+                {
+                    throw new Exception(
+                        "Live planet environment component is not an entity component.");
+                }
+
+                if (sourcePlanet.InScene)
+                {
+                    oldEnvironment.OnRemovedFromScene();
+                }
+
+                sourcePlanet.Components.Remove(
+                    binding.ComponentType);
+            }
+
+
+            sourcePlanet.Components.Add(
+                binding.ComponentType,
+                binding.Component);
+
+            if (sourcePlanet.InScene)
+            {
+                binding.EntityComponent.OnAddedToScene();
+            }
+        }
+
+
+        private void RestorePlanetEnvironmentFromCarrier(
+            MyPlanet sourcePlanet,
+            string environmentCarrierSubtype,
+            string providerSubtype)
+        {
+            PreparedEnvironmentBinding binding =
+                PrepareEnvironmentBindingFromCarrier(
+                    sourcePlanet,
+                    environmentCarrierSubtype,
+                    null);
+
+            AttachPreparedEnvironmentBinding(
+                sourcePlanet,
+                binding);
+
+
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Restored persisted caller environment. " +
+                "EntityId=" +
+                sourcePlanet.EntityId +
+                ", provider='" +
+                providerSubtype +
+                "', carrier='" +
+                environmentCarrierSubtype +
+                "'.");
         }
 
 
@@ -6514,17 +7095,20 @@ namespace VoxelCubemapApi.Server
 
         private PlanetModificationWorkResult PrepareStoredProviderSwap(
             MyPlanet targetPlanet,
-            string fromMaterial,
-            string toMaterial,
-            bool replaceSource,
             MyPlanetGeneratorDefinition replacementGenerator,
             string currentProviderSubtype,
-            int grassCoveragePercent,
-            string operationName = "Grass overlay")
+            string operationName = "planet modification")
         {
+            if (targetPlanet == null)
+                throw new ArgumentNullException("targetPlanet");
+
             if (targetPlanet.Storage == null)
                 throw new Exception(
                     "Target planet has null Storage.");
+
+            if (replacementGenerator == null)
+                throw new ArgumentNullException("replacementGenerator");
+
 
             // Capture the exact storage instance whose bytes are copied. The
             // simulation-thread commit later compares against this reference,
@@ -6548,54 +7132,15 @@ namespace VoxelCubemapApi.Server
                     "Serialized storage is not gzip data.");
             }
 
-            byte[] raw =
-                Zlib.InflateGzip(compressed);
-
-            MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] VX2 material-map test: compressed=" +
-                compressed.Length +
-                ", raw=" +
-                raw.Length);
-
-            int changedId =
-                -1;
 
             byte[] patchedRaw =
-                raw;
+                Zlib.InflateGzip(
+                    compressed);
 
 
-            // The generic planet creator must never globally rename one saved
-            // voxel-material palette entry to Grass. That aliases every voxel
-            // using that saved material ID and destroys the original planet's
-            // material composition.
-            //
-            // Grass now exists only through cloned generator material-map
-            // overlays. Preserve the VX2 palette for every /vcma testgrass
-            // percentage, including 100%.
-            //
-            // The generic /vcma testgrass path always preserves the VX2 palette.
-            // The replaceSource=false branch is retained only for historical
-            // compatibility with this prototype's storage-rewrite helper.
-            if (!replaceSource &&
-                grassCoveragePercent >= 100)
-            {
-                patchedRaw =
-                    PatchVoxelMaterialTableEntry(
-                        patchedRaw,
-                        fromMaterial,
-                        toMaterial,
-                        out changedId);
-            }
-            else
-            {
-                MyLog.Default.WriteLineAndConsole(
-                    "[RuntimePlanetGenerator] " +
-                    operationName +
-                    ": preserving the complete VX2 material palette.");
-            }
-
-
-            // Keep the storage provider and runtime generator package aligned.
+            // The voxel palette remains unchanged. Terraform material behavior
+            // comes from the generated planet definition and map overlays; the
+            // serialized storage only needs to point at the new provider subtype.
             if (!string.Equals(
                 currentProviderSubtype,
                 replacementGenerator.Id.SubtypeName,
@@ -6609,16 +7154,14 @@ namespace VoxelCubemapApi.Server
             }
 
             byte[] patchedCompressed =
-                Zlib.DeflateGzipStored(patchedRaw);
+                Zlib.DeflateGzipStored(
+                    patchedRaw);
+
 
             MyLog.Default.WriteLineAndConsole(
                 "[RuntimePlanetGenerator] Prepared planet provider for " +
                 operationName +
-                ". Saved material ID=" +
-                (changedId >= 0
-                    ? changedId.ToString()
-                    : "<palette preserved>") +
-                ", bytes=" +
+                ". bytes=" +
                 patchedCompressed.Length +
                 ". Waiting for simulation-thread commit.");
 
@@ -6634,24 +7177,6 @@ namespace VoxelCubemapApi.Server
                 PatchedStorage =
                     patchedCompressed,
 
-                FromMaterial =
-                    fromMaterial,
-
-                ToMaterial =
-                    toMaterial,
-
-                ChangedMaterialId =
-                    changedId,
-
-                ReplaceSource =
-                    replaceSource,
-
-                ReplacementGenerator =
-                    replacementGenerator,
-
-                GrassCoveragePercent =
-                    grassCoveragePercent,
-
                 OperationName =
                     operationName
             };
@@ -6659,7 +7184,7 @@ namespace VoxelCubemapApi.Server
 
 
         /// <summary>
-        /// Performs the compare-and-swap commit on the simulation thread.  The
+        /// Performs the compare-and-swap commit on the simulation thread. The
         /// expensive serialized copy is already complete; this method creates
         /// the engine storage bridge and changes the live storage reference in
         /// one simulation callback.
@@ -6694,8 +7219,23 @@ namespace VoxelCubemapApi.Server
             }
 
 
-            // CreateStorage and CreateVoxelMap interact with live engine state,
-            // so they intentionally remain in this simulation-thread commit.
+            // Prepare the environment component before mutating the live planet.
+            // The donor uses its own storage copy, so it never subscribes to the
+            // live planet storage during initialization or reload restoration.
+            PreparedEnvironmentBinding environmentBinding =
+                null;
+
+            if (!string.IsNullOrWhiteSpace(
+                workResult.EnvironmentCarrierSubtype))
+            {
+                environmentBinding =
+                    PrepareEnvironmentBindingFromCarrier(
+                        workResult.TargetPlanet,
+                        workResult.EnvironmentCarrierSubtype,
+                        workResult.PatchedStorage);
+            }
+
+
             VRage.ModAPI.IMyStorage patchedStorageApi =
                 MyAPIGateway.Session.VoxelMaps.CreateStorage(
                     workResult.PatchedStorage);
@@ -6716,53 +7256,51 @@ namespace VoxelCubemapApi.Server
             SpawnPlanetThroughVoxelMapStorageBridge(
                 workResult.TargetPlanet,
                 patchedStorageApi,
-                workResult.FromMaterial,
-                workResult.ToMaterial,
-                workResult.ChangedMaterialId,
-                workResult.ReplaceSource,
-                workResult.ReplacementGenerator);
+                environmentBinding,
+                workResult.EnvironmentCarrierSubtype);
         }
 
 
-        private void SpawnPlanetThroughVoxelMapStorageBridge(
+        private MyVoxelMap CreateVoxelStorageBridge(
             MyPlanet sourcePlanet,
-            VRage.ModAPI.IMyStorage patchedStorageApi,
-            string fromMaterial,
-            string toMaterial,
-            int changedId,
-            bool replaceSource,
-            MyPlanetGeneratorDefinition replacementGenerator)
+            VRage.ModAPI.IMyStorage storageApi,
+            string purpose)
         {
             if (sourcePlanet == null)
                 throw new ArgumentNullException("sourcePlanet");
 
-            if (patchedStorageApi == null)
-                throw new ArgumentNullException("patchedStorageApi");
+            if (storageApi == null)
+                throw new ArgumentNullException("storageApi");
 
-            // CreateStorage(byte[]) deliberately exposes only the narrow
-            // VRage.ModAPI.IMyStorage interface. MyPlanetInitArguments.Storage
-            // expects the engine-side voxel storage interface, so do NOT try
-            // to cast the storage itself.
-            //
-            // Instead, pass it through the public voxel-map factory. The
-            // concrete MyVoxelMap owns the engine-side storage internally and
-            // exposes it through MyVoxelMap.Storage.
+
             string bridgeStorageName =
-                "GrassMapBridge_" +
+                "VoxelCubemapApi_" +
+                (string.IsNullOrWhiteSpace(purpose)
+                    ? "StorageBridge"
+                    : purpose) +
+                "_" +
                 DateTime.UtcNow.Ticks;
 
-            var rng = new Random();
-            long bridgeEntityId = ((long)rng.Next() >> 32) + rng.Next();
+            long bridgeEntityId;
+            IMyEntity existingEntity;
 
-            // Keep the temporary voxel bridge well away from the real planet.
-            // One Space Engineers world unit is one meter, so three light
-            // seconds is ~899,377 km.
-            const double LightSecondMeters =
-                299792458.0;
+            do
+            {
+                bridgeEntityId =
+                    ((long)m_bridgeRandom.Next() << 31) |
+                    (uint)m_bridgeRandom.Next();
+
+                bridgeEntityId &=
+                    long.MaxValue;
+            }
+            while (bridgeEntityId == 0 ||
+                MyAPIGateway.Entities.TryGetEntityById(
+                    bridgeEntityId,
+                    out existingEntity));
+
 
             const double BridgeDistance =
-                LightSecondMeters * 3.0;
-
+                299792458.0 * 3.0;
 
             double directionX;
             double directionY;
@@ -6773,13 +7311,13 @@ namespace VoxelCubemapApi.Server
             do
             {
                 directionX =
-                    rng.NextDouble() * 2.0 - 1.0;
+                    m_bridgeRandom.NextDouble() * 2.0 - 1.0;
 
                 directionY =
-                    rng.NextDouble() * 2.0 - 1.0;
+                    m_bridgeRandom.NextDouble() * 2.0 - 1.0;
 
                 directionZ =
-                    rng.NextDouble() * 2.0 - 1.0;
+                    m_bridgeRandom.NextDouble() * 2.0 - 1.0;
 
                 directionLengthSquared =
                     directionX * directionX +
@@ -6795,8 +7333,8 @@ namespace VoxelCubemapApi.Server
                 Math.Sqrt(
                     directionLengthSquared);
 
-
-            Vector3D bridgeOffset =
+            Vector3D bridgePosition =
+                sourcePlanet.PositionComp.GetPosition() +
                 new Vector3D(
                     directionX * inverseDirectionLength,
                     directionY * inverseDirectionLength,
@@ -6804,20 +7342,16 @@ namespace VoxelCubemapApi.Server
                 BridgeDistance;
 
 
-            Vector3D bridgePosition =
-                sourcePlanet.PositionComp.GetPosition() +
-                bridgeOffset;
-
             VRage.Game.ModAPI.IMyVoxelMap bridgeApi =
                 MyAPIGateway.Session.VoxelMaps.CreateVoxelMap(
                     bridgeStorageName,
-                    patchedStorageApi,
+                    storageApi,
                     bridgePosition,
                     bridgeEntityId);
 
             if (bridgeApi == null)
                 throw new Exception(
-                    "CreateVoxelMap() rejected the patched ModAPI storage.");
+                    "CreateVoxelMap() rejected the ModAPI storage bridge.");
 
             MyVoxelMap bridge =
                 bridgeApi as MyVoxelMap;
@@ -6828,7 +7362,7 @@ namespace VoxelCubemapApi.Server
 
                 throw new Exception(
                     "CreateVoxelMap() did not return Sandbox.Game.Entities.MyVoxelMap; " +
-                    "cannot use it as the storage-interface bridge.");
+                    "cannot bridge the storage interface.");
             }
 
             if (bridge.Storage == null)
@@ -6839,72 +7373,99 @@ namespace VoxelCubemapApi.Server
                     "Temporary MyVoxelMap bridge has null engine storage.");
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Storage bridge created. " +
-                "API storage size=" +
-                patchedStorageApi.Size +
-                ", engine storage size=" +
-                bridge.Storage.Size +
-                ", distance from source=" +
-                BridgeDistance +
-                " m");
 
-            // Keep the original MyPlanet entity alive and swap only its
-            // voxel storage. This preserves the already-live planet environment
-            // component and every session/component registration attached to it.
-            //
-            // Storage assignment is authoritative. Generator can report a stale
-            // reference on this frame, so it is diagnostic only and never a
-            // rollback condition.
-            sourcePlanet.Storage =
-                bridge.Storage;
-
-
-            string liveGeneratorSubtype =
-                sourcePlanet.Generator == null
-                    ? null
-                    : sourcePlanet.Generator.Id.SubtypeName;
-
-
-            MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Swapped planet storage in-place. " +
-                "EntityId=" +
-                sourcePlanet.EntityId +
-                ", reported Generator='" +
-                (liveGeneratorSubtype ?? "<null>") +
-                "' (diagnostic only), StorageName='" +
-                sourcePlanet.StorageName +
-                "'. Original planet/environment entity preserved.");
-
-
-            // IMPORTANT: do not Close() the bridge here yet. MyVoxelMap.Close()
-            // normally closes its storage, and the new planet is intentionally
-            // sharing that same storage object at this point.
-            //
-            // Keep the bridge out of the scene if CreateVoxelMap did not add it
-            // automatically. If the factory did add it, we'll deal with
-            // transferring/pinning ownership in the next iteration.
             bridge.Save =
                 false;
 
-            if (bridge.InScene)
+            return bridge;
+        }
+
+
+        private static void RemoveStorageBridgeFromWorld(
+            MyVoxelMap bridge,
+            bool closeStorage)
+        {
+            if (bridge == null)
+                return;
+
+
+            bridge.Save =
+                false;
+
+            // RemoveEntity also unregisters MyVoxelBase instances from the
+            // session voxel-map collection. It is safe to call even when the
+            // bridge was never inserted into the render scene.
+            MyAPIGateway.Entities.RemoveEntity(
+                bridge);
+
+            if (closeStorage)
             {
-                MyAPIGateway.Entities.RemoveEntity(
-                    bridge);
+                bridge.Close();
             }
+        }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Patched live planet via MyVoxelMap " +
-                "storage bridge. EntityId=" +
-                sourcePlanet.EntityId +
-                ", StorageName='" +
-                sourcePlanet.StorageName +
-                "', saved material ID=" +
-                (changedId >= 0
-                    ? changedId.ToString()
-                    : "<palette preserved>") +
-                ".");
 
+        private void SpawnPlanetThroughVoxelMapStorageBridge(
+            MyPlanet sourcePlanet,
+            VRage.ModAPI.IMyStorage patchedStorageApi,
+            PreparedEnvironmentBinding environmentBinding,
+            string environmentCarrierSubtype)
+        {
+            if (sourcePlanet == null)
+                throw new ArgumentNullException("sourcePlanet");
+
+            if (patchedStorageApi == null)
+                throw new ArgumentNullException("patchedStorageApi");
+
+
+            MyVoxelMap bridge =
+                CreateVoxelStorageBridge(
+                    sourcePlanet,
+                    patchedStorageApi,
+                    "StorageBridge");
+
+            bool storageTransferred =
+                false;
+
+            try
+            {
+                // Keep the original MyPlanet in-scene. MyPlanet.Storage performs
+                // the normal provider refresh plus voxel render/physics invalidation.
+                sourcePlanet.Storage =
+                    bridge.Storage;
+
+                storageTransferred =
+                    true;
+
+
+                if (environmentBinding != null)
+                {
+                    AttachPreparedEnvironmentBinding(
+                        sourcePlanet,
+                        environmentBinding);
+                }
+
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Patched live planet in-place. " +
+                    "EntityId=" +
+                    sourcePlanet.EntityId +
+                    ", StorageName='" +
+                    sourcePlanet.StorageName +
+                    "', environment=" +
+                    (environmentBinding == null
+                        ? "unchanged"
+                        : "'" + environmentCarrierSubtype + "'") +
+                    ".");
+            }
+            finally
+            {
+                // After a successful transfer the planet owns the bridge storage,
+                // so the bridge itself must be unregistered but not closed.
+                RemoveStorageBridgeFromWorld(
+                    bridge,
+                    !storageTransferred);
+            }
         }
 
 
@@ -6925,7 +7486,7 @@ namespace VoxelCubemapApi.Server
                 toBytes.Length > 127)
             {
                 throw new Exception(
-                    "Prototype only supports short serialized strings.");
+                    "Serialized provider subtype exceeds the supported short-string encoding.");
             }
 
 
@@ -7055,160 +7616,6 @@ namespace VoxelCubemapApi.Server
                 toValue +
                 "'");
 
-
-            return output;
-        }
-
-
-        private static byte[] PatchVoxelMaterialTableEntry(
-            byte[] raw,
-            string fromMaterial,
-            string toMaterial,
-            out int savedMaterialId)
-        {
-            // Uploaded/current VX2 format begins with:
-            //
-            //   string "Octree"
-            //   ...
-            //   Int32 materialCount
-            //   repeated:
-            //       string materialSubtype
-            //       byte savedMaterialId
-            //
-            // Rather than hard-code the table offset, locate the exact
-            // serialized [length][name][id] sequence. The saved ID byte is
-            // retained; only the subtype string is changed.
-            byte[] fromBytes =
-                System.Text.Encoding.UTF8.GetBytes(
-                    fromMaterial);
-
-            byte[] toBytes =
-                System.Text.Encoding.UTF8.GetBytes(
-                    toMaterial);
-
-            if (fromBytes.Length > 127 ||
-                toBytes.Length > 127)
-            {
-                throw new Exception(
-                    "Prototype supports material names <= 127 UTF-8 bytes.");
-            }
-
-            int matchOffset = -1;
-            int matches = 0;
-
-            for (int i = 0;
-                i <= raw.Length - fromBytes.Length - 2;
-                i++)
-            {
-                if (raw[i] != (byte)fromBytes.Length)
-                    continue;
-
-                bool match = true;
-
-                for (int j = 0;
-                    j < fromBytes.Length;
-                    j++)
-                {
-                    if (raw[i + 1 + j] != fromBytes[j])
-                    {
-                        match = false;
-                        break;
-                    }
-                }
-
-                if (!match)
-                    continue;
-
-                matchOffset = i;
-                matches++;
-            }
-
-            if (matches != 1)
-                throw new Exception(
-                    "Expected exactly one serialized material-table entry for '" +
-                    fromMaterial +
-                    "', found " +
-                    matches +
-                    ".");
-
-            int idOffset =
-                matchOffset +
-                1 +
-                fromBytes.Length;
-
-            savedMaterialId =
-                raw[idOffset];
-
-            int newLength =
-                raw.Length -
-                fromBytes.Length +
-                toBytes.Length;
-
-            byte[] output =
-                new byte[newLength];
-
-            int outputPosition = 0;
-
-            // Copy everything before the serialized material-name entry.
-            if (matchOffset > 0)
-            {
-                Buffer.BlockCopy(
-                    raw,
-                    0,
-                    output,
-                    0,
-                    matchOffset);
-
-                outputPosition =
-                    matchOffset;
-            }
-
-            // BinaryWriter string encoding for these short ASCII subtype
-            // names uses a one-byte 7-bit length prefix.
-            output[outputPosition++] =
-                (byte)toBytes.Length;
-
-            if (toBytes.Length > 0)
-            {
-                Buffer.BlockCopy(
-                    toBytes,
-                    0,
-                    output,
-                    outputPosition,
-                    toBytes.Length);
-
-                outputPosition +=
-                    toBytes.Length;
-            }
-
-            // Preserve the original saved material ID and every byte after
-            // it. This causes stored voxels carrying that old byte ID to
-            // resolve against the new material subtype on deserialize.
-            int tailLength =
-                raw.Length - idOffset;
-
-            if (tailLength > 0)
-            {
-                Buffer.BlockCopy(
-                    raw,
-                    idOffset,
-                    output,
-                    outputPosition,
-                    tailLength);
-
-                outputPosition +=
-                    tailLength;
-            }
-
-            if (outputPosition != output.Length)
-            {
-                throw new Exception(
-                    "Internal VX2 material-table rewrite size mismatch. " +
-                    "Wrote=" +
-                    outputPosition +
-                    ", expected=" +
-                    output.Length);
-            }
 
             return output;
         }

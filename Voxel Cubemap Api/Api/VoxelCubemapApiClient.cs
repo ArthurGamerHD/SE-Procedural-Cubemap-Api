@@ -23,7 +23,7 @@ namespace VoxelCubemapApi.Api
             0x5643584150490001L;
 
         public static readonly Version ClientApiVersion =
-            new Version(0, 5, 0);
+            new Version(0, 6, 0);
 
         private Func<long, ApiData> m_getModificationTemplate;
         private bool m_listening;
@@ -286,6 +286,7 @@ namespace VoxelCubemapApi.Api
                 m_addComplexMaterial;
             private readonly Func<PlanetEnvironmentItemMapping[], int>
                 m_addEnvironmentItems;
+            private readonly Action<string> m_setEnvironmentDefinition;
             private readonly Func<byte, bool> m_removeMaterial;
             private readonly Action<byte, int> m_applyFractalNoise;
             private readonly Action<byte, byte> m_replaceBiome;
@@ -362,6 +363,12 @@ namespace VoxelCubemapApi.Api
                     GetRequired<Func<PlanetEnvironmentItemMapping[], int>>(
                         api,
                         "AddEnvironmentItems",
+                        out value);
+
+                m_setEnvironmentDefinition =
+                    GetRequired<Action<string>>(
+                        api,
+                        "SetEnvironmentDefinition",
                         out value);
 
                 m_removeMaterial =
@@ -520,6 +527,20 @@ namespace VoxelCubemapApi.Api
             {
                 return m_addEnvironmentItems(
                     mappings);
+            }
+
+
+            /// <summary>
+            /// Selects a caller-owned, normally loaded WorldEnvironmentDefinition
+            /// through a tiny PlanetGeneratorDefinition carrier. The carrier must
+            /// be declared in Data/*.sbc and its Environment field must reference
+            /// the caller's procedural environment definition.
+            /// </summary>
+            public void SetEnvironmentDefinition(
+                string carrierPlanetGeneratorSubtype)
+            {
+                m_setEnvironmentDefinition(
+                    carrierPlanetGeneratorSubtype);
             }
 
 

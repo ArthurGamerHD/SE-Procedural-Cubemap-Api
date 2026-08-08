@@ -62,7 +62,7 @@ namespace VoxelCubemapApi.Client
         /// <summary>
         /// Builds the grass modification entirely through the public API:
         /// nearest planet template, complex material, randomized biome fractal
-        /// bands, EarthLike vegetation, then push.
+        /// bands, caller-owned procedural vegetation definition, then push.
         /// </summary>
         [ChatCommand("testgrass", "vcma")]
         public static void ApplyGrassPlanet(
@@ -192,14 +192,11 @@ namespace VoxelCubemapApi.Client
                     forestBiomes[2],
                     innerCoverage);
 
-                EnvironmentItemsContent vegetation =
-                    EnvironmentItemsContent.Load(
-                        (MyModContext)client.ModContext,
-                        "Data/earthlike-vegetation.xml",
-                        "VoxelCubemapEarthLikeVegetation");
-
-                template.AddEnvironmentItems(
-                    vegetation.Mappings);
+                // This carrier is declared in Data/grass-environment.sbc. Keen
+                // loads and postprocesses the procedural environment normally at
+                // session start; the API only passes the whitelisted carrier id.
+                template.SetEnvironmentDefinition(
+                    "VoxelCubemapGrassEnvironmentCarrier");
 
                 MyLog.Default.WriteLineAndConsole(
                     "[Debug Grass API Client] Random biome fractals: " +

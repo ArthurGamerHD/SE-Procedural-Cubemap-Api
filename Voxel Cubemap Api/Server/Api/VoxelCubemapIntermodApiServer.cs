@@ -15,7 +15,7 @@ namespace VoxelCubemapApi.Server.Api
     internal sealed class VoxelCubemapIntermodApiServer
     {
         private static readonly Version ApiVersion =
-            new Version(0, 5, 0);
+            new Version(0, 6, 0);
 
         private readonly ApiData m_api;
         private bool m_registered;
