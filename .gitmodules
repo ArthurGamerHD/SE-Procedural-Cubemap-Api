@@ -1,0 +1,4 @@
+[submodule "External/Arthur-s-Lcd-Mod"]
+	path = External/Arthur-s-Lcd-Mod
+	url = https://github.com/ArthurGamerHD/Arthur-s-Lcd-Mod.git
+	branch = main

@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Voxel Cubemap Api", "Voxel Cubemap Api\Voxel Cubemap Api.csproj", "{3FA8ABF2-88BE-4B93-B03A-68A293672618}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LcdModCodeGenerator", "External\Arthur-s-Lcd-Mod\LcdModCodeGenerator\LcdModCodeGenerator.csproj", "{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3FA8ABF2-88BE-4B93-B03A-68A293672618}.Debug|x64.ActiveCfg = Debug|x64
+		{3FA8ABF2-88BE-4B93-B03A-68A293672618}.Debug|x64.Build.0 = Debug|x64
+		{3FA8ABF2-88BE-4B93-B03A-68A293672618}.Release|x64.ActiveCfg = Release|x64
+		{3FA8ABF2-88BE-4B93-B03A-68A293672618}.Release|x64.Build.0 = Release|x64
+		{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}.Debug|x64.Build.0 = Debug|Any CPU
+		{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}.Release|x64.ActiveCfg = Release|Any CPU
+		{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}.Release|x64.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

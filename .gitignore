@@ -1,0 +1,11 @@
+/*/obj
+/*/bin
+.idea
+*.DotSettings.user
+*.local.ini
+/SE.Source
+.claude/
+
+*.zip
+*.local.sh
+SpaceEngineers

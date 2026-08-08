@@ -1,0 +1,316 @@
+<?xml version="1.0"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!--
+    Client-side vegetation template copied from the vanilla EarthLike
+    PlanetGeneratorDefinition. It contains only mappings with trees and the
+    EarthForageables food mapping. Bushes and voxel coverage that share an
+    original tree mapping are intentionally preserved.
+
+    Source: Content/Data/PlanetGeneratorDefinitions.sbc / EarthLike
+  -->
+  <Definition xsi:type="PlanetGeneratorDefinition">
+    <Id>
+      <TypeId>PlanetGeneratorDefinition</TypeId>
+      <SubtypeId>VoxelCubemapEarthLikeVegetation</SubtypeId>
+    </Id>
+
+    <EnvironmentItems>
+      <!-- Forest edge: biome 113. -->
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Snow</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SnowForestEdge" Density="0.3"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SnowBushForestEdge" Density="0.4"/>
+          <Item TypeId="MyObjectBuilder_VoxelMapStorageDefinition" GroupId="SnowCoverageIronCore" ModifierId="EarthSnowArea" Density="0.002"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Woods_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="WoodGrassForestEdge" Density="0.3"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="WoodGrassBushForestEdge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Rocks_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="RockGrassForestEdge" Density="0.45"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="RockGrassBushForestEdge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassForestEdge" Density="0.1"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassBushForestEdge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Grass_old</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassForestEdge" Density="0.03"/>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassOldForestEdge" Density="0.06"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassOldBushForestEdge" Density="0.5"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="20" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Grass_old</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassOldForestEdge" Density="0.06"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassOldBushForestEdge" Density="0.5"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="20"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>113</Biome></Biomes>
+        <Materials><Material>Sand_02</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SandForestEdge" Density="0.05"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SandBushForestEdge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <!-- Medium forest: biome 141. -->
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Snow</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SnowForestMedium" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SnowBushForestMedium" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Woods_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="WoodGrassForestMedium" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="WoodGrassBushForestMedium" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Rocks_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="RockGrassForestMedium" Density="0.4"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="RockGrassBushForestMedium" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassForestMedium" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassBushForestMedium" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Grass_old</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassOldForestMedium" Density="0.15"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassOldBushForestMedium" Density="0.45"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="20" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>141</Biome></Biomes>
+        <Materials><Material>Sand_02</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SandForestMedium" Density="0.15"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SandBushForestMedium" Density="0.2"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <!-- Large forest: biome 198. -->
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Snow</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SnowForestLarge" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SnowBushForestLarge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Woods_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="WoodGrassForestLarge" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="WoodGrassBushForestLarge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Rocks_grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="RockGrassForestLarge" Density="0.35"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="RockGrassBushForestLarge" Density="0.2"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Grass</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassForestLarge" Density="0.6"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassBushForestLarge" Density="0.4"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Grass_old</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="GrassOldForestLarge" Density="0.07"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="GrassOldBushForestLarge" Density="0.3"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="20" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <Item>
+        <Biomes><Biome>198</Biome></Biomes>
+        <Materials><Material>Sand_02</Material></Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Trees" SubtypeId="SandForestLarge" Density="0.01"/>
+          <Item TypeId="MyObjectBuilder_DestroyableItems" SubtypeId="SandBushForestLarge" Density="0.005"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="0.7"/>
+          <Latitude Min="0" Max="75"/>
+          <Slope Min="0" Max="50"/>
+        </Rule>
+      </Item>
+
+      <!-- Food forageables from EarthLike. -->
+      <Item>
+        <Biomes>
+          <Biome>85</Biome>
+          <Biome>87</Biome>
+          <Biome>113</Biome>
+          <Biome>141</Biome>
+          <Biome>198</Biome>
+        </Biomes>
+        <Materials>
+          <Material>Woods_grass</Material>
+          <Material>Grass</Material>
+          <Material>Grass_old</Material>
+          <Material>Soil</Material>
+        </Materials>
+        <Items>
+          <Item TypeId="MyObjectBuilder_Forageable" SubtypeId="EarthForageables" Density="0.004"/>
+        </Items>
+        <Rule>
+          <Height Min="0" Max="1"/>
+          <Latitude Min="0" Max="90"/>
+          <Slope Min="0" Max="20"/>
+        </Rule>
+      </Item>
+    </EnvironmentItems>
+  </Definition>
+</Definitions>
