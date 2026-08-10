@@ -1,9 +1,13 @@
 #if DEBUG
 
-using System;
-using Generated;
 using Sandbox.ModAPI;
+
+using System;
+
+using Generated;
+
 using VoxelCubemapApi.Api;
+
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Utils;
@@ -20,9 +24,12 @@ namespace VoxelCubemapApi.Client
         private const long ReplyChannel =
             0x5643584150490002L;
 
-        private static DebugGrassPlanetClient m_instance;
+        private static readonly Version _clientApiVersion =
+            new Version(0, 0, 6);
 
-        private VoxelCubemapApiClient m_api;
+        private static DebugGrassPlanetClient _instance;
+
+        private ApiProvider _api;
 
 
         public override void LoadData()
@@ -30,31 +37,63 @@ namespace VoxelCubemapApi.Client
             if (MyAPIGateway.Utilities.IsDedicated)
                 return;
 
-            m_instance =
+            _instance =
                 this;
 
-            m_api =
-                new VoxelCubemapApiClient(
-                    ReplyChannel);
-
-            m_api.Init();
+            RequestApi();
         }
 
 
         protected override void UnloadData()
         {
-            if (m_api != null)
-            {
-                m_api.Close();
+            _api =
+                null;
 
-                m_api =
+            if (_instance == this)
+            {
+                _instance =
                     null;
             }
+        }
 
-            if (m_instance == this)
+
+        private void RequestApi()
+        {
+            try
             {
-                m_instance =
-                    null;
+                ApiProvider api = VoxelCubemapApiClient.TryGet(ReplyChannel);
+
+                if (api == null)
+                {
+                    _api =
+                        null;
+
+                    return;
+                }
+
+                Version serverVersion =
+                    api.GetApiVersion();
+
+                if (serverVersion == null ||
+                    !_clientApiVersion.Equals(
+                        serverVersion))
+                {
+                    throw new Exception(
+                        "API version mismatch. Client=" +
+                        _clientApiVersion +
+                        ", server=" +
+                        serverVersion +
+                        ".");
+                }
+
+                _api =
+                    api;
+            }
+            catch (Exception e)
+            {
+                LogWarning(
+                    "API response binding failed",
+                    e);
             }
         }
 
@@ -69,10 +108,9 @@ namespace VoxelCubemapApi.Client
             int grassCoveragePercent = 100)
         {
             DebugGrassPlanetClient client =
-                m_instance;
+                _instance;
 
-            if (client == null ||
-                client.m_api == null)
+            if (client == null)
             {
                 ShowMessage(
                     "Grass API client is not initialized.");
@@ -80,24 +118,27 @@ namespace VoxelCubemapApi.Client
                 return;
             }
 
-            if (!client.m_api.IsReady)
+            if (client._api == null)
             {
-                client.m_api.RequestApi();
+                client.RequestApi();
 
-                ShowMessage(
-                    "Voxel Cubemap API is not ready; requested it again.");
+                if (client._api == null)
+                {
+                    ShowMessage(
+                        "Voxel Cubemap API is not ready.");
 
-                return;
+                    return;
+                }
             }
 
 
-            VoxelCubemapApiClient.ModificationTemplate template =
+            ModificationTemplate template =
                 null;
 
             try
             {
                 template =
-                    client.m_api.GetModificationTemplate(
+                    client._api.GetModificationTemplate(
                         0);
 
                 if (template == null)
@@ -138,7 +179,7 @@ namespace VoxelCubemapApi.Client
                 };
 
                 long planetSeed =
-                    template.PlanetSeed;
+                    template.GetPlanetSeed();
 
                 var random =
                     new Random(
@@ -178,8 +219,6 @@ namespace VoxelCubemapApi.Client
                             middleCoverage)
                         : 0;
 
-                // The randomized nested bands share the grass mask's seamless
-                // noise field, so every generated forest biome stays on grass.
                 template.ApplyBiomeFractalNoise(
                     forestBiomes[0],
                     grassCoveragePercent);
@@ -192,9 +231,6 @@ namespace VoxelCubemapApi.Client
                     forestBiomes[2],
                     innerCoverage);
 
-                // This carrier is declared in Data/grass-environment.sbc. Keen
-                // loads and postprocesses the procedural environment normally at
-                // session start; the API only passes the whitelisted carrier id.
                 template.SetEnvironmentDefinition(
                     "VoxelCubemapGrassEnvironmentCarrier");
 
@@ -216,7 +252,7 @@ namespace VoxelCubemapApi.Client
                     ".");
 
 
-                VoxelCubemapApiClient.ModificationTemplate pushedTemplate =
+                ModificationTemplate pushedTemplate =
                     template;
 
                 template.Push(
@@ -239,14 +275,26 @@ namespace VoxelCubemapApi.Client
                 if (template != null)
                     template.Close();
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Debug Grass API Client] " +
+                LogWarning(
+                    "Grass modification failed",
                     e);
 
                 ShowMessage(
                     "Failed: " +
                     e.Message);
             }
+        }
+
+
+        private static void LogWarning(
+            string message,
+            Exception e)
+        {
+            MyLog.Default.WriteLineAndConsole(
+                "[Debug Grass API Client] " +
+                message +
+                ": " +
+                e);
         }
 
 

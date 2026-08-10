@@ -1,119 +1,45 @@
-using Sandbox.ModAPI;
-
 using System;
-
-using VRage.Utils;
-using VoxelCubemapApi.Api;
-
-using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
+using System.Collections.Generic;
+using Generated;
+using VoxelCubemapApi.Server.PlanetModification;
+using VoxelCubemapApi.Server.PlanetModification.Templates;
 
 namespace VoxelCubemapApi.Server.Api
 {
     /// <summary>
-    /// Publishes the delegate API over Space Engineers local mod messages.
+    /// Defines the root API published by the session-level API manager.
     /// </summary>
-    internal sealed class VoxelCubemapIntermodApiServer
+    [ApiProvider(
+        ClientNamespace = "VoxelCubemapApi.Api",
+        ClientName = "ApiProvider")]
+    internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version ApiVersion =
-            new Version(0, 6, 0);
-
-        private readonly ApiData m_api;
-        private bool m_registered;
-
-
-        public VoxelCubemapIntermodApiServer(
-            Func<long, ApiData> getModificationTemplate)
+        private static readonly Version _apiVersion = new Version(0, 0, 6);
+        private readonly PlanetModificationCoordinator _coordinator;
+        public VoxelCubemapIntermodApiServer(PlanetModificationCoordinator modificationCoordinator)
         {
-            if (getModificationTemplate == null)
-            {
-                throw new ArgumentNullException(
-                    "getModificationTemplate");
-            }
-
-
-            m_api =
-                new ApiData
-                {
-                    {
-                        "GetApiVersion",
-                        new Func<Version>(
-                            GetApiVersion)
-                    },
-                    {
-                        "GetModificationTemplate",
-                        getModificationTemplate
-                    }
-                };
+            _coordinator = modificationCoordinator;
         }
 
 
-        public void Register()
+        /// <summary>
+        /// Creates a mutable modification template for the requested planet and
+        /// returns its nested delegate API.
+        /// </summary>
+        [ApiMethod(typeof(PlanetModificationTemplate))]
+        public Dictionary<string, Delegate> GetModificationTemplate(long entityId)
         {
-            if (m_registered)
-                return;
-
-            MyAPIGateway.Utilities.RegisterMessageHandler(
-                VoxelCubemapApiClient.RegistrationChannel,
-                OnApiRequest);
-
-            m_registered =
-                true;
+            return _coordinator.CreateModificationTemplateApi(entityId);
         }
 
 
-        public void Close()
-        {
-            if (!m_registered)
-                return;
-
-            MyAPIGateway.Utilities.UnregisterMessageHandler(
-                VoxelCubemapApiClient.RegistrationChannel,
-                OnApiRequest);
-
-            m_registered =
-                false;
-        }
-
-
+        /// <summary>
+        /// Returns the version implemented by the server's root API.
+        /// </summary>
+        [ApiMethod]
         private static Version GetApiVersion()
         {
-            return ApiVersion;
-        }
-
-
-        private void OnApiRequest(
-            object payload)
-        {
-            if (!(payload is long))
-                return;
-
-            long replyChannel =
-                (long)payload;
-
-            if (replyChannel ==
-                VoxelCubemapApiClient.RegistrationChannel)
-            {
-                return;
-            }
-
-
-            try
-            {
-                // Mod messages share objects by reference. Return a per-client
-                // dictionary so the server's delegate table cannot be mutated.
-                MyAPIGateway.Utilities.SendModMessage(
-                    replyChannel,
-                    new ApiData(
-                        m_api));
-            }
-            catch (Exception e)
-            {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Failed to reply on channel " +
-                    replyChannel +
-                    ": " +
-                    e);
-            }
+            return _apiVersion;
         }
     }
 }

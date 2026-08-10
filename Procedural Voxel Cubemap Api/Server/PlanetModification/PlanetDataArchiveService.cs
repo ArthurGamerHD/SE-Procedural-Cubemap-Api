@@ -1,0 +1,399 @@
+using Sandbox.ModAPI;
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Adk.Compression.Zip;
+using Adk.Image.Png;
+using VoxelCubemapApi.Server.PlanetModification.Maps;
+using VoxelCubemapApi.Server.PlanetModification.Persistence;
+using VoxelCubemapApi.Server.PlanetModification.Templates;
+using VRage.Game;
+using VRage.Utils;
+
+namespace VoxelCubemapApi.Server.PlanetModification
+{
+    internal sealed class PlanetDataArchiveService
+    {
+        private readonly RuntimePackageStore _runtimePackages;
+
+
+        internal PlanetDataArchiveService(
+            RuntimePackageStore runtimePackages)
+        {
+            if (runtimePackages == null)
+                throw new ArgumentNullException("runtimePackages");
+
+            _runtimePackages =
+                runtimePackages;
+        }
+
+
+        internal void CreateModifiedArchive(
+            PlanetModificationSnapshot snapshot,
+            string archiveFileName)
+        {
+            if (snapshot == null)
+                throw new ArgumentNullException("snapshot");
+
+
+            string[] files =
+            {
+                "front.png",
+                "back.png",
+                "left.png",
+                "right.png",
+                "up.png",
+                "down.png",
+                "front_mat.png",
+                "back_mat.png",
+                "left_mat.png",
+                "right_mat.png",
+                "up_mat.png",
+                "down_mat.png"
+            };
+
+            var entries =
+                new List<MinimalZip.Entry>(
+                    files.Length);
+
+            Dictionary<string, byte[]> runtimeSourceFiles =
+                string.IsNullOrWhiteSpace(
+                    snapshot.SourceArchiveFile)
+                    ? null
+                    : ReadRuntimeArchive(
+                        snapshot.SourceArchiveFile);
+
+            if (snapshot.FractalNoiseOperations != null)
+            {
+                for (int operationIndex = 0;
+                    operationIndex < snapshot.FractalNoiseOperations.Count;
+                    operationIndex++)
+                {
+                    FractalNoiseOperation operation =
+                        snapshot.FractalNoiseOperations[operationIndex];
+
+                    operation.Threshold =
+                        CubemapNoise.ComputeGrassCoverageThreshold(
+                            snapshot.PlanetSeed,
+                            operation.CoveragePercent);
+                }
+            }
+
+
+            for (int i = 0;
+                i < files.Length;
+                i++)
+            {
+                string fileName =
+                    files[i];
+
+                PlanarPngBitmap modified =
+                    null;
+
+                bool haveModifiedImage =
+                    snapshot.Images != null &&
+                    snapshot.Images.TryGetValue(
+                        fileName,
+                        out modified);
+
+                List<Action<int, int, byte[], byte[], byte[], byte[]>> transforms =
+                    null;
+
+                bool haveTransforms =
+                    snapshot.ImageTransforms != null &&
+                    snapshot.ImageTransforms.TryGetValue(
+                        fileName,
+                        out transforms) &&
+                    transforms != null &&
+                    transforms.Count > 0;
+
+                bool haveFractalNoise =
+                    fileName.EndsWith(
+                        "_mat.png",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    snapshot.FractalNoiseOperations != null &&
+                    snapshot.FractalNoiseOperations.Count > 0;
+
+                bool haveBiomeReplacements =
+                    fileName.EndsWith(
+                        "_mat.png",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    snapshot.BiomeReplacementOperations != null &&
+                    snapshot.BiomeReplacementOperations.Count > 0;
+
+                bool validateAllocatedComplexMaterials =
+                    fileName.EndsWith(
+                        "_mat.png",
+                        StringComparison.OrdinalIgnoreCase) &&
+                    snapshot.AllocatedComplexMaterialValues != null &&
+                    snapshot.AllocatedComplexMaterialValues.Count > 0;
+
+
+                if ((haveTransforms ||
+                        haveFractalNoise ||
+                        haveBiomeReplacements ||
+                        validateAllocatedComplexMaterials) &&
+                    !haveModifiedImage)
+                {
+                    modified =
+                        PlanetMapOperations.DecodePlanetPng(
+                            fileName,
+                            ReadSnapshotPlanetDataFile(
+                                snapshot,
+                                runtimeSourceFiles,
+                                fileName));
+
+                    haveModifiedImage =
+                        true;
+                }
+
+                if (validateAllocatedComplexMaterials)
+                {
+                    PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
+                        modified,
+                        fileName,
+                        snapshot.AllocatedComplexMaterialValues);
+                }
+
+                if (haveBiomeReplacements)
+                {
+                    for (int operationIndex = 0;
+                        operationIndex < snapshot.BiomeReplacementOperations.Count;
+                        operationIndex++)
+                    {
+                        PlanetMapOperations.ApplyBiomeReplacementToPlanetImage(
+                            modified,
+                            snapshot.BiomeReplacementOperations[operationIndex]);
+                    }
+                }
+
+                if (haveFractalNoise)
+                {
+                    PlanetMapOperations.ApplyFractalNoiseToPlanetImage(
+                        modified,
+                        fileName,
+                        snapshot.PlanetSeed,
+                        snapshot.FractalNoiseOperations);
+                }
+
+                if (haveTransforms)
+                {
+                    for (int transformIndex = 0;
+                        transformIndex < transforms.Count;
+                        transformIndex++)
+                    {
+                        transforms[transformIndex](
+                            modified.Width,
+                            modified.Height,
+                            modified.Planes[0],
+                            modified.Planes[1],
+                            modified.Planes[2],
+                            modified.Planes[3]);
+                    }
+                }
+
+                byte[] data =
+                    haveModifiedImage
+                        ? modified.Encode()
+                        : ReadSnapshotPlanetDataFile(
+                            snapshot,
+                            runtimeSourceFiles,
+                            fileName);
+
+
+                entries.Add(
+                    new MinimalZip.Entry(
+                        fileName,
+                        data,
+                        MinimalZip.CompressionMode.Deflate));
+            }
+
+
+            byte[] archive =
+                MinimalZip.WriteBytes(
+                    entries);
+
+            _runtimePackages.SaveRuntimeArchive(
+                archiveFileName,
+                archive);
+
+
+            MyLog.Default.WriteLineAndConsole(
+                "[Voxel Cubemap API] Packed modification template " +
+                snapshot.TemplateId +
+                ": changed PNGs=" +
+                entries.Count(x =>
+                    (snapshot.Images != null &&
+                        snapshot.Images.ContainsKey(x.Name)) ||
+                    (snapshot.ImageTransforms != null &&
+                        snapshot.ImageTransforms.ContainsKey(x.Name)) ||
+                    (x.Name.EndsWith(
+                            "_mat.png",
+                            StringComparison.OrdinalIgnoreCase) &&
+                        ((snapshot.FractalNoiseOperations != null &&
+                            snapshot.FractalNoiseOperations.Count > 0) ||
+                         (snapshot.BiomeReplacementOperations != null &&
+                            snapshot.BiomeReplacementOperations.Count > 0)))) +
+                ", archive bytes=" +
+                archive.Length +
+                ".");
+        }
+
+
+        internal byte[] ReadSourceFile(
+            MyModContext sourceContext,
+            string sourceSubtype,
+            string sourceFolderName,
+            string fileName)
+        {
+            string folder =
+                sourceFolderName;
+
+
+            if (string.IsNullOrWhiteSpace(folder))
+                folder = sourceSubtype;
+
+
+            if (folder.IndexOf(':') >= 0 ||
+                folder.EndsWith(
+                    ".zip",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception(
+                    "Source definition XML uses a rooted/archive FolderName " +
+                    "and is not supported as a capture source: " +
+                    folder);
+            }
+
+
+            string relativePath =
+                "Data/PlanetDataFiles/" +
+                folder.Trim('/', '\\') +
+                "/" +
+                fileName;
+
+
+            if (sourceContext == null ||
+                sourceContext.IsBaseGame)
+            {
+                if (!MyAPIGateway.Utilities.FileExistsInGameContent(
+                    relativePath))
+                {
+                    throw new Exception(
+                        "Source planet map file does not exist in game content: " +
+                        relativePath);
+                }
+
+
+                using (BinaryReader reader =
+                    MyAPIGateway.Utilities.ReadBinaryFileInGameContent(
+                        relativePath))
+                {
+                    return BinaryData.ReadAll(
+                        reader);
+                }
+            }
+
+
+            if (!MyAPIGateway.Utilities.FileExistsInModLocation(
+                relativePath,
+                sourceContext.ModItem))
+            {
+                throw new Exception(
+                    "Source planet map file does not exist in mod content: " +
+                    relativePath);
+            }
+
+
+            using (BinaryReader reader =
+                MyAPIGateway.Utilities.ReadBinaryFileInModLocation(
+                    relativePath,
+                    sourceContext.ModItem))
+            {
+                return BinaryData.ReadAll(
+                    reader);
+            }
+        }
+
+
+        internal Dictionary<string, byte[]> ReadRuntimeArchive(
+            string sourceArchiveFile)
+        {
+            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                sourceArchiveFile,
+                typeof(VoxelCubemapApiServer)))
+            {
+                throw new Exception(
+                    "Runtime planet archive is missing: " +
+                    sourceArchiveFile);
+            }
+
+
+            using (BinaryReader reader =
+                MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                    sourceArchiveFile,
+                    typeof(VoxelCubemapApiServer)))
+            {
+                List<MinimalZip.Entry> entries =
+                    MinimalZip.Read(
+                        reader.BaseStream);
+
+                var output =
+                    new Dictionary<string, byte[]>(
+                        StringComparer.OrdinalIgnoreCase);
+
+                for (int i = 0;
+                    i < entries.Count;
+                    i++)
+                {
+                    MinimalZip.Entry entry =
+                        entries[i];
+
+                    if (entry != null)
+                    {
+                        output[entry.Name] =
+                            entry.Data;
+                    }
+                }
+
+                return output;
+            }
+        }
+
+
+        private byte[] ReadSnapshotPlanetDataFile(
+            PlanetModificationSnapshot snapshot,
+            Dictionary<string, byte[]> runtimeSourceFiles,
+            string fileName)
+        {
+            if (runtimeSourceFiles == null)
+            {
+                return ReadSourceFile(
+                    snapshot.SourceContext,
+                    snapshot.SourceSubtype,
+                    snapshot.SourceFolderName,
+                    fileName);
+            }
+
+            byte[] data;
+
+            if (!runtimeSourceFiles.TryGetValue(
+                fileName,
+                out data))
+            {
+                throw new Exception(
+                    "Planet PNG '" +
+                    fileName +
+                    "' is missing from runtime archive " +
+                    snapshot.SourceArchiveFile +
+                    ".");
+            }
+
+            return data;
+        }
+
+
+    }
+}

@@ -7,6 +7,9 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <Configurations>Release;Debug</Configurations>
     <Platforms>x64</Platforms>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>obj\$(Configuration)\$(TargetFramework)\Generated</CompilerGeneratedFilesOutputPath>
+    <ClientApiOutputPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\ClientApi'))</ClientApiOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Mal.Mdk2.ModAnalyzers" Version="2.1.16">
@@ -22,7 +25,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
-  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+  <ItemGroup>
     <ProjectReference Include="..\External\Adk\Adk.Analyzer\Adk.Analyzer.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false">
       <SetPlatform>Platform=AnyCPU</SetPlatform>
     </ProjectReference>
@@ -44,4 +47,33 @@
   </ItemGroup>
   <Import Project="..\External\Adk\Adk.Compression\Adk.Compression.projitems" Label="Shared" />
   <Import Project="..\External\Adk\Adk.Image\Adk.Image.projitems" Label="Shared" />
+
+  <Target Name="ExportGeneratedClientApi" AfterTargets="CoreCompile">
+    <ReadLinesFromFile File="$(ClientApiOutputPath)\.generated-files"
+                       Condition="Exists('$(ClientApiOutputPath)\.generated-files')">
+      <Output TaskParameter="Lines" ItemName="PreviousGeneratedClientApi" />
+    </ReadLinesFromFile>
+
+    <ItemGroup>
+      <GeneratedClientApiRunMarker Include="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\ApiProviderAttributes.g.cs" />
+      <GeneratedClientApi Include="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.cs"
+                          Exclude="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.g.cs" />
+      <GeneratedClientApiDestination Include="@(GeneratedClientApi->'$(ClientApiOutputPath)\%(Filename)%(Extension)')" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(ClientApiOutputPath)"
+             Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <Delete Files="@(PreviousGeneratedClientApi)"
+            Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <Copy SourceFiles="@(GeneratedClientApi)"
+          DestinationFiles="@(GeneratedClientApiDestination)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <WriteLinesToFile File="$(ClientApiOutputPath)\.generated-files"
+                      Lines="@(GeneratedClientApiDestination)"
+                      Overwrite="true"
+                      Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator"
+               Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+  </Target>
 </Project>

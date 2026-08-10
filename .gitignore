@@ -4,6 +4,7 @@
 *.DotSettings.user
 *.local.ini
 /SE.Source
+/ClientApi/.generated-files
 .claude/
 
 *.zip
