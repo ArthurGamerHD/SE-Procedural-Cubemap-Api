@@ -8,7 +8,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-using LcdMod.Common.Zip;
+using Adk.Compression.Zip;
+using Adk.Image.Png;
 using VoxelCubemapApi.Api;
 using VoxelCubemapApi.Server.Api;
 
@@ -21,7 +22,6 @@ using VRage.ObjectBuilders;
 using VRage.Utils;
 using VRageMath;
 using VRage.Voxels;
-using Crc32 = LcdMod.Common.Zip.Crc32;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
 namespace VoxelCubemapApi.Server
@@ -71,17 +71,6 @@ namespace VoxelCubemapApi.Server
         }
 
 
-        private sealed class PlanetPngImage
-        {
-            public string FileName;
-            public int Width;
-            public int Height;
-            public int BitDepth;
-            public int ColorType;
-            public byte[][] Planes;
-        }
-
-
         private sealed class FractalNoiseOperation
         {
             public int PlaneIndex;
@@ -109,7 +98,7 @@ namespace VoxelCubemapApi.Server
             public long PlanetSeed;
             public string TemplateId;
             public MyObjectBuilder_PlanetGeneratorDefinition Builder;
-            public Dictionary<string, PlanetPngImage> Images;
+            public Dictionary<string, PlanarPngBitmap> Images;
             public Dictionary<string,
                 List<Action<int, int, byte[], byte[], byte[], byte[]>>>
                     ImageTransforms;
@@ -127,8 +116,8 @@ namespace VoxelCubemapApi.Server
         private sealed class PlanetModificationTemplate
         {
             private readonly VoxelCubemapApiServer m_server;
-            private readonly Dictionary<string, PlanetPngImage> m_images =
-                new Dictionary<string, PlanetPngImage>(
+            private readonly Dictionary<string, PlanarPngBitmap> m_images =
+                new Dictionary<string, PlanarPngBitmap>(
                     StringComparer.OrdinalIgnoreCase);
 
             private readonly Dictionary<string,
@@ -336,50 +325,16 @@ namespace VoxelCubemapApi.Server
 
 
                 var images =
-                    new Dictionary<string, PlanetPngImage>(
+                    new Dictionary<string, PlanarPngBitmap>(
                         StringComparer.OrdinalIgnoreCase);
 
-                foreach (KeyValuePair<string, PlanetPngImage> pair in m_images)
+                foreach (KeyValuePair<string, PlanarPngBitmap> pair in m_images)
                 {
-                    PlanetPngImage source =
+                    PlanarPngBitmap source =
                         pair.Value;
-
-                    byte[][] planes =
-                        new byte[4][];
-
-                    for (int planeIndex = 0;
-                        planeIndex < planes.Length;
-                        planeIndex++)
-                    {
-                        byte[] sourcePlane =
-                            source.Planes[planeIndex];
-
-                        byte[] copy =
-                            new byte[sourcePlane.Length];
-
-                        Buffer.BlockCopy(
-                            sourcePlane,
-                            0,
-                            copy,
-                            0,
-                            sourcePlane.Length);
-
-                        planes[planeIndex] =
-                            copy;
-                    }
-
-
                     images.Add(
                         pair.Key,
-                        new PlanetPngImage
-                        {
-                            FileName = source.FileName,
-                            Width = source.Width,
-                            Height = source.Height,
-                            BitDepth = source.BitDepth,
-                            ColorType = source.ColorType,
-                            Planes = planes
-                        });
+                        source.Clone());
                 }
 
 
@@ -485,7 +440,7 @@ namespace VoxelCubemapApi.Server
             {
                 EnsureEditable();
 
-                PlanetPngImage image =
+                PlanarPngBitmap image =
                     GetOrLoadImage(
                         faceFileName);
 
@@ -505,7 +460,7 @@ namespace VoxelCubemapApi.Server
             private int[] GetPlanetPngSize(
                 string faceFileName)
             {
-                PlanetPngImage image =
+                PlanarPngBitmap image =
                     GetOrLoadImage(
                         faceFileName);
 
@@ -520,7 +475,7 @@ namespace VoxelCubemapApi.Server
             private int[] GetPlanetPngInfo(
                 string faceFileName)
             {
-                PlanetPngImage image =
+                PlanarPngBitmap image =
                     GetOrLoadImage(
                         faceFileName);
 
@@ -1160,7 +1115,7 @@ namespace VoxelCubemapApi.Server
             }
 
 
-            private PlanetPngImage GetOrLoadImage(
+            private PlanarPngBitmap GetOrLoadImage(
                 string faceFileName)
             {
                 EnsureEditable();
@@ -1169,7 +1124,7 @@ namespace VoxelCubemapApi.Server
                     ValidatePlanetFaceFileName(
                         faceFileName);
 
-                PlanetPngImage image;
+                PlanarPngBitmap image;
 
                 if (m_images.TryGetValue(
                     faceFileName,
@@ -2554,12 +2509,11 @@ namespace VoxelCubemapApi.Server
         }
 
 
-        private static PlanetPngImage DecodePlanetPng(
+        private static PlanarPngBitmap DecodePlanetPng(
             string fileName,
             byte[] png)
         {
-            if (png == null ||
-                png.Length < 8)
+            if (png == null)
             {
                 throw new Exception(
                     "Invalid planet PNG: " +
@@ -2567,475 +2521,27 @@ namespace VoxelCubemapApi.Server
             }
 
 
-            byte[] signature =
+            try
             {
-                0x89, 0x50, 0x4E, 0x47,
-                0x0D, 0x0A, 0x1A, 0x0A
-            };
+                PlanarPngBitmap image = PlanarPngBitmap.Load(png);
 
-            for (int i = 0;
-                i < signature.Length;
-                i++)
-            {
-                if (png[i] != signature[i])
+                if (image.SourceInterlaceMethod != 0)
                 {
                     throw new Exception(
-                        "Planet image is not a PNG: " +
-                        fileName);
-                }
-            }
-
-
-            int width =
-                0;
-
-            int height =
-                0;
-
-            int bitDepth =
-                0;
-
-            int colorType =
-                -1;
-
-            int interlace =
-                -1;
-
-            int idatSize =
-                0;
-
-            var idatChunks =
-                new List<byte[]>();
-
-            int position =
-                8;
-
-
-            while (position <= png.Length - 12)
-            {
-                int length =
-                    checked(
-                        (int)ReadUInt32BigEndian(
-                            png,
-                            position));
-
-                position +=
-                    4;
-
-                if (length < 0 ||
-                    position > png.Length - 8 - length)
-                {
-                    throw new Exception(
-                        "Truncated PNG chunk in " +
-                        fileName +
-                        ".");
+                        "Interlaced planet PNGs are not supported.");
                 }
 
-
-                byte type0 =
-                    png[position++];
-
-                byte type1 =
-                    png[position++];
-
-                byte type2 =
-                    png[position++];
-
-                byte type3 =
-                    png[position++];
-
-                int dataOffset =
-                    position;
-
-
-                if (type0 == (byte)'I' &&
-                    type1 == (byte)'H' &&
-                    type2 == (byte)'D' &&
-                    type3 == (byte)'R')
-                {
-                    if (length != 13)
-                        throw new Exception("Invalid PNG IHDR.");
-
-                    width =
-                        checked(
-                            (int)ReadUInt32BigEndian(
-                                png,
-                                dataOffset));
-
-                    height =
-                        checked(
-                            (int)ReadUInt32BigEndian(
-                                png,
-                                dataOffset + 4));
-
-                    bitDepth =
-                        png[dataOffset + 8];
-
-                    colorType =
-                        png[dataOffset + 9];
-
-                    if (png[dataOffset + 10] != 0 ||
-                        png[dataOffset + 11] != 0)
-                    {
-                        throw new Exception(
-                            "Unsupported PNG compression/filter method.");
-                    }
-
-                    interlace =
-                        png[dataOffset + 12];
-                }
-                else if (type0 == (byte)'I' &&
-                    type1 == (byte)'D' &&
-                    type2 == (byte)'A' &&
-                    type3 == (byte)'T')
-                {
-                    byte[] chunk =
-                        new byte[length];
-
-                    if (length > 0)
-                    {
-                        Buffer.BlockCopy(
-                            png,
-                            dataOffset,
-                            chunk,
-                            0,
-                            length);
-                    }
-
-                    idatChunks.Add(
-                        chunk);
-
-                    idatSize =
-                        checked(
-                            idatSize +
-                            length);
-                }
-
-
-                position =
-                    checked(
-                        dataOffset +
-                        length +
-                        4);
-
-                if (type0 == (byte)'I' &&
-                    type1 == (byte)'E' &&
-                    type2 == (byte)'N' &&
-                    type3 == (byte)'D')
-                {
-                    break;
-                }
+                return image;
             }
-
-
-            int bytesPerPixel;
-
-            if (colorType == 0 &&
-                bitDepth == 8)
-            {
-                bytesPerPixel =
-                    1;
-            }
-            else if (colorType == 0 &&
-                bitDepth == 16)
-            {
-                bytesPerPixel =
-                    2;
-            }
-            else if (colorType == 2 &&
-                bitDepth == 8)
-            {
-                bytesPerPixel =
-                    3;
-            }
-            else if (colorType == 6 &&
-                bitDepth == 8)
-            {
-                bytesPerPixel =
-                    4;
-            }
-            else
+            catch (Exception error)
             {
                 throw new Exception(
-                    "Unsupported planet PNG format. File=" +
+                    "Could not decode planet PNG " +
                     fileName +
-                    ", BitDepth=" +
-                    bitDepth +
-                    ", ColorType=" +
-                    colorType +
-                    ".");
+                    ": " +
+                    error.Message,
+                    error);
             }
-
-            if (width <= 0 ||
-                height <= 0 ||
-                interlace != 0 ||
-                idatSize == 0)
-            {
-                throw new Exception(
-                    "Invalid or interlaced planet PNG: " +
-                    fileName);
-            }
-
-
-            byte[] compressed =
-                new byte[idatSize];
-
-            int compressedOffset =
-                0;
-
-            for (int i = 0;
-                i < idatChunks.Count;
-                i++)
-            {
-                byte[] chunk =
-                    idatChunks[i];
-
-                if (chunk.Length > 0)
-                {
-                    Buffer.BlockCopy(
-                        chunk,
-                        0,
-                        compressed,
-                        compressedOffset,
-                        chunk.Length);
-
-                    compressedOffset +=
-                        chunk.Length;
-                }
-            }
-
-
-            int rowBytes =
-                checked(
-                    width *
-                    bytesPerPixel);
-
-            int filteredSize =
-                checked(
-                    height *
-                    (rowBytes + 1));
-
-            byte[] filtered =
-                Zlib.Inflate(
-                    compressed,
-                    filteredSize);
-
-            byte[] packedPixels =
-                UnfilterPngRows(
-                    filtered,
-                    width,
-                    height,
-                    bytesPerPixel);
-
-            int pixelCount =
-                checked(
-                    width *
-                    height);
-
-            byte[][] planes =
-            {
-                new byte[pixelCount],
-                new byte[pixelCount],
-                new byte[pixelCount],
-                new byte[pixelCount]
-            };
-
-
-            int packedOffset =
-                0;
-
-            for (int pixel = 0;
-                pixel < pixelCount;
-                pixel++)
-            {
-                if (colorType == 0 &&
-                    bitDepth == 16)
-                {
-                    // 16-bit grayscale height map: high and low sample bytes
-                    // occupy planes 0 and 1. Plane 2 is unused; alpha is opaque.
-                    planes[0][pixel] =
-                        packedPixels[packedOffset++];
-
-                    planes[1][pixel] =
-                        packedPixels[packedOffset++];
-
-                    planes[3][pixel] =
-                        255;
-                }
-                else if (colorType == 0)
-                {
-                    byte value =
-                        packedPixels[packedOffset++];
-
-                    planes[0][pixel] =
-                        value;
-
-                    planes[1][pixel] =
-                        value;
-
-                    planes[2][pixel] =
-                        value;
-
-                    planes[3][pixel] =
-                        255;
-                }
-                else
-                {
-                    planes[0][pixel] =
-                        packedPixels[packedOffset++];
-
-                    planes[1][pixel] =
-                        packedPixels[packedOffset++];
-
-                    planes[2][pixel] =
-                        packedPixels[packedOffset++];
-
-                    planes[3][pixel] =
-                        colorType == 6
-                            ? packedPixels[packedOffset++]
-                            : (byte)255;
-                }
-            }
-
-
-            return new PlanetPngImage
-            {
-                FileName = fileName,
-                Width = width,
-                Height = height,
-                BitDepth = bitDepth,
-                ColorType = colorType,
-                Planes = planes
-            };
-        }
-
-
-        private static byte[] EncodePlanetPng(
-            PlanetPngImage image)
-        {
-            if (image == null ||
-                image.Planes == null ||
-                image.Planes.Length != 4)
-            {
-                throw new Exception(
-                    "Invalid planet PNG image state.");
-            }
-
-
-            int pixelCount =
-                checked(
-                    image.Width *
-                    image.Height);
-
-            for (int i = 0;
-                i < image.Planes.Length;
-                i++)
-            {
-                if (image.Planes[i] == null ||
-                    image.Planes[i].Length != pixelCount)
-                {
-                    throw new Exception(
-                        "Planet PNG plane length mismatch for " +
-                        image.FileName +
-                        ".");
-                }
-            }
-
-
-            int bytesPerPixel;
-
-            if (image.ColorType == 0 &&
-                image.BitDepth == 8)
-            {
-                bytesPerPixel = 1;
-            }
-            else if (image.ColorType == 0 &&
-                image.BitDepth == 16)
-            {
-                bytesPerPixel = 2;
-            }
-            else if (image.ColorType == 2 &&
-                image.BitDepth == 8)
-            {
-                bytesPerPixel = 3;
-            }
-            else if (image.ColorType == 6 &&
-                image.BitDepth == 8)
-            {
-                bytesPerPixel = 4;
-            }
-            else
-            {
-                throw new Exception(
-                    "Unsupported planet PNG output format.");
-            }
-
-
-            int rowBytes =
-                checked(
-                    image.Width *
-                    bytesPerPixel);
-
-            byte[] filtered =
-                new byte[
-                    checked(
-                        image.Height *
-                        (rowBytes + 1))];
-
-            int outputOffset =
-                0;
-
-            int pixel =
-                0;
-
-            for (int y = 0;
-                y < image.Height;
-                y++)
-            {
-                filtered[outputOffset++] =
-                    0;
-
-                for (int x = 0;
-                    x < image.Width;
-                    x++)
-                {
-                    filtered[outputOffset++] =
-                        image.Planes[0][pixel];
-
-                    if (image.ColorType == 0 &&
-                        image.BitDepth == 16)
-                    {
-                        filtered[outputOffset++] =
-                            image.Planes[1][pixel];
-                    }
-                    else if (image.ColorType == 2 ||
-                        image.ColorType == 6)
-                    {
-                        filtered[outputOffset++] =
-                            image.Planes[1][pixel];
-
-                        filtered[outputOffset++] =
-                            image.Planes[2][pixel];
-
-                        if (image.ColorType == 6)
-                        {
-                            filtered[outputOffset++] =
-                                image.Planes[3][pixel];
-                        }
-                    }
-
-                    pixel++;
-                }
-            }
-
-
-            return BuildPng(
-                image.Width,
-                image.Height,
-                image.BitDepth,
-                image.ColorType,
-                DeflateZlibStored(
-                    filtered));
         }
 
 
@@ -3065,245 +2571,42 @@ namespace VoxelCubemapApi.Server
             double grassThreshold,
             bool[] observedMaterialValues)
         {
-            if (png == null ||
-                png.Length < 8)
-            {
-                throw new Exception(
-                    "Invalid material-map PNG.");
-            }
+            PlanarPngBitmap image =
+                DecodePlanetPng(
+                    faceFileName,
+                    png);
 
-
-            byte[] signature =
-            {
-                0x89, 0x50, 0x4E, 0x47,
-                0x0D, 0x0A, 0x1A, 0x0A
-            };
-
-
-            for (int i = 0;
-                i < signature.Length;
-                i++)
-            {
-                if (png[i] != signature[i])
-                {
-                    throw new Exception(
-                        "Material map is not a PNG.");
-                }
-            }
-
-
-            int width = 0;
-            int height = 0;
-            int bitDepth = 0;
-            int colorType = -1;
-            int interlace = -1;
-
-            int idatSize = 0;
-            var idatChunks =
-                new List<byte[]>();
-
-            int position = 8;
-
-
-            while (position <= png.Length - 12)
-            {
-                int length =
-                    checked((int)ReadUInt32BigEndian(
-                        png,
-                        position));
-
-                position +=
-                    4;
-
-
-                if (length < 0 ||
-                    position > png.Length - 8 - length)
-                {
-                    throw new Exception(
-                        "Truncated PNG chunk.");
-                }
-
-
-                byte type0 = png[position++];
-                byte type1 = png[position++];
-                byte type2 = png[position++];
-                byte type3 = png[position++];
-
-
-                int dataOffset =
-                    position;
-
-
-                if (type0 == (byte)'I' &&
-                    type1 == (byte)'H' &&
-                    type2 == (byte)'D' &&
-                    type3 == (byte)'R')
-                {
-                    if (length != 13)
-                        throw new Exception(
-                            "Invalid PNG IHDR.");
-
-                    width =
-                        checked((int)ReadUInt32BigEndian(
-                            png,
-                            dataOffset));
-
-                    height =
-                        checked((int)ReadUInt32BigEndian(
-                            png,
-                            dataOffset + 4));
-
-                    bitDepth =
-                        png[dataOffset + 8];
-
-                    colorType =
-                        png[dataOffset + 9];
-
-                    if (png[dataOffset + 10] != 0 ||
-                        png[dataOffset + 11] != 0)
-                    {
-                        throw new Exception(
-                            "Unsupported PNG compression/filter method.");
-                    }
-
-                    interlace =
-                        png[dataOffset + 12];
-                }
-                else if (type0 == (byte)'I' &&
-                    type1 == (byte)'D' &&
-                    type2 == (byte)'A' &&
-                    type3 == (byte)'T')
-                {
-                    byte[] chunk =
-                        new byte[length];
-
-                    if (length > 0)
-                    {
-                        Buffer.BlockCopy(
-                            png,
-                            dataOffset,
-                            chunk,
-                            0,
-                            length);
-                    }
-
-                    idatChunks.Add(
-                        chunk);
-
-                    idatSize =
-                        checked(
-                            idatSize +
-                            length);
-                }
-
-
-                position =
-                    checked(
-                        dataOffset +
-                        length +
-                        4);
-
-
-                if (type0 == (byte)'I' &&
-                    type1 == (byte)'E' &&
-                    type2 == (byte)'N' &&
-                    type3 == (byte)'D')
-                {
-                    break;
-                }
-            }
-
-
-            if (width <= 0 ||
-                height <= 0 ||
-                bitDepth != 8 ||
-                (colorType != 2 &&
-                 colorType != 6) ||
-                interlace != 0 ||
-                idatSize == 0)
+            if (image.BitDepth != 8 ||
+                (image.ColorType != 2 &&
+                 image.ColorType != 6))
             {
                 throw new Exception(
                     "Expected non-interlaced RGB8/RGBA8 source material PNG. " +
                     "Width=" +
-                    width +
+                    image.Width +
                     ", Height=" +
-                    height +
+                    image.Height +
                     ", BitDepth=" +
-                    bitDepth +
+                    image.BitDepth +
                     ", ColorType=" +
-                    colorType +
+                    image.ColorType +
                     ", Interlace=" +
-                    interlace);
+                    image.SourceInterlaceMethod);
             }
 
 
-            byte[] compressed =
-                new byte[idatSize];
-
-            int compressedOffset =
-                0;
-
-
-            for (int i = 0;
-                i < idatChunks.Count;
-                i++)
-            {
-                byte[] chunk =
-                    idatChunks[i];
-
-                if (chunk.Length > 0)
-                {
-                    Buffer.BlockCopy(
-                        chunk,
-                        0,
-                        compressed,
-                        compressedOffset,
-                        chunk.Length);
-
-                    compressedOffset +=
-                        chunk.Length;
-                }
-            }
-
-
-            int channels =
-                colorType == 2
-                    ? 3
-                    : 4;
-
-            int rowBytes =
-                checked(
-                    width *
-                    channels);
-
-            int filteredSize =
-                checked(
-                    height *
-                    (rowBytes + 1));
-
-
-            byte[] filtered =
-                Zlib.Inflate(
-                    compressed,
-                    filteredSize);
-
-
-            byte[] pixels =
-                UnfilterPngRows(
-                    filtered,
-                    width,
-                    height,
-                    channels);
+            byte[] materials =
+                image.Planes[0];
 
 
             if (observedMaterialValues != null)
             {
-                for (int offset = 0;
-                    offset < pixels.Length;
-                    offset += channels)
+                for (int pixel = 0;
+                    pixel < materials.Length;
+                    pixel++)
                 {
                     observedMaterialValues[
-                        pixels[offset]] =
+                        materials[pixel]] =
                         true;
                 }
 
@@ -3343,11 +2646,11 @@ namespace VoxelCubemapApi.Server
 
 
             for (int y = 0;
-                y < height;
+                y < image.Height;
                 y++)
             {
                 for (int x = 0;
-                    x < width;
+                    x < image.Width;
                     x++)
                 {
                     bool makeGrass;
@@ -3370,8 +2673,8 @@ namespace VoxelCubemapApi.Server
                                 grassNoiseGrid,
                                 x,
                                 y,
-                                width,
-                                height);
+                                image.Width,
+                                image.Height);
 
                         makeGrass =
                             growthScore >= grassThreshold;
@@ -3391,13 +2694,13 @@ namespace VoxelCubemapApi.Server
                         if (overlayValueBySource != null)
                         {
                             int sourceValue =
-                                pixels[pixelOffset];
+                                materials[pixelOffset];
 
                             int overlayValue =
                                 overlayValueBySource[sourceValue];
 
 
-                            pixels[pixelOffset] =
+                            materials[pixelOffset] =
                                 overlayValue >= 0
                                     ? (byte)overlayValue
                                     : materialValue;
@@ -3405,60 +2708,19 @@ namespace VoxelCubemapApi.Server
                         else
                         {
                             // Legacy full-replacement path only.
-                            pixels[pixelOffset] =
+                            materials[pixelOffset] =
                                 materialValue;
                         }
                     }
 
 
-                    pixelOffset +=
-                        channels;
+                    pixelOffset++;
                 }
             }
 
 
-            byte[] rewrittenFiltered =
-                new byte[filteredSize];
-
-            int sourceOffset = 0;
-            int outputOffset = 0;
-
-
-            for (int y = 0;
-                y < height;
-                y++)
-            {
-                // Filter type 0 keeps the encoder simple and deterministic.
-                rewrittenFiltered[outputOffset++] =
-                    0;
-
-                Buffer.BlockCopy(
-                    pixels,
-                    sourceOffset,
-                    rewrittenFiltered,
-                    outputOffset,
-                    rowBytes);
-
-                sourceOffset +=
-                    rowBytes;
-
-                outputOffset +=
-                    rowBytes;
-            }
-
-
-            byte[] rewrittenCompressed =
-                DeflateZlibStored(
-                    rewrittenFiltered);
-
-
-            return BuildPng(
-                width,
-                height,
-                colorType,
-                rewrittenCompressed);
+            return image.Encode();
         }
-
 
         private static int GetCubemapFaceIndex(
             string faceFileName)
@@ -4108,555 +3370,6 @@ namespace VoxelCubemapApi.Server
                     4294967295.0) *
                 2.0 -
                 1.0;
-        }
-
-
-        private static byte[] UnfilterPngRows(
-            byte[] filtered,
-            int width,
-            int height,
-            int bytesPerPixel)
-        {
-            int rowBytes =
-                checked(
-                    width *
-                    bytesPerPixel);
-
-            byte[] pixels =
-                new byte[
-                    checked(
-                        rowBytes *
-                        height)];
-
-            int source =
-                0;
-
-
-            for (int y = 0;
-                y < height;
-                y++)
-            {
-                byte filter =
-                    filtered[source++];
-
-                int rowOffset =
-                    y *
-                    rowBytes;
-
-                int previousRowOffset =
-                    rowOffset -
-                    rowBytes;
-
-
-                for (int x = 0;
-                    x < rowBytes;
-                    x++)
-                {
-                    int encoded =
-                        filtered[source++];
-
-                    int left =
-                        x >= bytesPerPixel
-                            ? pixels[
-                                rowOffset +
-                                x -
-                                bytesPerPixel]
-                            : 0;
-
-                    int up =
-                        y > 0
-                            ? pixels[
-                                previousRowOffset +
-                                x]
-                            : 0;
-
-                    int upLeft =
-                        y > 0 &&
-                        x >= bytesPerPixel
-                            ? pixels[
-                                previousRowOffset +
-                                x -
-                                bytesPerPixel]
-                            : 0;
-
-
-                    int value;
-
-
-                    switch (filter)
-                    {
-                        case 0:
-                            value =
-                                encoded;
-                            break;
-
-                        case 1:
-                            value =
-                                encoded +
-                                left;
-                            break;
-
-                        case 2:
-                            value =
-                                encoded +
-                                up;
-                            break;
-
-                        case 3:
-                            value =
-                                encoded +
-                                ((left + up) >> 1);
-                            break;
-
-                        case 4:
-                            value =
-                                encoded +
-                                PaethPredictor(
-                                    left,
-                                    up,
-                                    upLeft);
-                            break;
-
-                        default:
-                            throw new Exception(
-                                "Unsupported PNG filter type: " +
-                                filter);
-                    }
-
-
-                    pixels[
-                        rowOffset +
-                        x] =
-                        unchecked((byte)value);
-                }
-            }
-
-
-            return pixels;
-        }
-
-
-        private static int PaethPredictor(
-            int left,
-            int up,
-            int upLeft)
-        {
-            int p =
-                left +
-                up -
-                upLeft;
-
-            int pa =
-                Math.Abs(
-                    p -
-                    left);
-
-            int pb =
-                Math.Abs(
-                    p -
-                    up);
-
-            int pc =
-                Math.Abs(
-                    p -
-                    upLeft);
-
-
-            if (pa <= pb &&
-                pa <= pc)
-            {
-                return left;
-            }
-
-            if (pb <= pc)
-                return up;
-
-            return upLeft;
-        }
-
-
-        private static byte[] DeflateZlibStored(
-            byte[] data)
-        {
-            int blockCount =
-                Math.Max(
-                    1,
-                    (data.Length + 65534) /
-                    65535);
-
-            byte[] output =
-                new byte[
-                    checked(
-                        2 +
-                        data.Length +
-                        blockCount * 5 +
-                        4)];
-
-            int position =
-                0;
-
-
-            // CMF/FLG for DEFLATE, 32K window, fastest/no-compression.
-            output[position++] =
-                0x78;
-
-            output[position++] =
-                0x01;
-
-
-            int inputOffset =
-                0;
-
-
-            if (data.Length == 0)
-            {
-                WriteStoredDeflateBlock(
-                    output,
-                    ref position,
-                    data,
-                    0,
-                    0,
-                    true);
-            }
-            else
-            {
-                while (inputOffset < data.Length)
-                {
-                    int count =
-                        Math.Min(
-                            65535,
-                            data.Length -
-                            inputOffset);
-
-                    bool final =
-                        inputOffset +
-                        count ==
-                        data.Length;
-
-
-                    WriteStoredDeflateBlock(
-                        output,
-                        ref position,
-                        data,
-                        inputOffset,
-                        count,
-                        final);
-
-
-                    inputOffset +=
-                        count;
-                }
-            }
-
-
-            uint adler =
-                ComputeAdler32(
-                    data);
-
-
-            WriteUInt32BigEndian(
-                output,
-                ref position,
-                adler);
-
-
-            if (position != output.Length)
-            {
-                throw new Exception(
-                    "Internal zlib encoder length mismatch.");
-            }
-
-
-            return output;
-        }
-
-
-        private static void WriteStoredDeflateBlock(
-            byte[] output,
-            ref int position,
-            byte[] input,
-            int inputOffset,
-            int count,
-            bool final)
-        {
-            output[position++] =
-                final
-                    ? (byte)0x01
-                    : (byte)0x00;
-
-
-            ushort length =
-                (ushort)count;
-
-            ushort complement =
-                (ushort)~length;
-
-
-            output[position++] =
-                (byte)length;
-
-            output[position++] =
-                (byte)(length >> 8);
-
-            output[position++] =
-                (byte)complement;
-
-            output[position++] =
-                (byte)(complement >> 8);
-
-
-            if (count > 0)
-            {
-                Buffer.BlockCopy(
-                    input,
-                    inputOffset,
-                    output,
-                    position,
-                    count);
-
-                position +=
-                    count;
-            }
-        }
-
-
-        private static uint ComputeAdler32(
-            byte[] data)
-        {
-            const uint Modulus =
-                65521;
-
-            uint a =
-                1;
-
-            uint b =
-                0;
-
-
-            for (int i = 0;
-                i < data.Length;
-                i++)
-            {
-                a +=
-                    data[i];
-
-                if (a >= Modulus)
-                    a -= Modulus;
-
-                b +=
-                    a;
-
-                if (b >= Modulus)
-                    b %= Modulus;
-            }
-
-
-            return
-                (b << 16) |
-                a;
-        }
-
-
-        private static byte[] BuildPng(
-            int width,
-            int height,
-            int colorType,
-            byte[] compressed)
-        {
-            return BuildPng(
-                width,
-                height,
-                8,
-                colorType,
-                compressed);
-        }
-
-
-        private static byte[] BuildPng(
-            int width,
-            int height,
-            int bitDepth,
-            int colorType,
-            byte[] compressed)
-        {
-            byte[] ihdr =
-                new byte[13];
-
-            int headerOffset =
-                0;
-
-
-            WriteUInt32BigEndian(
-                ihdr,
-                ref headerOffset,
-                (uint)width);
-
-            WriteUInt32BigEndian(
-                ihdr,
-                ref headerOffset,
-                (uint)height);
-
-            ihdr[headerOffset++] =
-                (byte)bitDepth;
-
-            ihdr[headerOffset++] =
-                (byte)colorType;
-
-            ihdr[headerOffset++] =
-                0;
-
-            ihdr[headerOffset++] =
-                0;
-
-            ihdr[headerOffset++] =
-                0;
-
-
-            int outputLength =
-                checked(
-                    8 +
-                    12 + ihdr.Length +
-                    12 + compressed.Length +
-                    12);
-
-            byte[] output =
-                new byte[outputLength];
-
-            int position =
-                0;
-
-
-            byte[] signature =
-            {
-                0x89, 0x50, 0x4E, 0x47,
-                0x0D, 0x0A, 0x1A, 0x0A
-            };
-
-
-            Buffer.BlockCopy(
-                signature,
-                0,
-                output,
-                position,
-                signature.Length);
-
-            position +=
-                signature.Length;
-
-
-            WritePngChunk(
-                output,
-                ref position,
-                "IHDR",
-                ihdr);
-
-            WritePngChunk(
-                output,
-                ref position,
-                "IDAT",
-                compressed);
-
-            WritePngChunk(
-                output,
-                ref position,
-                "IEND",
-                new byte[0]);
-
-
-            if (position != output.Length)
-            {
-                throw new Exception(
-                    "Internal PNG encoder length mismatch.");
-            }
-
-
-            return output;
-        }
-
-
-        private static void WritePngChunk(
-            byte[] output,
-            ref int position,
-            string type,
-            byte[] data)
-        {
-            byte[] typeBytes =
-                System.Text.Encoding.ASCII.GetBytes(
-                    type);
-
-
-            WriteUInt32BigEndian(
-                output,
-                ref position,
-                (uint)data.Length);
-
-
-            Buffer.BlockCopy(
-                typeBytes,
-                0,
-                output,
-                position,
-                4);
-
-            position +=
-                4;
-
-
-            if (data.Length > 0)
-            {
-                Buffer.BlockCopy(
-                    data,
-                    0,
-                    output,
-                    position,
-                    data.Length);
-
-                position +=
-                    data.Length;
-            }
-
-
-            uint crc =
-                Crc32.Compute(
-                    typeBytes,
-                    data);
-
-
-            WriteUInt32BigEndian(
-                output,
-                ref position,
-                crc);
-        }
-
-
-        private static uint ReadUInt32BigEndian(
-            byte[] data,
-            int offset)
-        {
-            return
-                ((uint)data[offset] << 24) |
-                ((uint)data[offset + 1] << 16) |
-                ((uint)data[offset + 2] << 8) |
-                data[offset + 3];
-        }
-
-
-        private static void WriteUInt32BigEndian(
-            byte[] data,
-            ref int offset,
-            uint value)
-        {
-            data[offset++] =
-                (byte)(value >> 24);
-
-            data[offset++] =
-                (byte)(value >> 16);
-
-            data[offset++] =
-                (byte)(value >> 8);
-
-            data[offset++] =
-                (byte)value;
         }
 
 
@@ -6385,7 +5098,7 @@ namespace VoxelCubemapApi.Server
                 string fileName =
                     files[i];
 
-                PlanetPngImage modified =
+                PlanarPngBitmap modified =
                     null;
 
                 bool haveModifiedImage =
@@ -6492,8 +5205,7 @@ namespace VoxelCubemapApi.Server
 
                 byte[] data =
                     haveModifiedImage
-                        ? EncodePlanetPng(
-                            modified)
+                        ? modified.Encode()
                         : ReadSnapshotPlanetDataFile(
                             snapshot,
                             runtimeSourceFiles,
@@ -6544,7 +5256,7 @@ namespace VoxelCubemapApi.Server
 
 
         private static void ApplyFractalNoiseToPlanetImage(
-            PlanetPngImage image,
+            PlanarPngBitmap image,
             string faceFileName,
             long planetSeed,
             List<FractalNoiseOperation> operations)
@@ -6651,7 +5363,7 @@ namespace VoxelCubemapApi.Server
 
 
         private static void ApplyBiomeReplacementToPlanetImage(
-            PlanetPngImage image,
+            PlanarPngBitmap image,
             BiomeReplacementOperation operation)
         {
             if (image == null)
@@ -6674,7 +5386,7 @@ namespace VoxelCubemapApi.Server
 
 
         private static void ValidateAllocatedComplexMaterialValues(
-            PlanetPngImage image,
+            PlanarPngBitmap image,
             string faceFileName,
             List<byte> allocatedValues)
         {
