@@ -30,9 +30,6 @@
       <SetPlatform>Platform=AnyCPU</SetPlatform>
     </ProjectReference>
   </ItemGroup>
-  <ItemGroup Condition="'$(Configuration)' != 'Debug'">
-    <Compile Remove="Client\DebugGrassPlanetClient.cs" />
-  </ItemGroup>
   <ItemGroup>
     <AdditionalFiles Include="Content\*\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

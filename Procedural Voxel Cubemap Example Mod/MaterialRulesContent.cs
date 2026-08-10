@@ -1,14 +1,11 @@
-using Sandbox.ModAPI;
-
 using System;
 using System.IO;
 using System.Linq;
-
+using Sandbox.ModAPI;
 using VRage.Game;
-using VRage.Game.ObjectBuilders.Definitions;
 using VRage.Utils;
 
-namespace VoxelCubemapApi.Api
+namespace VoxelCubemapExampleMod
 {
     /// <summary>
     /// Loads a named complex planet-material group from an XML Definitions file

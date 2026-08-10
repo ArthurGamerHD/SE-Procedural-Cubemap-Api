@@ -1,25 +1,19 @@
-#if DEBUG
-
-using Sandbox.ModAPI;
-
 using System;
-
 using Generated;
-
+using Sandbox.ModAPI;
 using VoxelCubemapApi.Api;
-
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Utils;
 
-namespace VoxelCubemapApi.Client
+namespace VoxelCubemapExampleMod
 {
     /// <summary>
-    /// Debug consumer for the public SendModMessage API. No planet-generation
+    /// Test consumer for the public SendModMessage API. No planet-generation
     /// implementation is called directly from this component.
     /// </summary>
     [MySessionComponentDescriptor(MyUpdateOrder.NoUpdate)]
-    internal sealed class DebugGrassPlanetClient : MySessionComponentBase
+    internal sealed class GrassPlanetApiTestClient : MySessionComponentBase
     {
         private const long ReplyChannel =
             0x5643584150490002L;
@@ -27,7 +21,7 @@ namespace VoxelCubemapApi.Client
         private static readonly Version _clientApiVersion =
             new Version(0, 0, 6);
 
-        private static DebugGrassPlanetClient _instance;
+        private static GrassPlanetApiTestClient _instance;
 
         private ApiProvider _api;
 
@@ -107,7 +101,7 @@ namespace VoxelCubemapApi.Client
         public static void ApplyGrassPlanet(
             int grassCoveragePercent = 100)
         {
-            DebugGrassPlanetClient client =
+            GrassPlanetApiTestClient client =
                 _instance;
 
             if (client == null)
@@ -235,7 +229,7 @@ namespace VoxelCubemapApi.Client
                     "VoxelCubemapGrassEnvironmentCarrier");
 
                 MyLog.Default.WriteLineAndConsole(
-                    "[Debug Grass API Client] Random biome fractals: " +
+                    "[Grass API Test Client] Random biome fractals: " +
                     forestBiomes[0] +
                     "=" +
                     grassCoveragePercent +
@@ -291,7 +285,7 @@ namespace VoxelCubemapApi.Client
             Exception e)
         {
             MyLog.Default.WriteLineAndConsole(
-                "[Debug Grass API Client] " +
+                "[Grass API Test Client] " +
                 message +
                 ": " +
                 e);
@@ -307,4 +301,3 @@ namespace VoxelCubemapApi.Client
         }
     }
 }
-#endif

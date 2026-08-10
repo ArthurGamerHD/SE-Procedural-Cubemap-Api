@@ -2,7 +2,7 @@
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <!--
     This is a data-only carrier for the terraform surface recipe.
-    DebugGrassPlanetClient reads only the MaterialGroup named
+    GrassPlanetApiTestClient reads only the MaterialGroup named
     "TerraformGrassSurface"; this is not registered as a planet definition.
 
     The material rules use normal Space Engineers planet material syntax, so
