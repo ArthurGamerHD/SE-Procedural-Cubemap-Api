@@ -65,6 +65,14 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     : ReadRuntimeArchive(
                         snapshot.SourceArchiveFile);
 
+            bool haveBrushOperations =
+                snapshot.BrushOperations != null &&
+                snapshot.BrushOperations.Count > 0;
+
+            ApplyQueuedBrushes(
+                snapshot,
+                runtimeSourceFiles);
+
             if (snapshot.FractalNoiseOperations != null)
             {
                 for (int operationIndex = 0;
@@ -127,6 +135,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     fileName.EndsWith(
                         "_mat.png",
                         StringComparison.OrdinalIgnoreCase) &&
+                    !haveBrushOperations &&
                     snapshot.AllocatedComplexMaterialValues != null &&
                     snapshot.AllocatedComplexMaterialValues.Count > 0;
 
@@ -239,6 +248,106 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 ", archive bytes=" +
                 archive.Length +
                 ".");
+        }
+
+
+        private void ApplyQueuedBrushes(
+            PlanetModificationSnapshot snapshot,
+            Dictionary<string, byte[]> runtimeSourceFiles)
+        {
+            if (snapshot.BrushOperations == null ||
+                snapshot.BrushOperations.Count == 0)
+            {
+                return;
+            }
+
+            string[] faces =
+            {
+                "front",
+                "back",
+                "left",
+                "right",
+                "up",
+                "down"
+            };
+
+            if (snapshot.Images == null)
+            {
+                snapshot.Images =
+                    new Dictionary<string, PlanarPngBitmap>(
+                        StringComparer.OrdinalIgnoreCase);
+            }
+
+            for (int faceIndex = 0;
+                faceIndex < faces.Length;
+                faceIndex++)
+            {
+                string heightFileName =
+                    faces[faceIndex] +
+                    ".png";
+
+                string materialFileName =
+                    faces[faceIndex] +
+                    "_mat.png";
+
+                PlanarPngBitmap heightImage =
+                    GetOrLoadSnapshotImage(
+                        snapshot,
+                        runtimeSourceFiles,
+                        heightFileName);
+
+                PlanarPngBitmap materialImage =
+                    GetOrLoadSnapshotImage(
+                        snapshot,
+                        runtimeSourceFiles,
+                        materialFileName);
+
+                if (snapshot.AllocatedComplexMaterialValues != null &&
+                    snapshot.AllocatedComplexMaterialValues.Count > 0)
+                {
+                    PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
+                        materialImage,
+                        materialFileName,
+                        snapshot.AllocatedComplexMaterialValues);
+                }
+
+                PlanetMapOperations.ApplyBrushToPlanetImages(
+                    heightImage,
+                    materialImage,
+                    heightFileName,
+                    snapshot.PlanetSeed,
+                    snapshot.BrushOperations);
+            }
+        }
+
+
+        private PlanarPngBitmap GetOrLoadSnapshotImage(
+            PlanetModificationSnapshot snapshot,
+            Dictionary<string, byte[]> runtimeSourceFiles,
+            string fileName)
+        {
+            PlanarPngBitmap image;
+
+            if (snapshot.Images.TryGetValue(
+                fileName,
+                out image))
+            {
+                return image;
+            }
+
+            image =
+                PlanetMapOperations.DecodePlanetPng(
+                    fileName,
+                    ReadSnapshotPlanetDataFile(
+                        snapshot,
+                        runtimeSourceFiles,
+                        fileName));
+
+            snapshot.Images.Add(
+                fileName,
+                image);
+
+            return image;
         }
 
 

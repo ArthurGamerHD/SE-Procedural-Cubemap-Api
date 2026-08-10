@@ -36,6 +36,25 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
     }
 
 
+    internal sealed class BrushOperation
+    {
+        public int LayerIndex;
+        public int FillValue;
+        public bool UseNoise;
+        public double NoiseFrequency;
+        public int NoiseOctaves;
+        public int NoiseSeedOffset;
+        public double BlendNoiseMinimum;
+        public double BlendNoiseMaximum;
+        public int MinimumAltitude;
+        public int MaximumAltitude;
+        public double MinimumLatitude;
+        public double MaximumLatitude;
+        public int BiomeFilter;
+        public int MaterialFilter;
+    }
+
+
     internal sealed class PlanetModificationSnapshot
     {
         public MyPlanet TargetPlanet;
@@ -53,6 +72,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 ImageTransforms;
         public List<FractalNoiseOperation> FractalNoiseOperations;
         public List<BiomeReplacementOperation> BiomeReplacementOperations;
+        public List<BrushOperation> BrushOperations;
         public List<byte> AllocatedComplexMaterialValues;
         public string EnvironmentCarrierSubtype;
     }

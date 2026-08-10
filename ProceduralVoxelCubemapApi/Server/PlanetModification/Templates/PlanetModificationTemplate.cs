@@ -46,6 +46,10 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             _biomeReplacementOperations =
                 new List<BiomeReplacementOperation>();
 
+        private readonly List<BrushOperation>
+            _brushOperations =
+                new List<BrushOperation>();
+
         private readonly List<byte> _allocatedComplexMaterialValues =
             new List<byte>();
 
@@ -217,6 +221,37 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                     });
             }
 
+            var brushOperations =
+                new List<BrushOperation>(
+                    _brushOperations.Count);
+
+            for (int i = 0;
+                i < _brushOperations.Count;
+                i++)
+            {
+                BrushOperation operation =
+                    _brushOperations[i];
+
+                brushOperations.Add(
+                    new BrushOperation
+                    {
+                        LayerIndex = operation.LayerIndex,
+                        FillValue = operation.FillValue,
+                        UseNoise = operation.UseNoise,
+                        NoiseFrequency = operation.NoiseFrequency,
+                        NoiseOctaves = operation.NoiseOctaves,
+                        NoiseSeedOffset = operation.NoiseSeedOffset,
+                        BlendNoiseMinimum = operation.BlendNoiseMinimum,
+                        BlendNoiseMaximum = operation.BlendNoiseMaximum,
+                        MinimumAltitude = operation.MinimumAltitude,
+                        MaximumAltitude = operation.MaximumAltitude,
+                        MinimumLatitude = operation.MinimumLatitude,
+                        MaximumLatitude = operation.MaximumLatitude,
+                        BiomeFilter = operation.BiomeFilter,
+                        MaterialFilter = operation.MaterialFilter
+                    });
+            }
+
             var allocatedComplexValues =
                 new List<byte>(
                     _allocatedComplexMaterialValues);
@@ -237,6 +272,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 ImageTransforms = transforms,
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
+                BrushOperations = brushOperations,
                 AllocatedComplexMaterialValues = allocatedComplexValues,
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype
             };
@@ -920,6 +956,268 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                     TargetValue = biomeValue,
                     CoveragePercent = coveragePercent
                 });
+        }
+
+
+        /// <summary>
+        /// Queues a filtered cubemap brush. The layer is Material, Biome, Ore,
+        /// or Heightmap. Material/Biome/Ore fills use byte values; Heightmap
+        /// uses an unsigned 16-bit sample. Altitude filters use that same
+        /// unsigned 16-bit height sample and -1 disables either bound.
+        /// Latitude is signed degrees. Biome/material filters use -1 for any.
+        /// When procedural noise is enabled, only pixels whose normalized
+        /// seamless cubemap noise falls inside the inclusive blend range are
+        /// filled. Noise-specific parameters are ignored when useNoise is false.
+        /// </summary>
+        [ApiMethod]
+        private void ApplyBrush(
+            string layer,
+            int fillValue,
+            bool useNoise,
+            double noiseFrequency,
+            int noiseOctaves,
+            int noiseSeedOffset,
+            double blendNoiseMinimum,
+            double blendNoiseMaximum,
+            int minimumAltitude,
+            int maximumAltitude,
+            double minimumLatitude,
+            double maximumLatitude,
+            int biomeFilter,
+            int materialFilter)
+        {
+            EnsureEditable();
+
+            int layerIndex =
+                ParseBrushLayer(
+                    layer);
+
+            int maximumFillValue =
+                layerIndex == 3
+                    ? ushort.MaxValue
+                    : byte.MaxValue;
+
+            if (fillValue < 0 ||
+                fillValue > maximumFillValue)
+            {
+                throw new ArgumentException(
+                    "Brush fill value is outside the target layer range.",
+                    "fillValue");
+            }
+
+            if (layerIndex == 0 &&
+                !PlanetMaterialMap.UsesValue(
+                    Builder,
+                    (byte)fillValue))
+            {
+                throw new ArgumentException(
+                    "Material-map value " +
+                    fillValue +
+                    " is not defined in this template.",
+                    "fillValue");
+            }
+
+            if (layerIndex == 1)
+                EnsureBiomePlanetMapEnabled();
+
+            if (useNoise)
+            {
+                if (double.IsNaN(noiseFrequency) ||
+                    double.IsInfinity(noiseFrequency) ||
+                    noiseFrequency <= 0.0)
+                {
+                    throw new ArgumentException(
+                        "Noise frequency must be finite and greater than zero.",
+                        "noiseFrequency");
+                }
+
+                if (noiseOctaves < 1 ||
+                    noiseOctaves > 8)
+                {
+                    throw new ArgumentException(
+                        "Noise octaves must be from 1 to 8.",
+                        "noiseOctaves");
+                }
+
+                ValidateUnitRange(
+                    blendNoiseMinimum,
+                    "blendNoiseMinimum");
+
+                ValidateUnitRange(
+                    blendNoiseMaximum,
+                    "blendNoiseMaximum");
+
+                if (blendNoiseMinimum > blendNoiseMaximum)
+                {
+                    throw new ArgumentException(
+                        "Blend noise minimum cannot exceed the maximum.",
+                        "blendNoiseMinimum");
+                }
+            }
+
+            ValidateAltitudeBound(
+                minimumAltitude,
+                "minimumAltitude");
+
+            ValidateAltitudeBound(
+                maximumAltitude,
+                "maximumAltitude");
+
+            if (minimumAltitude >= 0 &&
+                maximumAltitude >= 0 &&
+                minimumAltitude > maximumAltitude)
+            {
+                throw new ArgumentException(
+                    "Minimum altitude cannot exceed maximum altitude.",
+                    "minimumAltitude");
+            }
+
+            ValidateLatitude(
+                minimumLatitude,
+                "minimumLatitude");
+
+            ValidateLatitude(
+                maximumLatitude,
+                "maximumLatitude");
+
+            if (minimumLatitude > maximumLatitude)
+            {
+                throw new ArgumentException(
+                    "Minimum latitude cannot exceed maximum latitude.",
+                    "minimumLatitude");
+            }
+
+            ValidateByteFilter(
+                biomeFilter,
+                "biomeFilter");
+
+            ValidateByteFilter(
+                materialFilter,
+                "materialFilter");
+
+            _brushOperations.Add(
+                new BrushOperation
+                {
+                    LayerIndex = layerIndex,
+                    FillValue = fillValue,
+                    UseNoise = useNoise,
+                    NoiseFrequency = noiseFrequency,
+                    NoiseOctaves = noiseOctaves,
+                    NoiseSeedOffset = noiseSeedOffset,
+                    BlendNoiseMinimum = blendNoiseMinimum,
+                    BlendNoiseMaximum = blendNoiseMaximum,
+                    MinimumAltitude = minimumAltitude,
+                    MaximumAltitude = maximumAltitude,
+                    MinimumLatitude = minimumLatitude,
+                    MaximumLatitude = maximumLatitude,
+                    BiomeFilter = biomeFilter,
+                    MaterialFilter = materialFilter
+                });
+        }
+
+
+        private static int ParseBrushLayer(
+            string layer)
+        {
+            if (string.Equals(
+                layer,
+                "Material",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            if (string.Equals(
+                layer,
+                "Biome",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return 1;
+            }
+
+            if (string.Equals(
+                layer,
+                "Ore",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return 2;
+            }
+
+            if (string.Equals(
+                    layer,
+                    "Heightmap",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    layer,
+                    "Height",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return 3;
+            }
+
+            throw new ArgumentException(
+                "Brush layer must be Material, Biome, Ore, or Heightmap.",
+                "layer");
+        }
+
+
+        private static void ValidateUnitRange(
+            double value,
+            string parameterName)
+        {
+            if (double.IsNaN(value) ||
+                double.IsInfinity(value) ||
+                value < 0.0 ||
+                value > 1.0)
+            {
+                throw new ArgumentException(
+                    "Brush noise range values must be from 0 to 1.",
+                    parameterName);
+            }
+        }
+
+
+        private static void ValidateAltitudeBound(
+            int value,
+            string parameterName)
+        {
+            if (value < -1 ||
+                value > ushort.MaxValue)
+            {
+                throw new ArgumentException(
+                    "Altitude bounds must be -1 or from 0 to 65535.",
+                    parameterName);
+            }
+        }
+
+
+        private static void ValidateLatitude(
+            double value,
+            string parameterName)
+        {
+            if (double.IsNaN(value) ||
+                double.IsInfinity(value) ||
+                value < -90.0 ||
+                value > 90.0)
+            {
+                throw new ArgumentException(
+                    "Latitude must be finite and from -90 to 90 degrees.",
+                    parameterName);
+            }
+        }
+
+
+        private static void ValidateByteFilter(
+            int value,
+            string parameterName)
+        {
+            if (value < -1 ||
+                value > byte.MaxValue)
+            {
+                throw new ArgumentException(
+                    "Brush byte filters must be -1 or from 0 to 255.",
+                    parameterName);
+            }
         }
 
 

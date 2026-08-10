@@ -437,6 +437,36 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 storageCommitted =
                     true;
 
+
+                if (!string.IsNullOrWhiteSpace(
+                    workResult.EnvironmentCarrierSubtype))
+                {
+                    MyPlanetGeneratorDefinition committedGenerator =
+                        workResult.TargetPlanet == null
+                            ? null
+                            : workResult.TargetPlanet.Generator;
+
+                    string expectedGeneratorSubtype =
+                        workResult.ReplacementGenerator == null
+                            ? null
+                            : workResult.ReplacementGenerator.Id.SubtypeName;
+
+                    if (committedGenerator == null ||
+                        string.IsNullOrWhiteSpace(
+                            expectedGeneratorSubtype) ||
+                        !string.Equals(
+                            committedGenerator.Id.SubtypeName,
+                            expectedGeneratorSubtype,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new Exception(
+                            "Planet storage was committed, but its live generator " +
+                            "identity was not updated to '" +
+                            expectedGeneratorSubtype +
+                            "'. The superseded runtime package was retained.");
+                    }
+                }
+
                 _runtimePackages.PruneSupersededRuntimePackages(
                     workResult.NewEntry);
 

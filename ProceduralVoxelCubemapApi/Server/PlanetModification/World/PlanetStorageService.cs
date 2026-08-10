@@ -608,13 +608,22 @@ namespace VoxelCubemapApi.Server.PlanetModification.World
                             sourcePlanet.Generator.EnvironmentDefinition,
                             replacementGenerator.EnvironmentDefinition);
 
-                    // MyPlanet.Init() is initialization-only code. Use it only for
-                    // the two cases where there is no alternative: adding the first
-                    // environment to a barren planet, or switching to a different
-                    // prepared caller environment definition. Repeated biome/height
-                    // edits using the same carrier must remain pure storage swaps.
+                    bool generatorIdentityChanged =
+                        sourcePlanet.Generator == null ||
+                        !string.Equals(
+                            sourcePlanet.Generator.Id.SubtypeName,
+                            replacementGenerator.Id.SubtypeName,
+                            StringComparison.OrdinalIgnoreCase);
+
+                    // MyPlanet.GetObjectBuilder() persists Generator.Id separately
+                    // from the generator subtype stored in VX2. Even when the caller
+                    // environment object is unchanged, a new runtime revision must
+                    // update MyPlanet.Generator before the previous package is
+                    // pruned; otherwise the next save references a definition that
+                    // LoadData() no longer recreates.
                     if (!hasEnvironmentComponent ||
-                        environmentDefinitionChanged)
+                        environmentDefinitionChanged ||
+                        generatorIdentityChanged)
                     {
                         PlanetEnvironmentService.ReinitializeInPlace(
                             sourcePlanet,
@@ -624,7 +633,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.World
                     {
                         MyLog.Default.WriteLineAndConsole(
                             "[RuntimePlanetGenerator] Reusing existing live planet environment; " +
-                            "caller definition is unchanged. EntityId=" +
+                            "caller definition and generator identity are unchanged. EntityId=" +
                             sourcePlanet.EntityId +
                             ".");
                     }

@@ -210,6 +210,70 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
         }
 
 
+        internal static double[] BuildBrushNoiseGrid(
+            int faceIndex,
+            long planetSeed,
+            double frequency,
+            int octaves,
+            int seedOffset)
+        {
+            const int GridResolution =
+                129;
+
+            double[] grid =
+                new double[
+                    GridResolution *
+                    GridResolution];
+
+            int offset =
+                0;
+
+            long seed =
+                unchecked(
+                    planetSeed +
+                    seedOffset);
+
+            for (int y = 0;
+                y < GridResolution;
+                y++)
+            {
+                for (int x = 0;
+                    x < GridResolution;
+                    x++)
+                {
+                    Vector3D direction =
+                        GetCubemapSphereDirection(
+                            faceIndex,
+                            x,
+                            y,
+                            GridResolution,
+                            GridResolution);
+
+                    double raw =
+                        PlanetFbm(
+                            direction,
+                            seed,
+                            frequency,
+                            octaves);
+
+                    double normalized =
+                        (raw + 1.0) *
+                        0.5;
+
+                    if (normalized < 0.0)
+                        normalized = 0.0;
+                    else if (normalized > 1.0)
+                        normalized = 1.0;
+
+                    grid[offset++] =
+                        normalized;
+                }
+            }
+
+            return grid;
+        }
+
+
         internal static double SampleGrassNoiseGrid(
             double[] grid,
             int x,
@@ -292,6 +356,43 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                 top,
                 bottom,
                 ty);
+        }
+
+
+        internal static double SampleBrushNoiseGrid(
+            double[] grid,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+            return SampleGrassNoiseGrid(
+                grid,
+                x,
+                y,
+                width,
+                height);
+        }
+
+
+        internal static double GetLatitudeDegrees(
+            int faceIndex,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+            Vector3D direction =
+                GetCubemapSphereDirection(
+                    faceIndex,
+                    x,
+                    y,
+                    width,
+                    height);
+
+            return Math.Asin(
+                    direction.Y) *
+                (180.0 / Math.PI);
         }
 
 
@@ -382,8 +483,20 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
             Vector3D direction,
             long planetSeed)
         {
-            double frequency =
-                2.15;
+            return PlanetFbm(
+                direction,
+                planetSeed,
+                2.15,
+                4);
+        }
+
+
+        private static double PlanetFbm(
+            Vector3D direction,
+            long planetSeed,
+            double frequency,
+            int octaves)
+        {
 
             double amplitude =
                 1.0;
@@ -396,7 +509,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
 
 
             for (int octave = 0;
-                octave < 4;
+                octave < octaves;
                 octave++)
             {
                 long octaveSeed =

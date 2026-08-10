@@ -25,6 +25,7 @@ namespace VoxelCubemapApi.Api
         private readonly Action<byte, int> _applyFractalNoise;
         private readonly Action<byte, byte> _replaceBiome;
         private readonly Action<byte, int> _applyBiomeFractalNoise;
+        private readonly Action<string, int, bool, double, int, int, double, double, int, int, double, double, int, int> _applyBrush;
         private readonly Func<byte, bool> _removeMaterial;
         private readonly Action<Action<bool, string>> _push;
         private readonly Action _close;
@@ -105,6 +106,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Action<byte, int>>(
                     api,
                     "ApplyBiomeFractalNoise");
+
+            _applyBrush =
+                GetRequired<Action<string, int, bool, double, int, int, double, double, int, int, double, double, int, int>>(
+                    api,
+                    "ApplyBrush");
 
             _removeMaterial =
                 GetRequired<Func<byte, bool>>(
@@ -274,6 +280,36 @@ namespace VoxelCubemapApi.Api
             int coveragePercent)
         {
             _applyBiomeFractalNoise(biomeValue, coveragePercent);
+        }
+
+
+        /// <summary>
+        /// Queues a filtered cubemap brush. The layer is Material, Biome, Ore,
+        /// or Heightmap. Material/Biome/Ore fills use byte values; Heightmap
+        /// uses an unsigned 16-bit sample. Altitude filters use that same
+        /// unsigned 16-bit height sample and -1 disables either bound.
+        /// Latitude is signed degrees. Biome/material filters use -1 for any.
+        /// When procedural noise is enabled, only pixels whose normalized
+        /// seamless cubemap noise falls inside the inclusive blend range are
+        /// filled. Noise-specific parameters are ignored when useNoise is false.
+        /// </summary>
+        public void ApplyBrush(
+            string layer,
+            int fillValue,
+            bool useNoise,
+            double noiseFrequency,
+            int noiseOctaves,
+            int noiseSeedOffset,
+            double blendNoiseMinimum,
+            double blendNoiseMaximum,
+            int minimumAltitude,
+            int maximumAltitude,
+            double minimumLatitude,
+            double maximumLatitude,
+            int biomeFilter,
+            int materialFilter)
+        {
+            _applyBrush(layer, fillValue, useNoise, noiseFrequency, noiseOctaves, noiseSeedOffset, blendNoiseMinimum, blendNoiseMaximum, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
         }
 
 
