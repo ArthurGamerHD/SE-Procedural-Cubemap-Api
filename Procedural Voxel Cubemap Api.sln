@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Voxel Cubemap Api", "Voxel Cubemap Api\Voxel Cubemap Api.csproj", "{3FA8ABF2-88BE-4B93-B03A-68A293672618}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Procedural Voxel Cubemap Api", "Procedural Voxel Cubemap Api\Procedural Voxel Cubemap Api.csproj", "{3FA8ABF2-88BE-4B93-B03A-68A293672618}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Adk.Analyzer", "External\Adk\Adk.Analyzer\Adk.Analyzer.csproj", "{9B85F0B8-4B83-40A6-B347-96FCC4D5041E}"
 EndProject

@@ -254,7 +254,7 @@ namespace VoxelCubemapApi.Client
             string message)
         {
             MyAPIGateway.Utilities.ShowMessage(
-                "Voxel Cubemap Api",
+                "Procedural Voxel Cubemap Api",
                 message);
         }
     }

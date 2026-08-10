@@ -33,6 +33,24 @@ namespace VoxelCubemapApi.Server
     }
 
 
+    public class RuntimePersistenceManifest
+    {
+        public List<RuntimePersistencePackageEntry> Packages =
+            new List<RuntimePersistencePackageEntry>();
+    }
+
+
+    public class RuntimePersistencePackageEntry
+    {
+        public string Subtype;
+        public long SourceEntityId;
+        public string GeneratorFile;
+        public string ArchiveFile;
+        public int ChunkCount;
+        public bool Pending;
+    }
+
+
     public class RuntimePlanetBuilderEntry
     {
         public string Subtype;
@@ -57,6 +75,7 @@ namespace VoxelCubemapApi.Server
             public object OriginalStorage;
             public byte[] PatchedStorage;
             public MyPlanetGeneratorDefinition ReplacementGenerator;
+            public RuntimePlanetBuilderEntry NewEntry;
             public string EnvironmentCarrierSubtype;
             public string OperationName;
         }
@@ -1362,11 +1381,39 @@ namespace VoxelCubemapApi.Server
 
 
         private bool m_requestInProgress;
-        private bool m_unloading;
+        private volatile bool m_unloading;
         private VoxelCubemapIntermodApiServer m_intermodApi;
+
+        private readonly object m_persistenceSync =
+            new object();
+
+        private readonly HashSet<string> m_worldStorageCacheFiles =
+            new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
 
         private const string RuntimeSettingsFile =
             "settings.xml";
+
+        private const string PersistenceVariablePrefix =
+            "VoxelCubemapApi.RuntimePersistence.v1.";
+
+        private const string RuntimeSettingsVariable =
+            PersistenceVariablePrefix +
+            "SettingsXml";
+
+        private const string PersistenceManifestVariable =
+            PersistenceVariablePrefix +
+            "ManifestXml";
+
+        // MyObjectBuilder_ScriptManager stores utility variables as object-valued
+        // XML entries. A byte[] value is written as typed Base64, but Keen's
+        // checkpoint XmlReader cannot read binary content. Keep 4 MiB raw chunk
+        // boundaries while storing each chunk as an ordinary Base64 string.
+        private const int ArchiveChunkSizeBytes =
+            4 * 1024 * 1024;
+
+        private const int MaxArchiveChunkCount =
+            512;
 
         private const string GenericRuntimeSubtypePrefix =
             "GrassPlanet_";
@@ -1389,6 +1436,9 @@ namespace VoxelCubemapApi.Server
 
         private RuntimePlanetGeneratorSettings m_settings =
             new RuntimePlanetGeneratorSettings();
+
+        private RuntimePersistenceManifest m_persistenceManifest =
+            new RuntimePersistenceManifest();
 
         private readonly Dictionary<string, MyPlanetGeneratorDefinition>
             m_persistedRuntimeGenerators =
@@ -1422,6 +1472,9 @@ namespace VoxelCubemapApi.Server
 
         public override void LoadData()
         {
+            m_unloading =
+                false;
+
             LoadPersistedRuntimeGenerators();
 
             m_restoredEnvironmentBindings.Clear();
@@ -1429,14 +1482,26 @@ namespace VoxelCubemapApi.Server
             m_environmentRestoreRetryTicks =
                 0;
 
-            m_unloading =
-                false;
-
             m_intermodApi =
                 new VoxelCubemapIntermodApiServer(
                     CreateModificationTemplateApi);
 
             m_intermodApi.Register();
+        }
+
+
+        public override void BeforeStart()
+        {
+            try
+            {
+                ReconcileRuntimePackagesWithLivePlanets();
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Startup persistence cleanup failed: " +
+                    e);
+            }
         }
 
         protected override void UnloadData()
@@ -1454,6 +1519,9 @@ namespace VoxelCubemapApi.Server
                 m_intermodApi =
                     null;
             }
+
+
+            ClearWorldStorageCache();
         }
 
 
@@ -1685,6 +1753,9 @@ namespace VoxelCubemapApi.Server
             PlanetModificationWorkResult workResult =
                 null;
 
+            RuntimePlanetBuilderEntry pendingEntry =
+                null;
+
             Exception workError =
                 null;
 
@@ -1698,7 +1769,8 @@ namespace VoxelCubemapApi.Server
                         {
                             workResult =
                                 PrepareModificationPush(
-                                    snapshot);
+                                    snapshot,
+                                    out pendingEntry);
                         }
                         catch (Exception e)
                         {
@@ -1713,6 +1785,7 @@ namespace VoxelCubemapApi.Server
                                 CompleteModificationPush(
                                     workResult,
                                     workError,
+                                    pendingEntry,
                                     callback);
                             });
                     });
@@ -1732,8 +1805,12 @@ namespace VoxelCubemapApi.Server
 
 
         private PlanetModificationWorkResult PrepareModificationPush(
-            PlanetModificationSnapshot snapshot)
+            PlanetModificationSnapshot snapshot,
+            out RuntimePlanetBuilderEntry pendingEntry)
         {
+            pendingEntry =
+                null;
+
             if (snapshot == null)
                 throw new ArgumentNullException("snapshot");
 
@@ -1764,6 +1841,25 @@ namespace VoxelCubemapApi.Server
                 archiveFile;
 
 
+            pendingEntry =
+                new RuntimePlanetBuilderEntry
+                {
+                    Subtype = runtimeSubtype,
+                    SourceSubtype = snapshot.SourceSubtype,
+                    SourceEntityId = snapshot.TargetPlanet.EntityId,
+                    EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
+                    GeneratorFile = generatorFile,
+                    ArchiveFile = archiveFile,
+                    GrassMaterialValue = 0,
+                    GrassCoveragePercent = 0,
+                    PlanetSeed = snapshot.PlanetSeed,
+                    GrassNoiseVersion = 0
+                };
+
+            BeginPendingPersistencePackage(
+                pendingEntry);
+
+
             CreateModifiedPlanetDataArchive(
                 snapshot,
                 archiveFile);
@@ -1792,26 +1888,6 @@ namespace VoxelCubemapApi.Server
                 snapshot.EnvironmentCarrierSubtype);
 
 
-            var entry =
-                new RuntimePlanetBuilderEntry
-                {
-                    Subtype = runtimeSubtype,
-                    SourceSubtype = snapshot.SourceSubtype,
-                    SourceEntityId = snapshot.TargetPlanet.EntityId,
-                    EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
-                    GeneratorFile = generatorFile,
-                    ArchiveFile = archiveFile,
-                    GrassMaterialValue = 0,
-                    GrassCoveragePercent = 0,
-                    PlanetSeed = snapshot.PlanetSeed,
-                    GrassNoiseVersion = 0
-                };
-
-            m_settings.PlanetBuilders.Add(
-                entry);
-
-            SaveRuntimeSettings();
-
             m_persistedRuntimeGenerators[
                 runtimeSubtype] =
                 runtimeGenerator;
@@ -1827,6 +1903,9 @@ namespace VoxelCubemapApi.Server
             result.EnvironmentCarrierSubtype =
                 snapshot.EnvironmentCarrierSubtype;
 
+            result.NewEntry =
+                pendingEntry;
+
             return result;
         }
 
@@ -1834,8 +1913,15 @@ namespace VoxelCubemapApi.Server
         private void CompleteModificationPush(
             PlanetModificationWorkResult workResult,
             Exception workError,
+            RuntimePlanetBuilderEntry pendingEntry,
             Action<bool, string> callback)
         {
+            bool commitAttempted =
+                false;
+
+            bool storageCommitted =
+                false;
+
             try
             {
                 if (m_unloading)
@@ -1851,8 +1937,20 @@ namespace VoxelCubemapApi.Server
                 }
 
 
+                StageRuntimePackageForCommit(
+                    workResult.NewEntry);
+
+                commitAttempted =
+                    true;
+
                 CommitPlanetStorage(
                     workResult);
+
+                storageCommitted =
+                    true;
+
+                PruneSupersededRuntimePackages(
+                    workResult.NewEntry);
 
                 DispatchPushResponse(
                     callback,
@@ -1861,6 +1959,68 @@ namespace VoxelCubemapApi.Server
             }
             catch (Exception e)
             {
+                bool providerStateResolved =
+                    !commitAttempted;
+
+                if (!storageCommitted &&
+                    commitAttempted &&
+                    workResult != null &&
+                    workResult.NewEntry != null)
+                {
+                    providerStateResolved =
+                        TryIsRuntimePackageLive(
+                            workResult.TargetPlanet,
+                            workResult.NewEntry,
+                            out storageCommitted);
+
+                    if (storageCommitted)
+                    {
+                        try
+                        {
+                            PruneSupersededRuntimePackages(
+                                workResult.NewEntry);
+                        }
+                        catch (Exception cleanupError)
+                        {
+                            MyLog.Default.WriteLineAndConsole(
+                                "[Voxel Cubemap API] Deferred superseded-package cleanup: " +
+                                cleanupError);
+                        }
+                    }
+                }
+
+
+                if (!m_unloading &&
+                    !storageCommitted &&
+                    providerStateResolved &&
+                    (pendingEntry != null ||
+                        (workResult != null &&
+                            workResult.NewEntry != null)))
+                {
+                    try
+                    {
+                        DiscardRuntimePackage(
+                            pendingEntry ??
+                            workResult.NewEntry);
+                    }
+                    catch (Exception cleanupError)
+                    {
+                        MyLog.Default.WriteLineAndConsole(
+                            "[Voxel Cubemap API] Failed package cleanup also failed: " +
+                            cleanupError);
+                    }
+                }
+
+                else if (!storageCommitted &&
+                    commitAttempted &&
+                    !providerStateResolved)
+                {
+                    MyLog.Default.WriteLineAndConsole(
+                        "[Voxel Cubemap API] Retaining staged package because " +
+                        "the live provider could not be resolved safely.");
+                }
+
+
                 MyLog.Default.WriteLineAndConsole(
                     "[Voxel Cubemap API] Push failed: " +
                     e);
@@ -2127,40 +2287,6 @@ namespace VoxelCubemapApi.Server
                 archiveFile;
 
 
-            string savePath =
-                ResolveInitialSavePath();
-
-
-            CreatePlanetDataArchive(
-                sourceContext,
-                sourceSubtype,
-                sourceFolderName,
-                archiveFile,
-                grassMaterialValue,
-                grassOverlayValuesBySource,
-                planetSeed,
-                grassCoveragePercent);
-
-
-            SaveGeneratorBuilder(
-                generatorFile,
-                builder);
-
-
-            string absoluteFolder =
-                BuildWorldStorageFilePath(
-                    savePath,
-                    archiveFile);
-
-
-            MyPlanetGeneratorDefinition runtimeGenerator =
-                RegisterRuntimeGeneratorDefinition(
-                    builder,
-                    runtimeSubtype,
-                    absoluteFolder,
-                    grassMaterialValue);
-
-
             var entry =
                 new RuntimePlanetBuilderEntry
                 {
@@ -2193,15 +2319,62 @@ namespace VoxelCubemapApi.Server
                 };
 
 
-            m_settings.PlanetBuilders.Add(
+            BeginPendingPersistencePackage(
                 entry);
 
-            SaveRuntimeSettings();
+
+            MyPlanetGeneratorDefinition runtimeGenerator;
+
+            try
+            {
+                string savePath =
+                    ResolveInitialSavePath();
 
 
-            m_persistedRuntimeGenerators[
-                runtimeSubtype] =
-                runtimeGenerator;
+                CreatePlanetDataArchive(
+                    sourceContext,
+                    sourceSubtype,
+                    sourceFolderName,
+                    archiveFile,
+                    grassMaterialValue,
+                    grassOverlayValuesBySource,
+                    planetSeed,
+                    grassCoveragePercent);
+
+
+                SaveGeneratorBuilder(
+                    generatorFile,
+                    builder);
+
+
+                string absoluteFolder =
+                    BuildWorldStorageFilePath(
+                        savePath,
+                        archiveFile);
+
+
+                runtimeGenerator =
+                    RegisterRuntimeGeneratorDefinition(
+                        builder,
+                        runtimeSubtype,
+                        absoluteFolder,
+                        grassMaterialValue);
+
+
+                m_persistedRuntimeGenerators[
+                    runtimeSubtype] =
+                    runtimeGenerator;
+
+                StageRuntimePackageForCommit(
+                    entry);
+            }
+            catch
+            {
+                DiscardRuntimePackage(
+                    entry);
+
+                throw;
+            }
 
 
             MyLog.Default.WriteLineAndConsole(
@@ -3468,8 +3641,11 @@ namespace VoxelCubemapApi.Server
 
         private void LoadPersistedRuntimeGenerators()
         {
+            bool migrateLegacyWorldStorage;
+
             m_settings =
-                LoadRuntimeSettings();
+                LoadRuntimeSettings(
+                    out migrateLegacyWorldStorage);
 
 
             if (m_settings.PlanetBuilders == null)
@@ -3477,14 +3653,6 @@ namespace VoxelCubemapApi.Server
                 m_settings.PlanetBuilders =
                     new List<RuntimePlanetBuilderEntry>();
             }
-
-
-            if (m_settings.PlanetBuilders.Count == 0)
-                return;
-
-
-            string savePath =
-                ResolveInitialSavePath();
 
 
             for (int i = 0;
@@ -3501,8 +3669,36 @@ namespace VoxelCubemapApi.Server
                     string.IsNullOrWhiteSpace(entry.ArchiveFile))
                 {
                     throw new Exception(
-                        "settings.xml contains an invalid runtime planet entry.");
+                        "Persisted settings contain an invalid runtime planet entry.");
                 }
+            }
+
+
+            m_persistenceManifest =
+                LoadPersistenceManifest();
+
+            CleanupAbandonedPersistencePackages();
+            SeedPersistenceManifestFromSettings();
+
+
+            if (m_settings.PlanetBuilders.Count == 0)
+                return;
+
+
+            RecreateWorldStorageCache(
+                migrateLegacyWorldStorage);
+
+
+            string savePath =
+                ResolveInitialSavePath();
+
+
+            for (int i = 0;
+                i < m_settings.PlanetBuilders.Count;
+                i++)
+            {
+                RuntimePlanetBuilderEntry entry =
+                    m_settings.PlanetBuilders[i];
 
 
                 MyPlanetGeneratorDefinition generator =
@@ -3527,25 +3723,47 @@ namespace VoxelCubemapApi.Server
         }
 
 
-        private RuntimePlanetGeneratorSettings LoadRuntimeSettings()
+        private RuntimePlanetGeneratorSettings LoadRuntimeSettings(
+            out bool migratedLegacyWorldStorage)
         {
-            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                RuntimeSettingsFile,
-                typeof(VoxelCubemapApiServer)))
-            {
-                return new RuntimePlanetGeneratorSettings();
-            }
+            migratedLegacyWorldStorage =
+                false;
 
 
             string xml;
 
-            using (TextReader reader =
-                MyAPIGateway.Utilities.ReadFileInWorldStorage(
+            if (!MyAPIGateway.Utilities.GetVariable<string>(
+                RuntimeSettingsVariable,
+                out xml))
+            {
+                if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
                     RuntimeSettingsFile,
                     typeof(VoxelCubemapApiServer)))
-            {
-                xml =
-                    reader.ReadToEnd();
+                {
+                    return new RuntimePlanetGeneratorSettings();
+                }
+
+
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                        RuntimeSettingsFile,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    xml =
+                        reader.ReadToEnd();
+                }
+
+
+                MyAPIGateway.Utilities.SetVariable(
+                    RuntimeSettingsVariable,
+                    xml);
+
+                migratedLegacyWorldStorage =
+                    true;
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Migrating persistence from " +
+                    "WorldStorage to session variables.");
             }
 
 
@@ -3574,18 +3792,23 @@ namespace VoxelCubemapApi.Server
 
         private void SaveRuntimeSettings()
         {
-            string xml =
-                MyAPIGateway.Utilities
-                    .SerializeToXML<RuntimePlanetGeneratorSettings>(
-                        m_settings);
-
-
-            using (TextWriter writer =
-                MyAPIGateway.Utilities.WriteFileInWorldStorage(
-                    RuntimeSettingsFile,
-                    typeof(VoxelCubemapApiServer)))
+            lock (m_persistenceSync)
             {
-                writer.Write(
+                ThrowIfPersistenceUnavailable();
+
+
+                string xml =
+                    MyAPIGateway.Utilities
+                        .SerializeToXML<RuntimePlanetGeneratorSettings>(
+                            m_settings);
+
+
+                MyAPIGateway.Utilities.SetVariable(
+                    RuntimeSettingsVariable,
+                    xml);
+
+                WriteWorldStorageTextCache(
+                    RuntimeSettingsFile,
                     xml);
             }
         }
@@ -3595,19 +3818,1463 @@ namespace VoxelCubemapApi.Server
             string fileName,
             MyObjectBuilder_PlanetGeneratorDefinition builder)
         {
+            lock (m_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+
+                string xml =
+                    MyAPIGateway.Utilities
+                        .SerializeToXML<MyObjectBuilder_PlanetGeneratorDefinition>(
+                            builder);
+
+
+                MyAPIGateway.Utilities.SetVariable(
+                    BuildGeneratorVariableName(
+                        fileName),
+                    xml);
+
+                WriteWorldStorageTextCache(
+                    fileName,
+                    xml);
+            }
+        }
+
+
+        private void RecreateWorldStorageCache(
+            bool allowLegacyMigration)
+        {
+            lock (m_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+
+                WriteWorldStorageTextCache(
+                    RuntimeSettingsFile,
+                    MyAPIGateway.Utilities
+                        .SerializeToXML<RuntimePlanetGeneratorSettings>(
+                            m_settings));
+
+
+                for (int i = 0;
+                    i < m_settings.PlanetBuilders.Count;
+                    i++)
+                {
+                    RuntimePlanetBuilderEntry entry =
+                        m_settings.PlanetBuilders[i];
+
+                    RestoreGeneratorCache(
+                        entry.GeneratorFile,
+                        allowLegacyMigration);
+
+                    RestoreArchiveCache(
+                        entry.ArchiveFile,
+                        allowLegacyMigration);
+                }
+            }
+        }
+
+
+        private void RestoreGeneratorCache(
+            string fileName,
+            bool allowLegacyMigration)
+        {
+            string xml;
+
+            if (!MyAPIGateway.Utilities.GetVariable<string>(
+                BuildGeneratorVariableName(
+                    fileName),
+                out xml))
+            {
+                if (!allowLegacyMigration ||
+                    !MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        fileName,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    throw new Exception(
+                        "Missing persisted runtime generator variable: " +
+                        fileName);
+                }
+
+
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                        fileName,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    xml =
+                        reader.ReadToEnd();
+                }
+
+
+                MyAPIGateway.Utilities.SetVariable(
+                    BuildGeneratorVariableName(
+                        fileName),
+                    xml);
+            }
+
+
+            if (string.IsNullOrWhiteSpace(xml))
+            {
+                throw new Exception(
+                    "Persisted runtime generator variable is empty: " +
+                    fileName);
+            }
+
+
+            WriteWorldStorageTextCache(
+                fileName,
+                xml);
+        }
+
+
+        private void RestoreArchiveCache(
+            string fileName,
+            bool allowLegacyMigration)
+        {
+            byte[] archive;
+
+            if (!TryLoadRuntimeArchiveVariables(
+                fileName,
+                out archive))
+            {
+                if (!allowLegacyMigration ||
+                    !MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        fileName,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    throw new Exception(
+                        "Missing persisted runtime archive variables: " +
+                        fileName);
+                }
+
+
+                using (BinaryReader reader =
+                    MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                        fileName,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    archive =
+                        ReadAllBytes(
+                            reader);
+                }
+
+
+                SaveRuntimeArchiveVariables(
+                    fileName,
+                    archive);
+            }
+
+
+            WriteWorldStorageBinaryCache(
+                fileName,
+                archive);
+        }
+
+
+        private void SaveRuntimeArchive(
+            string fileName,
+            byte[] archive)
+        {
+            lock (m_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+                SaveRuntimeArchiveVariables(
+                    fileName,
+                    archive);
+
+                WriteWorldStorageBinaryCache(
+                    fileName,
+                    archive);
+            }
+        }
+
+
+        private void SaveRuntimeArchiveVariables(
+            string fileName,
+            byte[] archive)
+        {
+            if (archive == null)
+                throw new ArgumentNullException("archive");
+
+
+            string chunkCountVariable =
+                BuildArchiveChunkCountVariableName(
+                    fileName);
+
+            int previousChunkCount;
+
+            bool hadPreviousChunkCount =
+                MyAPIGateway.Utilities.GetVariable<int>(
+                    chunkCountVariable,
+                    out previousChunkCount);
+
+            RuntimePersistencePackageEntry manifestPackage =
+                FindPersistenceManifestPackage(
+                    fileName);
+
+            if (!hadPreviousChunkCount)
+            {
+                previousChunkCount =
+                    manifestPackage == null
+                        ? 0
+                        : manifestPackage.ChunkCount;
+            }
+
+
+            ValidateArchiveChunkCount(
+                previousChunkCount,
+                fileName);
+
+
+            int previousArchiveLength;
+
+            bool hadPreviousArchiveLength =
+                MyAPIGateway.Utilities.GetVariable<int>(
+                    BuildArchiveLengthVariableName(
+                        fileName),
+                    out previousArchiveLength);
+
+            var previousChunks =
+                new List<string>(
+                    previousChunkCount);
+
+
+            for (int chunkIndex = 0;
+                chunkIndex < previousChunkCount;
+                chunkIndex++)
+            {
+                string previousChunk;
+
+                if (!MyAPIGateway.Utilities.GetVariable<string>(
+                    BuildArchiveChunkVariableName(
+                        fileName,
+                        chunkIndex),
+                    out previousChunk) ||
+                    previousChunk == null)
+                {
+                    throw new Exception(
+                        "Cannot safely rewrite runtime archive '" +
+                        fileName +
+                        "' because previous chunk " +
+                        chunkIndex +
+                        " is missing.");
+                }
+
+
+                previousChunks.Add(
+                    previousChunk);
+            }
+
+
+            int chunkCount =
+                (int)(((long)archive.Length +
+                    ArchiveChunkSizeBytes -
+                    1) /
+                    ArchiveChunkSizeBytes);
+
+            ValidateArchiveChunkCount(
+                chunkCount,
+                fileName);
+
+
+            int previousManifestChunkCount =
+                manifestPackage == null
+                    ? 0
+                    : manifestPackage.ChunkCount;
+
+            if (manifestPackage != null)
+            {
+                manifestPackage.ChunkCount =
+                    chunkCount;
+
+                SavePersistenceManifest();
+            }
+
+
+            RemoveRuntimeArchiveVariableRange(
+                fileName,
+                previousChunkCount);
+
+
+            int writtenChunkCount =
+                0;
+
+
+            try
+            {
+                for (int chunkIndex = 0;
+                    chunkIndex < chunkCount;
+                    chunkIndex++)
+                {
+                    int offset =
+                        chunkIndex *
+                        ArchiveChunkSizeBytes;
+
+                    int length =
+                        Math.Min(
+                            ArchiveChunkSizeBytes,
+                            archive.Length - offset);
+
+                    string chunk =
+                        Convert.ToBase64String(
+                            archive,
+                            offset,
+                            length);
+
+                    MyAPIGateway.Utilities.SetVariable(
+                        BuildArchiveChunkVariableName(
+                            fileName,
+                            chunkIndex),
+                        chunk);
+
+                    writtenChunkCount++;
+                }
+
+
+                MyAPIGateway.Utilities.SetVariable(
+                    BuildArchiveLengthVariableName(
+                        fileName),
+                    archive.Length);
+
+                MyAPIGateway.Utilities.SetVariable(
+                    chunkCountVariable,
+                    chunkCount);
+            }
+            catch
+            {
+                RemoveRuntimeArchiveVariableRange(
+                    fileName,
+                    writtenChunkCount);
+
+
+                for (int chunkIndex = 0;
+                    chunkIndex < previousChunks.Count;
+                    chunkIndex++)
+                {
+                    MyAPIGateway.Utilities.SetVariable(
+                        BuildArchiveChunkVariableName(
+                            fileName,
+                            chunkIndex),
+                        previousChunks[chunkIndex]);
+                }
+
+
+                if (hadPreviousArchiveLength)
+                {
+                    MyAPIGateway.Utilities.SetVariable(
+                        BuildArchiveLengthVariableName(
+                            fileName),
+                        previousArchiveLength);
+                }
+
+                if (hadPreviousChunkCount)
+                {
+                    MyAPIGateway.Utilities.SetVariable(
+                        chunkCountVariable,
+                        previousChunkCount);
+                }
+
+
+                if (manifestPackage != null)
+                {
+                    manifestPackage.ChunkCount =
+                        previousManifestChunkCount;
+
+                    SavePersistenceManifest();
+                }
+
+
+                throw;
+            }
+        }
+
+
+        private bool TryLoadRuntimeArchiveVariables(
+            string fileName,
+            out byte[] archive)
+        {
+            archive =
+                null;
+
+
+            int chunkCount;
+
+            if (!MyAPIGateway.Utilities.GetVariable<int>(
+                BuildArchiveChunkCountVariableName(
+                    fileName),
+                out chunkCount))
+            {
+                return false;
+            }
+
+
+            int archiveLength;
+
+            if (!MyAPIGateway.Utilities.GetVariable<int>(
+                    BuildArchiveLengthVariableName(
+                        fileName),
+                    out archiveLength) ||
+                archiveLength < 0 ||
+                chunkCount < 0)
+            {
+                throw new Exception(
+                    "Invalid runtime archive variable metadata: " +
+                    fileName);
+            }
+
+
+            int expectedChunkCount =
+                (int)(((long)archiveLength +
+                    ArchiveChunkSizeBytes -
+                    1) /
+                    ArchiveChunkSizeBytes);
+
+            if (chunkCount != expectedChunkCount)
+            {
+                throw new Exception(
+                    "Runtime archive variable chunk count does not match " +
+                    "its stored length: " +
+                    fileName);
+            }
+
+
+            archive =
+                new byte[archiveLength];
+
+
+            for (int chunkIndex = 0;
+                chunkIndex < chunkCount;
+                chunkIndex++)
+            {
+                string encodedChunk;
+
+                if (!MyAPIGateway.Utilities.GetVariable<string>(
+                    BuildArchiveChunkVariableName(
+                        fileName,
+                        chunkIndex),
+                    out encodedChunk) ||
+                    string.IsNullOrEmpty(encodedChunk))
+                {
+                    throw new Exception(
+                        "Missing runtime archive variable chunk " +
+                        chunkIndex +
+                        " for " +
+                        fileName);
+                }
+
+
+                byte[] chunk;
+
+                try
+                {
+                    chunk =
+                        Convert.FromBase64String(
+                            encodedChunk);
+                }
+                catch (FormatException e)
+                {
+                    throw new Exception(
+                        "Runtime archive variable chunk " +
+                        chunkIndex +
+                        " is not valid Base64 for " +
+                        fileName,
+                        e);
+                }
+
+
+                int offset =
+                    chunkIndex *
+                    ArchiveChunkSizeBytes;
+
+                int expectedLength =
+                    Math.Min(
+                        ArchiveChunkSizeBytes,
+                        archiveLength - offset);
+
+                if (chunk.Length != expectedLength)
+                {
+                    throw new Exception(
+                        "Invalid runtime archive variable chunk length " +
+                        chunkIndex +
+                        " for " +
+                        fileName);
+                }
+
+
+                Buffer.BlockCopy(
+                    chunk,
+                    0,
+                    archive,
+                    offset,
+                    chunk.Length);
+            }
+
+
+            return true;
+        }
+
+
+        private static string BuildGeneratorVariableName(
+            string fileName)
+        {
+            return
+                PersistenceVariablePrefix +
+                "GeneratorXml." +
+                fileName;
+        }
+
+
+        private static string BuildArchiveChunkCountVariableName(
+            string fileName)
+        {
+            return
+                PersistenceVariablePrefix +
+                "Archive." +
+                fileName +
+                ".ChunkCount";
+        }
+
+
+        private static string BuildArchiveLengthVariableName(
+            string fileName)
+        {
+            return
+                PersistenceVariablePrefix +
+                "Archive." +
+                fileName +
+                ".Length";
+        }
+
+
+        private static string BuildArchiveChunkVariableName(
+            string fileName,
+            int chunkIndex)
+        {
+            return
+                PersistenceVariablePrefix +
+                "Archive." +
+                fileName +
+                ".Chunk." +
+                chunkIndex;
+        }
+
+
+        private RuntimePersistenceManifest LoadPersistenceManifest()
+        {
+            string xml;
+
+            if (!MyAPIGateway.Utilities.GetVariable<string>(
+                    PersistenceManifestVariable,
+                    out xml) ||
+                string.IsNullOrWhiteSpace(xml))
+            {
+                return new RuntimePersistenceManifest();
+            }
+
+
+            RuntimePersistenceManifest manifest =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<RuntimePersistenceManifest>(
+                        xml);
+
+            if (manifest == null)
+            {
+                throw new Exception(
+                    "Could not deserialize the runtime persistence manifest.");
+            }
+
+
+            if (manifest.Packages == null)
+            {
+                manifest.Packages =
+                    new List<RuntimePersistencePackageEntry>();
+            }
+
+
+            return manifest;
+        }
+
+
+        private void SavePersistenceManifest()
+        {
             string xml =
                 MyAPIGateway.Utilities
-                    .SerializeToXML<MyObjectBuilder_PlanetGeneratorDefinition>(
-                        builder);
+                    .SerializeToXML<RuntimePersistenceManifest>(
+                        m_persistenceManifest);
+
+            MyAPIGateway.Utilities.SetVariable(
+                PersistenceManifestVariable,
+                xml);
+        }
 
 
+        private RuntimePersistencePackageEntry
+            FindPersistenceManifestPackage(
+                string archiveFile)
+        {
+            if (m_persistenceManifest == null ||
+                m_persistenceManifest.Packages == null ||
+                string.IsNullOrWhiteSpace(archiveFile))
+            {
+                return null;
+            }
+
+
+            return m_persistenceManifest.Packages
+                .FirstOrDefault(x =>
+                    x != null &&
+                    string.Equals(
+                        x.ArchiveFile,
+                        archiveFile,
+                        StringComparison.OrdinalIgnoreCase));
+        }
+
+
+        private static bool PersistencePackageMatchesEntry(
+            RuntimePersistencePackageEntry package,
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (package == null ||
+                entry == null)
+            {
+                return false;
+            }
+
+
+            return
+                string.Equals(
+                    package.Subtype,
+                    entry.Subtype,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    package.GeneratorFile,
+                    entry.GeneratorFile,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    package.ArchiveFile,
+                    entry.ArchiveFile,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+
+        private RuntimePersistencePackageEntry
+            CreatePersistencePackageFromEntry(
+                RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+
+            int chunkCount;
+
+            if (!MyAPIGateway.Utilities.GetVariable<int>(
+                BuildArchiveChunkCountVariableName(
+                    entry.ArchiveFile),
+                out chunkCount))
+            {
+                chunkCount =
+                    0;
+            }
+
+
+            ValidateArchiveChunkCount(
+                chunkCount,
+                entry.ArchiveFile);
+
+
+            return new RuntimePersistencePackageEntry
+            {
+                Subtype = entry.Subtype,
+                SourceEntityId = entry.SourceEntityId,
+                GeneratorFile = entry.GeneratorFile,
+                ArchiveFile = entry.ArchiveFile,
+                ChunkCount = chunkCount,
+                Pending = false
+            };
+        }
+
+
+        private void BeginPendingPersistencePackage(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+
+            lock (m_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+
+                RuntimePersistencePackageEntry package =
+                    FindPersistenceManifestPackage(
+                        entry.ArchiveFile);
+
+                if (package == null)
+                {
+                    package =
+                        new RuntimePersistencePackageEntry();
+
+                    m_persistenceManifest.Packages.Add(
+                        package);
+                }
+
+
+                int chunkCount;
+
+                if (!MyAPIGateway.Utilities.GetVariable<int>(
+                    BuildArchiveChunkCountVariableName(
+                        entry.ArchiveFile),
+                    out chunkCount))
+                {
+                    chunkCount =
+                        0;
+                }
+
+
+                ValidateArchiveChunkCount(
+                    chunkCount,
+                    entry.ArchiveFile);
+
+                package.Subtype =
+                    entry.Subtype;
+
+                package.SourceEntityId =
+                    entry.SourceEntityId;
+
+                package.GeneratorFile =
+                    entry.GeneratorFile;
+
+                package.ArchiveFile =
+                    entry.ArchiveFile;
+
+                package.ChunkCount =
+                    chunkCount;
+
+                package.Pending =
+                    true;
+
+                SavePersistenceManifest();
+            }
+        }
+
+
+        private void CleanupAbandonedPersistencePackages()
+        {
+            lock (m_persistenceSync)
+            {
+                bool settingsChanged =
+                    false;
+
+                bool manifestChanged =
+                    false;
+
+
+                for (int packageIndex =
+                        m_persistenceManifest.Packages.Count - 1;
+                    packageIndex >= 0;
+                    packageIndex--)
+                {
+                    RuntimePersistencePackageEntry package =
+                        m_persistenceManifest.Packages[packageIndex];
+
+                    RuntimePlanetBuilderEntry referencedEntry =
+                        package == null
+                            ? null
+                            : m_settings.PlanetBuilders
+                                .FirstOrDefault(x =>
+                                    PersistencePackageMatchesEntry(
+                                        package,
+                                        x));
+
+                    if (package != null &&
+                        !package.Pending &&
+                        referencedEntry != null)
+                    {
+                        continue;
+                    }
+
+
+                    if (package != null)
+                    {
+                        RemovePersistencePackageArtifacts(
+                            package);
+                    }
+
+
+                    if (package != null &&
+                        m_settings.PlanetBuilders.RemoveAll(x =>
+                            PersistencePackageMatchesEntry(
+                                package,
+                                x)) > 0)
+                    {
+                        settingsChanged =
+                            true;
+                    }
+
+
+                    m_persistenceManifest.Packages.RemoveAt(
+                        packageIndex);
+
+                    manifestChanged =
+                        true;
+                }
+
+
+                if (settingsChanged)
+                    SaveRuntimeSettings();
+
+                if (manifestChanged)
+                    SavePersistenceManifest();
+            }
+        }
+
+
+        private void SeedPersistenceManifestFromSettings()
+        {
+            lock (m_persistenceSync)
+            {
+                bool changed =
+                    false;
+
+
+                for (int entryIndex = 0;
+                    entryIndex < m_settings.PlanetBuilders.Count;
+                    entryIndex++)
+                {
+                    RuntimePlanetBuilderEntry entry =
+                        m_settings.PlanetBuilders[entryIndex];
+
+                    if (entry == null ||
+                        FindPersistenceManifestPackage(
+                            entry.ArchiveFile) != null)
+                    {
+                        continue;
+                    }
+
+
+                    int chunkCount;
+
+                    if (!MyAPIGateway.Utilities.GetVariable<int>(
+                        BuildArchiveChunkCountVariableName(
+                            entry.ArchiveFile),
+                        out chunkCount))
+                    {
+                        chunkCount =
+                            0;
+                    }
+
+
+                    ValidateArchiveChunkCount(
+                        chunkCount,
+                        entry.ArchiveFile);
+
+                    m_persistenceManifest.Packages.Add(
+                        new RuntimePersistencePackageEntry
+                        {
+                            Subtype = entry.Subtype,
+                            SourceEntityId = entry.SourceEntityId,
+                            GeneratorFile = entry.GeneratorFile,
+                            ArchiveFile = entry.ArchiveFile,
+                            ChunkCount = chunkCount,
+                            Pending = false
+                        });
+
+                    changed =
+                        true;
+                }
+
+
+                if (changed)
+                    SavePersistenceManifest();
+            }
+        }
+
+
+        private static void ValidateArchiveChunkCount(
+            int chunkCount,
+            string fileName)
+        {
+            if (chunkCount < 0 ||
+                chunkCount > MaxArchiveChunkCount)
+            {
+                throw new Exception(
+                    "Invalid runtime archive chunk count " +
+                    chunkCount +
+                    " for " +
+                    fileName);
+            }
+        }
+
+
+        private static void RemoveRuntimeArchiveVariableRange(
+            string fileName,
+            int chunkCount)
+        {
+            ValidateArchiveChunkCount(
+                chunkCount,
+                fileName);
+
+
+            for (int chunkIndex = 0;
+                chunkIndex < chunkCount;
+                chunkIndex++)
+            {
+                MyAPIGateway.Utilities.RemoveVariable(
+                    BuildArchiveChunkVariableName(
+                        fileName,
+                        chunkIndex));
+            }
+
+
+            MyAPIGateway.Utilities.RemoveVariable(
+                BuildArchiveLengthVariableName(
+                    fileName));
+
+            MyAPIGateway.Utilities.RemoveVariable(
+                BuildArchiveChunkCountVariableName(
+                    fileName));
+        }
+
+
+        private void RemovePersistencePackageArtifacts(
+            RuntimePersistencePackageEntry package)
+        {
+            if (package == null)
+                return;
+
+
+            int chunkCount;
+
+            if (!MyAPIGateway.Utilities.GetVariable<int>(
+                BuildArchiveChunkCountVariableName(
+                    package.ArchiveFile),
+                out chunkCount))
+            {
+                chunkCount =
+                    package.ChunkCount;
+            }
+
+
+            ValidateArchiveChunkCount(
+                chunkCount,
+                package.ArchiveFile);
+
+            RemoveRuntimeArchiveVariableRange(
+                package.ArchiveFile,
+                Math.Max(
+                    chunkCount,
+                    package.ChunkCount));
+
+            MyAPIGateway.Utilities.RemoveVariable(
+                BuildGeneratorVariableName(
+                    package.GeneratorFile));
+
+            TryDeleteWorldStorageCacheFile(
+                package.GeneratorFile);
+
+            TryDeleteWorldStorageCacheFile(
+                package.ArchiveFile);
+
+            m_worldStorageCacheFiles.Remove(
+                package.GeneratorFile);
+
+            m_worldStorageCacheFiles.Remove(
+                package.ArchiveFile);
+
+
+            if (!string.IsNullOrWhiteSpace(
+                package.Subtype))
+            {
+                m_persistedRuntimeGenerators.Remove(
+                    package.Subtype);
+            }
+        }
+
+
+        private void StageRuntimePackageForCommit(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+
+            lock (m_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+
+                RuntimePersistencePackageEntry package =
+                    FindPersistenceManifestPackage(
+                        entry.ArchiveFile);
+
+                if (package == null)
+                {
+                    throw new Exception(
+                        "Pending runtime package is missing from the manifest: " +
+                        entry.ArchiveFile);
+                }
+
+
+                int chunkCount;
+
+                if (!MyAPIGateway.Utilities.GetVariable<int>(
+                    BuildArchiveChunkCountVariableName(
+                        entry.ArchiveFile),
+                    out chunkCount))
+                {
+                    throw new Exception(
+                        "Pending runtime package has no chunk-count metadata: " +
+                        entry.ArchiveFile);
+                }
+
+
+                ValidateArchiveChunkCount(
+                    chunkCount,
+                    entry.ArchiveFile);
+
+                package.Subtype =
+                    entry.Subtype;
+
+                package.SourceEntityId =
+                    entry.SourceEntityId;
+
+                package.GeneratorFile =
+                    entry.GeneratorFile;
+
+                package.ChunkCount =
+                    chunkCount;
+
+                package.Pending =
+                    false;
+
+
+                if (!m_settings.PlanetBuilders.Any(x =>
+                    x != null &&
+                    string.Equals(
+                        x.Subtype,
+                        entry.Subtype,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    m_settings.PlanetBuilders.Add(
+                        entry);
+                }
+
+
+                SaveRuntimeSettings();
+                SavePersistenceManifest();
+            }
+        }
+
+
+        private void PruneSupersededRuntimePackages(
+            RuntimePlanetBuilderEntry retainedEntry)
+        {
+            if (retainedEntry == null)
+                throw new ArgumentNullException("retainedEntry");
+
+
+            lock (m_persistenceSync)
+            {
+                var supersededEntries =
+                    m_settings.PlanetBuilders
+                        .Where(x =>
+                            x != null &&
+                            x.SourceEntityId == retainedEntry.SourceEntityId &&
+                            !string.Equals(
+                                x.Subtype,
+                                retainedEntry.Subtype,
+                                StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                if (supersededEntries.Count == 0)
+                    return;
+
+
+                for (int i = 0;
+                    i < supersededEntries.Count;
+                    i++)
+                {
+                    RuntimePlanetBuilderEntry supersededEntry =
+                        supersededEntries[i];
+
+                    RuntimePersistencePackageEntry package =
+                        FindPersistenceManifestPackage(
+                            supersededEntry.ArchiveFile);
+
+                    RemovePersistencePackageArtifacts(
+                        package ??
+                        CreatePersistencePackageFromEntry(
+                            supersededEntry));
+
+                    if (package != null)
+                    {
+                        m_persistenceManifest.Packages.Remove(
+                            package);
+                    }
+
+
+                    m_settings.PlanetBuilders.Remove(
+                        supersededEntry);
+
+                    m_persistedRuntimeGenerators.Remove(
+                        supersededEntry.Subtype);
+                }
+
+
+                SaveRuntimeSettings();
+                SavePersistenceManifest();
+            }
+        }
+
+
+        private void DiscardRuntimePackage(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                return;
+
+
+            lock (m_persistenceSync)
+            {
+                RuntimePersistencePackageEntry package =
+                    FindPersistenceManifestPackage(
+                        entry.ArchiveFile);
+
+                RemovePersistencePackageArtifacts(
+                    package ??
+                    CreatePersistencePackageFromEntry(
+                        entry));
+
+                if (package != null)
+                {
+                    m_persistenceManifest.Packages.Remove(
+                        package);
+                }
+
+
+                bool settingsChanged =
+                    m_settings.PlanetBuilders.RemoveAll(x =>
+                        x != null &&
+                        string.Equals(
+                            x.Subtype,
+                            entry.Subtype,
+                            StringComparison.OrdinalIgnoreCase)) > 0;
+
+                m_persistedRuntimeGenerators.Remove(
+                    entry.Subtype);
+
+
+                if (settingsChanged)
+                    SaveRuntimeSettings();
+
+                SavePersistenceManifest();
+            }
+        }
+
+
+        private void ReconcileRuntimePackagesWithLivePlanets()
+        {
+            List<RuntimePlanetBuilderEntry> entries;
+
+            lock (m_persistenceSync)
+            {
+                entries =
+                    m_settings.PlanetBuilders
+                        .Where(x =>
+                            x != null)
+                        .ToList();
+            }
+
+
+            var staleEntries =
+                new List<RuntimePlanetBuilderEntry>();
+
+            foreach (IGrouping<long, RuntimePlanetBuilderEntry> group in
+                entries.GroupBy(x =>
+                    x.SourceEntityId))
+            {
+                MyPlanet planet =
+                    FindPlanetByEntityId(
+                        group.Key);
+
+                if (planet == null ||
+                    planet.Storage == null ||
+                    planet.Closed ||
+                    planet.MarkedForClose)
+                {
+                    staleEntries.AddRange(
+                        group);
+
+                    continue;
+                }
+
+
+                long planetSeed;
+                string providerSubtype;
+
+                try
+                {
+                    ReadLivePlanetProviderIdentity(
+                        planet,
+                        out planetSeed,
+                        out providerSubtype);
+                }
+                catch (Exception e)
+                {
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Retaining packages for planet " +
+                        group.Key +
+                        " because its live provider could not be resolved: " +
+                        e.Message);
+
+                    continue;
+                }
+
+
+                staleEntries.AddRange(
+                    group.Where(x =>
+                        !string.Equals(
+                            x.Subtype,
+                            providerSubtype,
+                            StringComparison.OrdinalIgnoreCase)));
+            }
+
+
+            if (staleEntries.Count == 0)
+                return;
+
+
+            lock (m_persistenceSync)
+            {
+                int removedCount =
+                    0;
+
+
+                for (int entryIndex = 0;
+                    entryIndex < staleEntries.Count;
+                    entryIndex++)
+                {
+                    RuntimePlanetBuilderEntry staleEntry =
+                        staleEntries[entryIndex];
+
+                    if (!m_settings.PlanetBuilders.Contains(
+                        staleEntry))
+                    {
+                        continue;
+                    }
+
+
+                    RuntimePersistencePackageEntry package =
+                        FindPersistenceManifestPackage(
+                            staleEntry.ArchiveFile);
+
+                    RemovePersistencePackageArtifacts(
+                        package ??
+                        CreatePersistencePackageFromEntry(
+                            staleEntry));
+
+                    if (package != null)
+                    {
+                        m_persistenceManifest.Packages.Remove(
+                            package);
+                    }
+
+
+                    m_settings.PlanetBuilders.Remove(
+                        staleEntry);
+
+                    m_persistedRuntimeGenerators.Remove(
+                        staleEntry.Subtype);
+
+                    removedCount++;
+                }
+
+
+                if (removedCount == 0)
+                    return;
+
+
+                SaveRuntimeSettings();
+                SavePersistenceManifest();
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Removed stale runtime packages: " +
+                    removedCount);
+            }
+        }
+
+
+        private bool TryIsRuntimePackageLive(
+            MyPlanet planet,
+            RuntimePlanetBuilderEntry entry,
+            out bool isLive)
+        {
+            isLive =
+                false;
+
+
+            if (planet == null ||
+                entry == null ||
+                planet.Storage == null)
+            {
+                return true;
+            }
+
+
+            try
+            {
+                long planetSeed;
+                string providerSubtype;
+
+                ReadLivePlanetProviderIdentity(
+                    planet,
+                    out planetSeed,
+                    out providerSubtype);
+
+                isLive =
+                    string.Equals(
+                        providerSubtype,
+                        entry.Subtype,
+                        StringComparison.OrdinalIgnoreCase);
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[Voxel Cubemap API] Could not resolve live provider after " +
+                    "a commit error: " +
+                    e.Message);
+
+                return false;
+            }
+        }
+
+
+        private void WriteWorldStorageTextCache(
+            string fileName,
+            string contents)
+        {
             using (TextWriter writer =
                 MyAPIGateway.Utilities.WriteFileInWorldStorage(
                     fileName,
                     typeof(VoxelCubemapApiServer)))
             {
                 writer.Write(
-                    xml);
+                    contents);
+            }
+
+
+            m_worldStorageCacheFiles.Add(
+                fileName);
+        }
+
+
+        private void WriteWorldStorageBinaryCache(
+            string fileName,
+            byte[] contents)
+        {
+            using (BinaryWriter writer =
+                MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
+                    fileName,
+                    typeof(VoxelCubemapApiServer)))
+            {
+                writer.Write(
+                    contents);
+            }
+
+
+            m_worldStorageCacheFiles.Add(
+                fileName);
+        }
+
+
+        private void ClearWorldStorageCache()
+        {
+            lock (m_persistenceSync)
+            {
+                foreach (string fileName in
+                    m_worldStorageCacheFiles)
+                {
+                    TryDeleteWorldStorageCacheFile(
+                        fileName);
+                }
+
+
+                m_worldStorageCacheFiles.Clear();
+
+                TryDeleteWorldStorageCacheFile(
+                    RuntimeSettingsFile);
+
+
+                if (m_settings == null ||
+                    m_settings.PlanetBuilders == null)
+                {
+                    return;
+                }
+
+
+                for (int i = 0;
+                    i < m_settings.PlanetBuilders.Count;
+                    i++)
+                {
+                    RuntimePlanetBuilderEntry entry =
+                        m_settings.PlanetBuilders[i];
+
+                    if (entry == null)
+                        continue;
+
+
+                    TryDeleteWorldStorageCacheFile(
+                        entry.GeneratorFile);
+
+                    TryDeleteWorldStorageCacheFile(
+                        entry.ArchiveFile);
+                }
+            }
+        }
+
+
+        private void ThrowIfPersistenceUnavailable()
+        {
+            if (m_unloading)
+            {
+                throw new Exception(
+                    "Runtime planet persistence is unavailable while the " +
+                    "session is unloading.");
+            }
+        }
+
+
+        private static void TryDeleteWorldStorageCacheFile(
+            string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return;
+
+
+            try
+            {
+                if (MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                    fileName,
+                    typeof(VoxelCubemapApiServer)))
+                {
+                    MyAPIGateway.Utilities.DeleteFileInWorldStorage(
+                        fileName,
+                        typeof(VoxelCubemapApiServer));
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Could not clear WorldStorage " +
+                    "cache file '" +
+                    fileName +
+                    "': " +
+                    e);
             }
         }
 
@@ -4116,8 +5783,20 @@ namespace VoxelCubemapApi.Server
                 initArguments.Generator =
                     replacementGenerator;
 
-                initArguments.MarkAreaEmpty =
-                    false;
+                
+                //initArguments.MarkAreaEmpty =
+                //  false;
+                // ok this should be marked false to avoid memory leak however,
+                // if I do so, no way to set it back to true without re-initing 
+                // the planet, this corrupts the planet generator causing asteroids
+                // to spawn inside the atmosphere next time the session is reloaded
+                
+                // option 1: memory leak
+                // option 2: corrupted planet
+                // option 3: somewhere in between by set it to false but then call
+                //           "init" a single time with true to restore on next load
+                
+                // for now, lets keep at a small memory leak
 
                 initArguments.InitializeComponents =
                     false;
@@ -4359,6 +6038,8 @@ namespace VoxelCubemapApi.Server
             MyPlanet sourcePlanet,
             MyPlanetGeneratorDefinition runtimeGenerator)
         {
+            MyAPIGateway.Session.Save();
+            
             if (sourcePlanet == null)
                 throw new ArgumentNullException("sourcePlanet");
 
@@ -4412,12 +6093,36 @@ namespace VoxelCubemapApi.Server
                 ReinitializePlanetEnvironmentInPlace(
                     sourcePlanet,
                     runtimeGenerator);
-
+                
                 sourcePlanet.Storage =
                     storageBridge.Storage;
 
                 storageTransferred =
                     true;
+            }
+            // pray to klang for this not fail...
+            // because if it does,
+            // we have no way to fix it withing the mod api limitations
+            catch (Exception e)
+            {
+                MyAPIGateway.Utilities.ShowNotification(
+                    "[RuntimePlanetGenerator]",
+                    10000,
+                    MyFontEnum.Red);
+                MyAPIGateway.Utilities.ShowNotification(
+                    "Could not refresh persisted planet environment",
+                    10000,
+                    MyFontEnum.Red);
+                MyAPIGateway.Utilities.ShowNotification(
+                    "Continue to playing in this session is NOT RECOMMENDED",
+                    10000,
+                    MyFontEnum.Red);
+                MyAPIGateway.Utilities.ShowNotification(
+                    "Please reload the session",
+                    10000,
+                    MyFontEnum.Red);
+
+                MyLog.Default.Log(MyLogSeverity.Error, "[RuntimePlanetGenerator] Could not refresh persisted planet environment: " + e.Message);
             }
             finally
             {
@@ -5002,7 +6707,7 @@ namespace VoxelCubemapApi.Server
                 entries.Add(
                     new MinimalZip.Entry(
                         fileName,
-                        data));
+                        data, MinimalZip.CompressionMode.Deflate));
             }
 
 
@@ -5011,14 +6716,9 @@ namespace VoxelCubemapApi.Server
                     entries);
 
 
-            using (BinaryWriter writer =
-                MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
-                    archiveFileName,
-                    typeof(VoxelCubemapApiServer)))
-            {
-                writer.Write(
-                    archive);
-            }
+            SaveRuntimeArchive(
+                archiveFileName,
+                archive);
 
 
             MyLog.Default.WriteLineAndConsole(
@@ -5215,7 +6915,8 @@ namespace VoxelCubemapApi.Server
                 entries.Add(
                     new MinimalZip.Entry(
                         fileName,
-                        data));
+                        data,
+                        MinimalZip.CompressionMode.Deflate));
             }
 
 
@@ -5223,14 +6924,9 @@ namespace VoxelCubemapApi.Server
                 MinimalZip.WriteBytes(
                     entries);
 
-            using (BinaryWriter writer =
-                MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
-                    archiveFileName,
-                    typeof(VoxelCubemapApiServer)))
-            {
-                writer.Write(
-                    archive);
-            }
+            SaveRuntimeArchive(
+                archiveFileName,
+                archive);
 
 
             MyLog.Default.WriteLineAndConsole(
@@ -5700,6 +7396,10 @@ namespace VoxelCubemapApi.Server
 
             if (string.IsNullOrWhiteSpace(savePath))
                 return;
+
+
+            RecreateWorldStorageCache(
+                false);
 
 
             for (int i = 0;
