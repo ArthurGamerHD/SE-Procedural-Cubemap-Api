@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 using Generated;
+using Jakaria.API;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VoxelCubemapApi.Api;
 using VRage.Game;
 using VRage.Game.Components;
+using VRage.ModAPI;
 using VRage.Utils;
 
 namespace VoxelCubemapExampleMod
@@ -12,9 +16,12 @@ namespace VoxelCubemapExampleMod
     /// Test consumer for the public SendModMessage API. No planet-generation
     /// implementation is called directly from this component.
     /// </summary>
-    [MySessionComponentDescriptor(MyUpdateOrder.NoUpdate)]
+    [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     internal sealed class GrassPlanetApiTestClient : MySessionComponentBase
     {
+        private const int WaterLevelEaseTicks =
+            10 * 60;
+
         private const long ReplyChannel =
             0x5643584150490002L;
 
@@ -24,6 +31,12 @@ namespace VoxelCubemapExampleMod
         private static GrassPlanetApiTestClient _instance;
 
         private ApiProvider _api;
+
+        private readonly List<Action> _runNextTick =
+            new List<Action>();
+
+        private readonly List<Action> _runThisTick =
+            new List<Action>();
 
 
         public override void LoadData()
@@ -40,6 +53,9 @@ namespace VoxelCubemapExampleMod
 
         protected override void UnloadData()
         {
+            _runNextTick.Clear();
+            _runThisTick.Clear();
+
             _api =
                 null;
 
@@ -48,6 +64,33 @@ namespace VoxelCubemapExampleMod
                 _instance =
                     null;
             }
+        }
+
+
+        public override void UpdateBeforeSimulation()
+        {
+            _runThisTick.AddRange(
+                _runNextTick);
+
+            _runNextTick.Clear();
+
+            for (int index = 0;
+                index < _runThisTick.Count;
+                index++)
+            {
+                try
+                {
+                    _runThisTick[index]();
+                }
+                catch (Exception e)
+                {
+                    LogWarning(
+                        "Scheduled update failed",
+                        e);
+                }
+            }
+
+            _runThisTick.Clear();
         }
 
 
@@ -544,6 +587,56 @@ namespace VoxelCubemapExampleMod
                                     : "Ocean material transition failed."
                                 : message);
                     });
+
+
+                if(WaterModAPI.Registered )
+                {
+                    IMyEntity entity;
+
+                    if (MyAPIGateway.Entities.TryGetEntityById(template.GetPlanetEntityId(), out entity) && entity is MyPlanet)
+                    {
+                        var planet = (MyPlanet)entity;
+                        float wModRadius = (float)client._api.GetWaterUtil().HeightmapUnitToWaterRadius(
+                            planet.EntityId,
+                            oceanHeight);
+
+                        float initialWaterRadius = (float)client._api.GetWaterUtil().HeightmapUnitToWaterRadius(
+                            planet.EntityId,
+                            0);
+
+                        if (WaterModAPI.HasWater(planet))
+                            client.EaseWaterRadius(planet, wModRadius);
+                        else if (WaterModAPI.CreateWater(
+                            planet,
+                            initialWaterRadius))
+                        {
+                            client._runNextTick.Add(
+                                delegate
+                                {
+                                    client.EaseWaterRadius(
+                                        planet,
+                                        wModRadius);
+                                });
+                        }
+                        else
+                        {
+                            MyLog.Default.Log(
+                                MyLogSeverity.Warning,
+                                "[Grass API Test Client] Failed to create water before easing its radius.");
+                        }
+
+
+                    }
+                    else
+                    {
+                        ShowMessage("Failed to set water radius: Could not find planet entity.");
+                    }
+
+                }
+                else
+                {
+                    MyLog.Default.Log(MyLogSeverity.Info, "Water Mod api not registered, skipping water");
+                }
             }
             catch (Exception e)
             {
@@ -558,6 +651,66 @@ namespace VoxelCubemapExampleMod
                     "Failed: " +
                     e.Message);
             }
+        }
+
+
+        private void EaseWaterRadius(
+            MyPlanet planet,
+            float targetRadius)
+        {
+            float startRadius =
+                WaterModAPI.GetPhysical(planet).Item2 /
+                (float)planet.MinimumRadius;
+
+            int elapsedTicks =
+                0;
+
+            Action updateWaterRadius =
+                null;
+
+            updateWaterRadius =
+                delegate
+                {
+                    if (!WaterModAPI.Registered)
+                        return;
+
+                    float progress =
+                        Math.Min(
+                            1f,
+                            elapsedTicks /
+                            (float)WaterLevelEaseTicks);
+
+                    float easedProgress =
+                        progress *
+                        progress *
+                        (3f - 2f * progress);
+
+                    float radius =
+                        startRadius +
+                        (targetRadius - startRadius) *
+                        easedProgress;
+
+                    if (!WaterModAPI.SetWaterRadius(
+                        planet,
+                        radius))
+                    {
+                        MyLog.Default.Log(
+                            MyLogSeverity.Warning,
+                            "[Grass API Test Client] Failed to ease water radius.");
+
+                        return;
+                    }
+
+                    if (elapsedTicks < WaterLevelEaseTicks)
+                    {
+                        elapsedTicks++;
+
+                        _runNextTick.Add(
+                            updateWaterRadius);
+                    }
+                };
+
+            updateWaterRadius();
         }
 
         [ChatCommand("water", "vcma")]
