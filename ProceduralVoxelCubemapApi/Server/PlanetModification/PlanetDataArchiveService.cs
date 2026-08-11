@@ -387,42 +387,140 @@ namespace VoxelCubemapApi.Server.PlanetModification
             if (sourceContext == null ||
                 sourceContext.IsBaseGame)
             {
-                if (!MyAPIGateway.Utilities.FileExistsInGameContent(
-                    relativePath))
+                byte[] gameData;
+
+                if (TryReadGameContentFile(
+                    relativePath,
+                    out gameData))
                 {
-                    throw new Exception(
-                        "Source planet map file does not exist in game content: " +
-                        relativePath);
+                    return gameData;
                 }
+            }
+            else
+            {
+                byte[] contextModData;
+
+                if (TryReadModFile(
+                    relativePath,
+                    sourceContext.ModItem,
+                    out contextModData))
+                {
+                    return contextModData;
+                }
+            }
 
 
+            // A live definition can retain an incomplete or vanilla context
+            // even though its planet maps came from a loaded mod. Probe every
+            // loaded mod for the requested relative file before giving up.
+            if (MyAPIGateway.Session != null &&
+                MyAPIGateway.Session.Mods != null)
+            {
+                foreach (MyObjectBuilder_Checkpoint.ModItem mod in
+                    MyAPIGateway.Session.Mods)
+                {
+                    byte[] modData;
+
+                    if (!TryReadModFile(
+                        relativePath,
+                        mod,
+                        out modData))
+                    {
+                        continue;
+                    }
+
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Resolved source planet map " +
+                        "from loaded mod " +
+                        mod.PublishedFileId +
+                        ": " +
+                        relativePath);
+
+
+                    return modData;
+                }
+            }
+
+
+            if (sourceContext != null &&
+                !sourceContext.IsBaseGame)
+            {
+                byte[] gameData;
+
+                if (TryReadGameContentFile(
+                    relativePath,
+                    out gameData))
+                {
+                    return gameData;
+                }
+            }
+
+
+            throw new Exception(
+                "Source planet map file was not found in game content or " +
+                "any loaded mod: " +
+                relativePath +
+                " (source subtype '" +
+                sourceSubtype +
+                "').");
+        }
+
+
+        private static bool TryReadGameContentFile(
+            string relativePath,
+            out byte[] data)
+        {
+            data =
+                null;
+
+
+            try
+            {
                 using (BinaryReader reader =
                     MyAPIGateway.Utilities.ReadBinaryFileInGameContent(
                         relativePath))
                 {
-                    return BinaryData.ReadAll(
-                        reader);
+                    data =
+                        BinaryData.ReadAll(
+                            reader);
+
+                    return true;
                 }
             }
-
-
-            if (!MyAPIGateway.Utilities.FileExistsInModLocation(
-                relativePath,
-                sourceContext.ModItem))
+            catch
             {
-                throw new Exception(
-                    "Source planet map file does not exist in mod content: " +
-                    relativePath);
+                return false;
             }
+        }
 
 
-            using (BinaryReader reader =
-                MyAPIGateway.Utilities.ReadBinaryFileInModLocation(
-                    relativePath,
-                    sourceContext.ModItem))
+        private static bool TryReadModFile(
+            string relativePath,
+            MyObjectBuilder_Checkpoint.ModItem mod,
+            out byte[] data)
+        {
+            data =
+                null;
+
+
+            try
             {
-                return BinaryData.ReadAll(
-                    reader);
+                using (BinaryReader reader =
+                    MyAPIGateway.Utilities.ReadBinaryFileInModLocation(
+                        relativePath,
+                        mod))
+                {
+                    data =
+                        BinaryData.ReadAll(
+                            reader);
+
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 

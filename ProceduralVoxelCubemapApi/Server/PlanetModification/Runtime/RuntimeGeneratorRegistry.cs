@@ -2,6 +2,7 @@ using Sandbox.Definitions;
 using Sandbox.ModAPI;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -62,70 +63,20 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
             string xml;
             string resolvedFile;
 
+            string subtype =
+                sourceGenerator.Id.SubtypeName;
+
             ReadSourceDefinitionXml(
                 context,
+                subtype,
                 out xml,
                 out resolvedFile);
 
 
-            MyObjectBuilder_Definitions definitions =
-                MyAPIGateway.Utilities
-                    .SerializeFromXML<MyObjectBuilder_Definitions>(
-                        xml);
-
-
-            if (definitions == null)
-            {
-                throw new Exception(
-                    "Source definition file did not deserialize as Definitions: " +
-                    resolvedFile);
-            }
-
-
-            string subtype =
-                sourceGenerator.Id.SubtypeName;
-
-
             MyObjectBuilder_PlanetGeneratorDefinition builder =
-                null;
-
-
-            // Keen's PlanetGeneratorDefinitions.sbc currently mixes both XML
-            // layouts in the same file:
-            //
-            //   <Definition xsi:type="PlanetGeneratorDefinition">
-            //
-            // deserializes into MyObjectBuilder_Definitions.Definitions, while:
-            //
-            //   <PlanetGeneratorDefinitions>
-            //       <PlanetGeneratorDefinition>
-            //
-            // deserializes into PlanetGeneratorDefinitions.
-            //
-            // EarthLike is in the generic Definitions[] collection.
-            if (definitions.Definitions != null)
-            {
-                builder =
-                    definitions.Definitions
-                        .OfType<MyObjectBuilder_PlanetGeneratorDefinition>()
-                        .FirstOrDefault(x =>
-                            x.Id.SubtypeName.Equals(
-                                subtype,
-                                StringComparison.OrdinalIgnoreCase));
-            }
-
-
-            if (builder == null &&
-                definitions.PlanetGeneratorDefinitions != null)
-            {
-                builder =
-                    definitions.PlanetGeneratorDefinitions
-                        .FirstOrDefault(x =>
-                            x != null &&
-                            x.Id.SubtypeName.Equals(
-                                subtype,
-                                StringComparison.OrdinalIgnoreCase));
-            }
+                DeserializeSourceBuilder(
+                    xml,
+                    subtype);
 
 
             if (builder == null)
@@ -161,6 +112,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
 
         private void ReadSourceDefinitionXml(
             MyModContext context,
+            string subtype,
             out string xml,
             out string resolvedFile)
         {
@@ -194,117 +146,152 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
                 NormalizePath(
                     context.ModPath);
 
+            var relativeFiles =
+                new List<string>();
+
+
+            AddRelativeFileFromRoot(
+                relativeFiles,
+                currentFile,
+                contextRoot);
+
+            AddRelativeFileFromRoot(
+                relativeFiles,
+                currentFile,
+                contentRoot);
+
+
+            if (currentFile.StartsWith(
+                    "Data/",
+                    StringComparison.OrdinalIgnoreCase) ||
+                currentFile.StartsWith(
+                    "DLC/",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                AddRelativeFileCandidate(
+                    relativeFiles,
+                    currentFile);
+            }
+
+
+            AddRelativeFileFromMarker(
+                relativeFiles,
+                currentFile,
+                "/Data/");
+
+            AddRelativeFileFromMarker(
+                relativeFiles,
+                currentFile,
+                "/DLC/");
+
 
             // Definition contexts are engine objects and retain native paths,
             // while LinuxCompat deliberately exposes Windows-shaped GamePaths
             // to mods. Classify the base-game context before comparing those
             // two representations; its default ModItem has no Name and cannot
             // be passed to FileExistsInModLocation.
-            if (context.IsBaseGame &&
-                !string.IsNullOrWhiteSpace(contextRoot) &&
-                currentFile.StartsWith(
-                    contextRoot + "/",
-                    StringComparison.OrdinalIgnoreCase))
+            bool preferGameContent =
+                context.IsBaseGame ||
+                (!string.IsNullOrWhiteSpace(contentRoot) &&
+                    currentFile.StartsWith(
+                        contentRoot + "/",
+                        StringComparison.OrdinalIgnoreCase));
+
+
+            if (preferGameContent)
             {
-                string relativeFile =
-                    currentFile.Substring(
-                        contextRoot.Length + 1);
-
-
-                ReadGameContentText(
-                    relativeFile,
-                    out xml);
-
-                resolvedFile =
-                    relativeFile;
-
-                return;
-            }
-
-
-            // Vanilla + DLC: CurrentFile should resolve under the real game
-            // Content directory. Strip only the content root and let ModAPI
-            // read the SBC itself.
-            if (!string.IsNullOrWhiteSpace(contentRoot) &&
-                currentFile.StartsWith(
-                    contentRoot + "/",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                string relativeFile =
-                    currentFile.Substring(
-                        contentRoot.Length + 1);
-
-
-                ReadGameContentText(
-                    relativeFile,
-                    out xml);
-
-                resolvedFile =
-                    relativeFile;
-
-                return;
-            }
-
-
-            // Some contexts expose CurrentFile already content-relative.
-            if (currentFile.StartsWith(
-                "Data/",
-                StringComparison.OrdinalIgnoreCase) ||
-                currentFile.StartsWith(
-                    "DLC/",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                ReadGameContentText(
-                    currentFile,
-                    out xml);
-
-                resolvedFile =
-                    currentFile;
-
-                return;
-            }
-
-
-            // Mod planets: read the actual source SBC from that mod.
-            string modRoot =
-                contextRoot;
-
-
-            if (!string.IsNullOrWhiteSpace(modRoot) &&
-                currentFile.StartsWith(
-                    modRoot + "/",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                string relativeFile =
-                    currentFile.Substring(
-                        modRoot.Length + 1);
-
-
-                if (!MyAPIGateway.Utilities.FileExistsInModLocation(
-                    relativeFile,
-                    context.ModItem))
+                for (int index = 0;
+                    index < relativeFiles.Count;
+                    index++)
                 {
-                    throw new Exception(
-                        "Source planet definition file does not exist in " +
-                        "mod content: " +
-                        relativeFile);
+                    if (TryReadGameContentDefinition(
+                        relativeFiles[index],
+                        subtype,
+                        out xml))
+                    {
+                        resolvedFile =
+                            relativeFiles[index] +
+                            " [game content]";
+
+                        return;
+                    }
                 }
-
-
-                using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInModLocation(
-                        relativeFile,
-                        context.ModItem))
+            }
+            else
+            {
+                for (int index = 0;
+                    index < relativeFiles.Count;
+                    index++)
                 {
-                    xml =
-                        reader.ReadToEnd();
+                    if (TryReadModDefinition(
+                        relativeFiles[index],
+                        context.ModItem,
+                        subtype,
+                        out xml))
+                    {
+                        resolvedFile =
+                            relativeFiles[index] +
+                            " [definition context mod]";
+
+                        return;
+                    }
                 }
+            }
 
 
-                resolvedFile =
-                    relativeFile;
+            // Definition contexts can be incomplete or point at the vanilla
+            // file when a loaded mod supplies the live planet definition. As
+            // a fallback, probe the candidate path in every loaded mod, just
+            // like model-content resolution does for modded LCD blocks.
+            if (MyAPIGateway.Session != null &&
+                MyAPIGateway.Session.Mods != null)
+            {
+                for (int fileIndex = 0;
+                    fileIndex < relativeFiles.Count;
+                    fileIndex++)
+                {
+                    foreach (MyObjectBuilder_Checkpoint.ModItem mod in
+                        MyAPIGateway.Session.Mods)
+                    {
+                        if (!TryReadModDefinition(
+                            relativeFiles[fileIndex],
+                            mod,
+                            subtype,
+                            out xml))
+                        {
+                            continue;
+                        }
 
-                return;
+                        resolvedFile =
+                            relativeFiles[fileIndex] +
+                            " [loaded mod " +
+                            mod.PublishedFileId +
+                            "]";
+
+                        return;
+                    }
+                }
+            }
+
+
+            if (!preferGameContent)
+            {
+                for (int index = 0;
+                    index < relativeFiles.Count;
+                    index++)
+                {
+                    if (TryReadGameContentDefinition(
+                        relativeFiles[index],
+                        subtype,
+                        out xml))
+                    {
+                        resolvedFile =
+                            relativeFiles[index] +
+                            " [game-content fallback]";
+
+                        return;
+                    }
+                }
             }
 
 
@@ -315,31 +302,204 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
                 "', ContentPath='" +
                 contentRoot +
                 "', ModPath='" +
-                modRoot +
+                contextRoot +
                 "'.");
         }
 
 
-        private static void ReadGameContentText(
-            string relativeFile,
-            out string xml)
+        private static MyObjectBuilder_PlanetGeneratorDefinition
+            DeserializeSourceBuilder(
+                string xml,
+                string subtype)
         {
-            if (!MyAPIGateway.Utilities.FileExistsInGameContent(
-                relativeFile))
+            MyObjectBuilder_Definitions definitions =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<MyObjectBuilder_Definitions>(
+                        xml);
+
+
+            if (definitions == null)
+                return null;
+
+
+            MyObjectBuilder_PlanetGeneratorDefinition builder =
+                null;
+
+
+            // Keen's PlanetGeneratorDefinitions.sbc currently mixes both XML
+            // layouts in the same file. Generic Definition elements deserialize
+            // into Definitions[], while explicit PlanetGeneratorDefinition
+            // elements deserialize into PlanetGeneratorDefinitions[].
+            if (definitions.Definitions != null)
             {
-                throw new Exception(
-                    "Source planet definition file does not exist in game " +
-                    "content: " +
-                    relativeFile);
+                builder =
+                    definitions.Definitions
+                        .OfType<MyObjectBuilder_PlanetGeneratorDefinition>()
+                        .FirstOrDefault(x =>
+                            x.Id.SubtypeName.Equals(
+                                subtype,
+                                StringComparison.OrdinalIgnoreCase));
             }
 
 
-            using (TextReader reader =
-                MyAPIGateway.Utilities.ReadFileInGameContent(
-                    relativeFile))
+            if (builder == null &&
+                definitions.PlanetGeneratorDefinitions != null)
             {
-                xml =
-                    reader.ReadToEnd();
+                builder =
+                    definitions.PlanetGeneratorDefinitions
+                        .FirstOrDefault(x =>
+                            x != null &&
+                            x.Id.SubtypeName.Equals(
+                                subtype,
+                                StringComparison.OrdinalIgnoreCase));
+            }
+
+
+            return builder;
+        }
+
+
+        private static bool TryReadGameContentDefinition(
+            string relativeFile,
+            string subtype,
+            out string xml)
+        {
+            xml =
+                null;
+
+
+            try
+            {
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInGameContent(
+                        relativeFile))
+                {
+                    string candidate =
+                        reader.ReadToEnd();
+
+                    if (DeserializeSourceBuilder(
+                        candidate,
+                        subtype) == null)
+                    {
+                        return false;
+                    }
+
+                    xml =
+                        candidate;
+
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+        private static bool TryReadModDefinition(
+            string relativeFile,
+            MyObjectBuilder_Checkpoint.ModItem mod,
+            string subtype,
+            out string xml)
+        {
+            xml =
+                null;
+
+
+            try
+            {
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInModLocation(
+                        relativeFile,
+                        mod))
+                {
+                    string candidate =
+                        reader.ReadToEnd();
+
+                    if (DeserializeSourceBuilder(
+                        candidate,
+                        subtype) == null)
+                    {
+                        return false;
+                    }
+
+                    xml =
+                        candidate;
+
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+        private static void AddRelativeFileFromRoot(
+            List<string> candidates,
+            string currentFile,
+            string root)
+        {
+            if (string.IsNullOrWhiteSpace(root) ||
+                !currentFile.StartsWith(
+                    root + "/",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+
+            AddRelativeFileCandidate(
+                candidates,
+                currentFile.Substring(
+                    root.Length + 1));
+        }
+
+
+        private static void AddRelativeFileFromMarker(
+            List<string> candidates,
+            string currentFile,
+            string marker)
+        {
+            int markerIndex =
+                currentFile.IndexOf(
+                    marker,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (markerIndex < 0)
+                return;
+
+
+            AddRelativeFileCandidate(
+                candidates,
+                currentFile.Substring(
+                    markerIndex + 1));
+        }
+
+
+        private static void AddRelativeFileCandidate(
+            List<string> candidates,
+            string relativeFile)
+        {
+            if (string.IsNullOrWhiteSpace(relativeFile))
+                return;
+
+
+            string normalized =
+                NormalizePath(
+                    relativeFile)
+                    .TrimStart('/');
+
+
+            if (!candidates.Any(x =>
+                x.Equals(
+                    normalized,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                candidates.Add(
+                    normalized);
             }
         }
 
@@ -358,12 +518,50 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
             }
 
 
+            string worldSavePath =
+                ResolveWorldSavePath(
+                    savePath);
+
+
             return
-                NormalizePath(savePath) +
+                worldSavePath +
                 "/Storage/" +
                 MyAPIGateway.Utilities.GamePaths.ModScopeName +
                 "/" +
                 fileName;
+        }
+
+
+        private static string ResolveWorldSavePath(
+            string fallbackSavePath)
+        {
+            string savesRoot =
+                NormalizePath(
+                    MyAPIGateway.Utilities.GamePaths.SavesPath);
+
+            string sessionName =
+                MyAPIGateway.Session == null
+                    ? null
+                    : MyAPIGateway.Session.Name;
+
+
+            if (string.IsNullOrWhiteSpace(savesRoot) ||
+                string.IsNullOrWhiteSpace(sessionName))
+            {
+                return NormalizePath(
+                    fallbackSavePath);
+            }
+
+
+            // World-storage APIs use MySession.WorldSavePath, which diverges
+            // from CurrentPath for workshop worlds. Match the engine's path:
+            // SavesPath + checkpoint SessionName with ':' replaced by '-'.
+            return
+                savesRoot.TrimEnd('/') +
+                "/" +
+                sessionName.Replace(
+                    ':',
+                    '-');
         }
 
 
