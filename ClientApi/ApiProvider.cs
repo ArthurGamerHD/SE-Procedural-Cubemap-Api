@@ -10,6 +10,7 @@ namespace VoxelCubemapApi.Api
     public sealed class ApiProvider
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
+        private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<Version> _getApiVersion;
@@ -25,6 +26,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Func<long, ApiData>>(
                     api,
                     "GetModificationTemplate");
+
+            _getPlanetMetadata =
+                GetRequired<Func<long, bool, ApiData>>(
+                    api,
+                    "GetPlanetMetadata");
 
             _getNoiseProvider =
                 GetRequired<Func<ApiData>>(
@@ -56,6 +62,23 @@ namespace VoxelCubemapApi.Api
             return nestedApi == null
                 ? null
                 : new ModificationTemplate(nestedApi);
+        }
+
+
+        /// <summary>
+        /// Creates a read-only metadata for the requested planet, returns Null if no matching planet found
+        /// returns its nested delegate API.
+        /// </summary>
+        public PlanetMetadataProvider GetPlanetMetadata(
+            long entityId,
+            bool includedVanilla)
+        {
+            ApiData nestedApi =
+                _getPlanetMetadata(entityId, includedVanilla);
+
+            return nestedApi == null
+                ? null
+                : new PlanetMetadataProvider(nestedApi);
         }
 
 

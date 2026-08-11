@@ -151,6 +151,11 @@ namespace VoxelCubemapApi.Server
             _unloading =
                 true;
 
+            if (_modifications != null)
+            {
+                _modifications.ClosePlanetMetadataProviders();
+            }
+
             _vegetationClearScheduler.Clear();
 
             UnregisterApiManager();
@@ -177,6 +182,8 @@ namespace VoxelCubemapApi.Server
         {
             if (MyAPIGateway.Session == null)
                 return;
+
+            _modifications.UpdatePlanetMetadataProviders();
 
             _vegetationClearScheduler.Update();
 

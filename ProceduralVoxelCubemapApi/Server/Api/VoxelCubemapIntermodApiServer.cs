@@ -14,7 +14,7 @@ namespace VoxelCubemapApi.Server.Api
         ClientName = "ApiProvider")]
     internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version _apiVersion = new Version(0, 0, 6);
+        private static readonly Version _apiVersion = new Version(0, 0, 7);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
@@ -38,6 +38,17 @@ namespace VoxelCubemapApi.Server.Api
             return _coordinator.CreateModificationTemplateApi(entityId);
         }
 
+        /// <summary>
+        /// Creates a read-only metadata for the requested planet, returns Null if no matching planet found
+        /// returns its nested delegate API.
+        /// </summary>
+        [ApiMethod(typeof(PlanetMetadataProvider))]
+        public Dictionary<string, Delegate> GetPlanetMetadata(long entityId, bool includedVanilla = false)
+        {
+            return _coordinator.GetOrCreatePlanetMetadataProvider(
+                entityId,
+                includedVanilla);
+        }
 
         /// <summary>
         /// Returns the root-level procedural noise provider.

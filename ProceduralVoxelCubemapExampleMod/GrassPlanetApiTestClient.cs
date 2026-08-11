@@ -19,7 +19,7 @@ namespace VoxelCubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version _clientApiVersion =
-            new Version(0, 0, 6);
+            new Version(0, 0, 7);
 
         private static GrassPlanetApiTestClient _instance;
 

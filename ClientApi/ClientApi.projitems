@@ -9,6 +9,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)ApiProvider.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ModificationTemplate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)NoiseProvider.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)PlanetMetadataProvider.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)VoxelCubemapApiClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)WaterUtil.cs" />
   </ItemGroup>

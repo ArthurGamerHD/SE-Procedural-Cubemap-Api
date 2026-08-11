@@ -3,8 +3,10 @@ using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
+using VoxelCubemapApi.Server.Api;
 using VoxelCubemapApi.Server.PlanetModification.Persistence;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
@@ -26,11 +28,35 @@ namespace VoxelCubemapApi.Server.PlanetModification
         private const string GenericGeneratorFileSuffix =
             ".generator.xml";
 
+        private static readonly string[] MetadataMapFileNames =
+        {
+            "front.png",
+            "back.png",
+            "left.png",
+            "right.png",
+            "up.png",
+            "down.png",
+            "front_mat.png",
+            "back_mat.png",
+            "left_mat.png",
+            "right_mat.png",
+            "up_mat.png",
+            "down_mat.png"
+        };
+
         private readonly RuntimePackageStore _runtimePackages;
         private readonly PlanetDataArchiveService _planetDataArchives;
         private readonly RuntimeGeneratorRegistry _runtimeGenerators;
         private readonly PlanetStorageService _planetStorage;
         private readonly Func<bool> _isUnloading;
+
+        private readonly Dictionary<long, List<Action<long, string>>>
+            _runtimePlanetChangedCallbacks =
+                new Dictionary<long, List<Action<long, string>>>();
+
+        private readonly Dictionary<long, CachedPlanetMetadataProvider>
+            _planetMetadataProviders =
+                new Dictionary<long, CachedPlanetMetadataProvider>();
 
         private bool _requestInProgress;
 
@@ -470,6 +496,10 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 _runtimePackages.PruneSupersededRuntimePackages(
                     workResult.NewEntry);
 
+                InvalidatePlanetMetadataProvider(
+                    workResult.TargetPlanet.EntityId,
+                    workResult.NewEntry.Subtype);
+
                 DispatchPushResponse(
                     callback,
                     true,
@@ -671,5 +701,622 @@ namespace VoxelCubemapApi.Server.PlanetModification
         }
 
 
+        internal ApiData GetOrCreatePlanetMetadataProvider(
+            long planetEntityId,
+            bool includeVanilla)
+        {
+            if (_isUnloading())
+            {
+                throw new Exception(
+                    "Voxel Cubemap API server is unloading.");
+            }
+
+
+            MyPlanet targetPlanet =
+                planetEntityId == 0
+                    ? PlanetLocator.FindNearestToPlayer()
+                    : PlanetLocator.FindByEntityId(
+                        planetEntityId);
+
+            if (targetPlanet == null)
+            {
+                throw new Exception(
+                    planetEntityId == 0
+                        ? "Could not find a planet near the local player."
+                        : "Could not find planet entity " +
+                            planetEntityId +
+                            ".");
+            }
+
+            if (targetPlanet.Generator == null)
+            {
+                throw new Exception(
+                    "Target planet has no generator definition.");
+            }
+
+
+            string currentProviderSubtype =
+                ReadCurrentProviderSubtype(
+                    targetPlanet);
+
+            if (!includeVanilla &&
+                FindRuntimeEntry(
+                    currentProviderSubtype) == null)
+            {
+                return null;
+            }
+
+
+            CachedPlanetMetadataProvider staleProvider =
+                null;
+
+            lock (_planetMetadataProviders)
+            {
+                CachedPlanetMetadataProvider cachedProvider;
+
+                if (_planetMetadataProviders.TryGetValue(
+                        targetPlanet.EntityId,
+                        out cachedProvider) &&
+                    ReferenceEquals(
+                        cachedProvider.Planet,
+                        targetPlanet) &&
+                    !cachedProvider.Snapshot.IsClosed &&
+                    string.Equals(
+                        cachedProvider.Snapshot.ProviderSubtype,
+                        currentProviderSubtype,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return AddPlanetMetadataHandler(
+                        cachedProvider);
+                }
+
+                if (cachedProvider != null)
+                {
+                    _planetMetadataProviders.Remove(
+                        targetPlanet.EntityId);
+
+                    staleProvider =
+                        cachedProvider;
+                }
+            }
+
+
+            if (staleProvider != null)
+            {
+                NotifyRuntimePlanetChanged(
+                    targetPlanet.EntityId,
+                    currentProviderSubtype);
+
+                CloseCachedPlanetMetadataProvider(
+                    staleProvider);
+            }
+
+
+            Dictionary<string, byte[]> snapshotFiles =
+                CapturePlanetMetadataFiles(
+                    targetPlanet,
+                    currentProviderSubtype);
+
+
+            var snapshot =
+                new PlanetMetadataSnapshot(
+                    targetPlanet.EntityId,
+                    currentProviderSubtype,
+                    snapshotFiles);
+
+            var newCachedProvider =
+                new CachedPlanetMetadataProvider
+                {
+                    Planet = targetPlanet,
+                    Snapshot = snapshot
+                };
+
+            CachedPlanetMetadataProvider displacedProvider =
+                null;
+
+            ApiData handlerApi;
+
+            lock (_planetMetadataProviders)
+            {
+                string verifiedProviderSubtype =
+                    ReadCurrentProviderSubtype(
+                        targetPlanet);
+
+                if (!string.Equals(
+                    currentProviderSubtype,
+                    verifiedProviderSubtype,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    snapshot.Close();
+
+                    throw new InvalidOperationException(
+                        "Planet provider changed from '" +
+                        currentProviderSubtype +
+                        "' to '" +
+                        verifiedProviderSubtype +
+                        "' while its metadata snapshot was being captured. Retry the request.");
+                }
+
+
+                CachedPlanetMetadataProvider cachedProvider;
+
+                if (_planetMetadataProviders.TryGetValue(
+                        targetPlanet.EntityId,
+                        out cachedProvider) &&
+                    ReferenceEquals(
+                        cachedProvider.Planet,
+                        targetPlanet) &&
+                    !cachedProvider.Snapshot.IsClosed &&
+                    string.Equals(
+                        cachedProvider.Snapshot.ProviderSubtype,
+                        currentProviderSubtype,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    snapshot.Close();
+
+                    return AddPlanetMetadataHandler(
+                        cachedProvider);
+                }
+
+                if (cachedProvider != null)
+                {
+                    displacedProvider =
+                        cachedProvider;
+                }
+
+                _planetMetadataProviders[
+                    targetPlanet.EntityId] =
+                    newCachedProvider;
+
+                handlerApi =
+                    AddPlanetMetadataHandler(
+                        newCachedProvider);
+            }
+
+
+            if (displacedProvider != null)
+            {
+                CloseCachedPlanetMetadataProvider(
+                    displacedProvider);
+            }
+
+
+            return handlerApi;
+        }
+
+
+        internal string ReadCurrentProviderSubtype(
+            MyPlanet planet)
+        {
+            if (planet == null)
+                throw new ArgumentNullException("planet");
+
+            MyPlanet livePlanet =
+                PlanetLocator.FindByEntityId(
+                    planet.EntityId);
+
+            if (livePlanet == null ||
+                !ReferenceEquals(
+                    livePlanet,
+                    planet))
+            {
+                throw new Exception(
+                    "Planet entity " +
+                    planet.EntityId +
+                    " is no longer loaded.");
+            }
+
+
+            long planetSeed;
+            string currentProviderSubtype;
+
+            _planetStorage.ReadProviderIdentity(
+                planet,
+                out planetSeed,
+                out currentProviderSubtype);
+
+
+            return currentProviderSubtype;
+        }
+
+
+        private Dictionary<string, byte[]> CapturePlanetMetadataFiles(
+            MyPlanet planet,
+            string currentProviderSubtype)
+        {
+            if (planet == null)
+                throw new ArgumentNullException("planet");
+
+            var snapshotFiles =
+                new Dictionary<string, byte[]>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            RuntimePlanetBuilderEntry runtimeEntry =
+                FindRuntimeEntry(
+                    currentProviderSubtype);
+
+            if (runtimeEntry != null)
+            {
+                Dictionary<string, byte[]> runtimeFiles =
+                    _planetDataArchives.ReadRuntimeArchive(
+                        runtimeEntry.ArchiveFile);
+
+                for (int index = 0;
+                    index < MetadataMapFileNames.Length;
+                    index++)
+                {
+                    string fileName =
+                        MetadataMapFileNames[index];
+
+                    byte[] runtimeFile;
+
+                    if (!runtimeFiles.TryGetValue(
+                        fileName,
+                        out runtimeFile))
+                    {
+                        throw new Exception(
+                            "Planet PNG '" +
+                            fileName +
+                            "' is missing from runtime archive " +
+                            runtimeEntry.ArchiveFile +
+                            ".");
+                    }
+
+                    snapshotFiles.Add(
+                        fileName,
+                        runtimeFile);
+                }
+
+                return snapshotFiles;
+            }
+
+
+            string sourceSubtype;
+
+            MyPlanetGeneratorDefinition sourceGenerator =
+                ResolveOriginalSourceGenerator(
+                    planet,
+                    currentProviderSubtype,
+                    out sourceSubtype);
+
+            string sourceFolderName =
+                string.IsNullOrWhiteSpace(
+                    sourceGenerator.FolderName)
+                    ? sourceSubtype
+                    : sourceGenerator.FolderName;
+
+
+            for (int index = 0;
+                index < MetadataMapFileNames.Length;
+                index++)
+            {
+                string fileName =
+                    MetadataMapFileNames[index];
+
+                snapshotFiles.Add(
+                    fileName,
+                    _planetDataArchives.ReadSourceFile(
+                        sourceGenerator.Context,
+                        sourceSubtype,
+                        sourceFolderName,
+                        fileName));
+            }
+
+
+            return snapshotFiles;
+        }
+
+
+        internal void ReleasePlanetMetadataHandler(
+            PlanetMetadataProvider provider)
+        {
+            if (provider == null)
+                return;
+
+            PlanetMetadataSnapshot snapshotToClose =
+                null;
+
+            lock (_planetMetadataProviders)
+            {
+                CachedPlanetMetadataProvider cachedProvider;
+
+                if (_planetMetadataProviders.TryGetValue(
+                        provider.PlanetEntityId,
+                        out cachedProvider) &&
+                    ReferenceEquals(
+                        cachedProvider.Snapshot,
+                        provider.Snapshot))
+                {
+                    cachedProvider.Handlers.Remove(
+                        provider);
+
+                    if (cachedProvider.Handlers.Count == 0)
+                    {
+                        _planetMetadataProviders.Remove(
+                            provider.PlanetEntityId);
+
+                        snapshotToClose =
+                            cachedProvider.Snapshot;
+                    }
+                }
+            }
+
+
+            if (snapshotToClose != null)
+            {
+                snapshotToClose.Close();
+            }
+        }
+
+
+        private ApiData AddPlanetMetadataHandler(
+            CachedPlanetMetadataProvider cachedProvider)
+        {
+            var handler =
+                new PlanetMetadataProvider(
+                    this,
+                    cachedProvider.Snapshot);
+
+            cachedProvider.Handlers.Add(
+                handler);
+
+            return handler.GetApi();
+        }
+
+
+        private static void CloseCachedPlanetMetadataProvider(
+            CachedPlanetMetadataProvider cachedProvider)
+        {
+            PlanetMetadataProvider[] handlers =
+                cachedProvider.Handlers.ToArray();
+
+            cachedProvider.Handlers.Clear();
+
+            for (int index = 0;
+                index < handlers.Length;
+                index++)
+            {
+                handlers[index].CloseFromCoordinator();
+            }
+
+            cachedProvider.Snapshot.Close();
+        }
+
+
+        internal void UpdatePlanetMetadataProviders()
+        {
+            CachedPlanetMetadataProvider[] cachedProviders;
+
+            lock (_planetMetadataProviders)
+            {
+                cachedProviders =
+                    _planetMetadataProviders.Values.ToArray();
+            }
+
+
+            for (int index = 0;
+                index < cachedProviders.Length;
+                index++)
+            {
+                CachedPlanetMetadataProvider cachedProvider =
+                    cachedProviders[index];
+
+                long planetEntityId =
+                    cachedProvider.Snapshot.PlanetEntityId;
+
+                MyPlanet livePlanet =
+                    PlanetLocator.FindByEntityId(
+                        planetEntityId);
+
+                if (livePlanet == null ||
+                    !ReferenceEquals(
+                        livePlanet,
+                        cachedProvider.Planet) ||
+                    livePlanet.Closed ||
+                    livePlanet.MarkedForClose ||
+                    !livePlanet.InScene)
+                {
+                    InvalidatePlanetMetadataProvider(
+                        planetEntityId,
+                        null,
+                        cachedProvider.Snapshot);
+
+                    continue;
+                }
+            }
+        }
+
+
+        internal void ClosePlanetMetadataProviders()
+        {
+            CachedPlanetMetadataProvider[] cachedProviders;
+
+            lock (_planetMetadataProviders)
+            {
+                cachedProviders =
+                    _planetMetadataProviders.Values.ToArray();
+
+                _planetMetadataProviders.Clear();
+            }
+
+
+            for (int index = 0;
+                index < cachedProviders.Length;
+                index++)
+            {
+                CachedPlanetMetadataProvider cachedProvider =
+                    cachedProviders[index];
+
+                NotifyRuntimePlanetChanged(
+                    cachedProvider.Snapshot.PlanetEntityId,
+                    null);
+
+                CloseCachedPlanetMetadataProvider(
+                    cachedProvider);
+            }
+        }
+
+
+        internal bool SubscribeRuntimePlanetChanged(
+            long planetEntityId,
+            Action<long, string> callback)
+        {
+            if (callback == null)
+                return false;
+
+
+            lock (_runtimePlanetChangedCallbacks)
+            {
+                List<Action<long, string>> callbacks;
+
+                if (!_runtimePlanetChangedCallbacks.TryGetValue(
+                    planetEntityId,
+                    out callbacks))
+                {
+                    callbacks =
+                        new List<Action<long, string>>();
+
+                    _runtimePlanetChangedCallbacks.Add(
+                        planetEntityId,
+                        callbacks);
+                }
+
+                if (callbacks.Contains(
+                    callback))
+                {
+                    return false;
+                }
+
+                callbacks.Add(
+                    callback);
+
+                return true;
+            }
+        }
+
+
+        internal void UnsubscribeRuntimePlanetChanged(
+            long planetEntityId,
+            Action<long, string> callback)
+        {
+            if (callback == null)
+                return;
+
+
+            lock (_runtimePlanetChangedCallbacks)
+            {
+                List<Action<long, string>> callbacks;
+
+                if (!_runtimePlanetChangedCallbacks.TryGetValue(
+                    planetEntityId,
+                    out callbacks))
+                {
+                    return;
+                }
+
+                callbacks.Remove(
+                    callback);
+
+                if (callbacks.Count == 0)
+                {
+                    _runtimePlanetChangedCallbacks.Remove(
+                        planetEntityId);
+                }
+            }
+        }
+
+
+        private void NotifyRuntimePlanetChanged(
+            long planetEntityId,
+            string runtimeSubtype)
+        {
+            Action<long, string>[] callbacks;
+
+            lock (_runtimePlanetChangedCallbacks)
+            {
+                List<Action<long, string>> registeredCallbacks;
+
+                if (!_runtimePlanetChangedCallbacks.TryGetValue(
+                        planetEntityId,
+                        out registeredCallbacks) ||
+                    registeredCallbacks.Count == 0)
+                {
+                    return;
+                }
+
+                callbacks =
+                    registeredCallbacks.ToArray();
+            }
+
+
+            for (int index = 0;
+                index < callbacks.Length;
+                index++)
+            {
+                try
+                {
+                    callbacks[index](
+                        planetEntityId,
+                        runtimeSubtype);
+                }
+                catch (Exception e)
+                {
+                    MyLog.Default.WriteLineAndConsole(
+                        "[Voxel Cubemap API] Runtime planet change callback " +
+                        "failed: " +
+                        e);
+                }
+            }
+        }
+
+
+        private bool InvalidatePlanetMetadataProvider(
+            long planetEntityId,
+            string runtimeSubtype,
+            PlanetMetadataSnapshot expectedSnapshot = null)
+        {
+            CachedPlanetMetadataProvider cachedProvider;
+
+            lock (_planetMetadataProviders)
+            {
+                if (!_planetMetadataProviders.TryGetValue(
+                    planetEntityId,
+                    out cachedProvider))
+                {
+                    return false;
+                }
+
+                if (expectedSnapshot != null &&
+                    !ReferenceEquals(
+                        cachedProvider.Snapshot,
+                        expectedSnapshot))
+                {
+                    return false;
+                }
+
+                _planetMetadataProviders.Remove(
+                    planetEntityId);
+            }
+
+
+            NotifyRuntimePlanetChanged(
+                planetEntityId,
+                runtimeSubtype);
+
+            CloseCachedPlanetMetadataProvider(
+                cachedProvider);
+
+            return true;
+        }
+
+
+        private sealed class CachedPlanetMetadataProvider
+        {
+            internal MyPlanet Planet;
+            internal PlanetMetadataSnapshot Snapshot;
+
+            internal readonly List<PlanetMetadataProvider> Handlers =
+                new List<PlanetMetadataProvider>();
+        }
     }
 }
