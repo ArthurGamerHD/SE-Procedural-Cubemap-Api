@@ -4,7 +4,7 @@ using VRageMath;
 
 namespace VoxelCubemapApi.Server.PlanetModification.Maps
 {
-    internal static class CubemapNoise
+    internal static class FractalBrownianMotion
     {
         internal static int GetCubemapFaceIndex(
             string faceFileName)
@@ -465,6 +465,214 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
             int thresholdIndex =
                 sampleCount -
                 grassSampleCount;
+
+
+            if (thresholdIndex < 0)
+                thresholdIndex = 0;
+
+            if (thresholdIndex >= sampleCount)
+                thresholdIndex = sampleCount - 1;
+
+
+            return samples[
+                thresholdIndex];
+        }
+
+
+        internal static double ComputeBrushCoverageThreshold(
+            long planetSeed,
+            int coveragePercent)
+        {
+            if (coveragePercent <= 0)
+                return 1.0;
+
+            if (coveragePercent >= 100)
+                return 0.0;
+
+
+            const int SampleResolution =
+                129;
+
+            int sampleCount =
+                6 *
+                SampleResolution *
+                SampleResolution;
+
+            double[] samples =
+                new double[
+                    sampleCount];
+
+            int sampleIndex =
+                0;
+
+
+            for (int face = 0;
+                face < 6;
+                face++)
+            {
+                for (int y = 0;
+                    y < SampleResolution;
+                    y++)
+                {
+                    for (int x = 0;
+                        x < SampleResolution;
+                        x++)
+                    {
+                        Vector3D direction =
+                            GetCubemapSphereDirection(
+                                face,
+                                x,
+                                y,
+                                SampleResolution,
+                                SampleResolution);
+
+                        double raw =
+                            PlanetGrassFbm(
+                                direction,
+                                planetSeed);
+
+                        double normalized =
+                            (raw + 1.0) *
+                            0.5;
+
+                        if (normalized < 0.0)
+                            normalized = 0.0;
+                        else if (normalized > 1.0)
+                            normalized = 1.0;
+
+                        samples[sampleIndex++] =
+                            normalized;
+                    }
+                }
+            }
+
+
+            Array.Sort(
+                samples);
+
+
+            int selectedSampleCount =
+                (sampleCount *
+                    coveragePercent +
+                    99) /
+                100;
+
+            int thresholdIndex =
+                sampleCount -
+                selectedSampleCount;
+
+
+            if (thresholdIndex < 0)
+                thresholdIndex = 0;
+
+            if (thresholdIndex >= sampleCount)
+                thresholdIndex = sampleCount - 1;
+
+
+            return samples[
+                thresholdIndex];
+        }
+
+
+        internal static double ComputeBrushCoverageThreshold(
+            long planetSeed,
+            double frequency,
+            int octaves,
+            int seedOffset,
+            int coveragePercent)
+        {
+            if (coveragePercent <= 0)
+                return double.PositiveInfinity;
+
+            if (coveragePercent >= 100)
+                return double.NegativeInfinity;
+
+            if (octaves <= 0)
+            {
+                throw new ArgumentException(
+                    "Noise octaves must be greater than zero.",
+                    nameof(octaves));
+            }
+
+
+            const int SampleResolution =
+                129;
+
+            int sampleCount =
+                6 *
+                SampleResolution *
+                SampleResolution;
+
+            double[] samples =
+                new double[
+                    sampleCount];
+
+            int sampleIndex =
+                0;
+
+            long seed =
+                unchecked(
+                    planetSeed +
+                    seedOffset);
+
+
+            for (int face = 0;
+                face < 6;
+                face++)
+            {
+                for (int y = 0;
+                    y < SampleResolution;
+                    y++)
+                {
+                    for (int x = 0;
+                        x < SampleResolution;
+                        x++)
+                    {
+                        Vector3D direction =
+                            GetCubemapSphereDirection(
+                                face,
+                                x,
+                                y,
+                                SampleResolution,
+                                SampleResolution);
+
+                        double raw =
+                            PlanetFbm(
+                                direction,
+                                seed,
+                                frequency,
+                                octaves);
+
+                        double normalized =
+                            (raw + 1.0) *
+                            (raw + 1.0) *
+                            0.5;
+
+                        if (normalized < 0.0)
+                            normalized = 0.0;
+                        else if (normalized > 1.0)
+                            normalized = 1.0;
+
+                        samples[sampleIndex++] =
+                            normalized;
+                    }
+                }
+            }
+
+
+            Array.Sort(
+                samples);
+
+
+            int selectedSampleCount =
+                (sampleCount *
+                    coveragePercent +
+                    99) /
+                100;
+
+            int thresholdIndex =
+                sampleCount -
+                selectedSampleCount;
 
 
             if (thresholdIndex < 0)

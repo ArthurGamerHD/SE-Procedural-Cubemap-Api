@@ -465,6 +465,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
 
         /// <summary>
         /// Adds a simple voxel material definition at the requested map value.
+        /// The existing explicit-ID contract is preserved.
         /// </summary>
         [ApiMethod]
         private bool AddMaterial(
@@ -473,7 +474,66 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             float maxDepth)
         {
             EnsureEditable();
+            ValidateSimpleMaterial(
+                materialSubtype,
+                maxDepth);
 
+            // Initialize this before checking the requested value so explicit
+            // registration cannot accidentally collide with a value already
+            // present in one of the six source material maps.
+            EnsureUsedMaterialMapValues();
+
+            if (_usedMaterialMapValues[mapValue])
+                return false;
+
+            AppendSimpleMaterial(
+                materialSubtype,
+                mapValue,
+                maxDepth);
+
+            _usedMaterialMapValues[mapValue] =
+                true;
+
+            return true;
+        }
+
+
+        /// <summary>
+        /// Adds a simple voxel material definition using a server-allocated map
+        /// value and returns that value. This is the preferred registration path
+        /// when the caller does not require a specific byte ID.
+        /// </summary>
+        [ApiMethod("AddMaterialSequential")]
+        private byte AddMaterial(
+            string materialSubtype,
+            float maxDepth)
+        {
+            EnsureEditable();
+            ValidateSimpleMaterial(
+                materialSubtype,
+                maxDepth);
+
+            EnsureUsedMaterialMapValues();
+
+            byte mapValue =
+                PlanetMaterialMap.AllocateValue(
+                    _usedMaterialMapValues,
+                    ref _nextMaterialMapCandidate);
+
+            // AllocateValue already marks the chosen byte as used.
+            AppendSimpleMaterial(
+                materialSubtype,
+                mapValue,
+                maxDepth);
+
+            return mapValue;
+        }
+
+
+        private static void ValidateSimpleMaterial(
+            string materialSubtype,
+            float maxDepth)
+        {
             if (string.IsNullOrWhiteSpace(
                 materialSubtype))
             {
@@ -490,17 +550,14 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                     "Material max depth must be a finite non-negative value.",
                     "maxDepth");
             }
-
-            if (PlanetMaterialMap.UsesValue(
-                Builder,
-                mapValue) ||
-                (_usedMaterialMapValues != null &&
-                    _usedMaterialMapValues[mapValue]))
-            {
-                return false;
-            }
+        }
 
 
+        private void AppendSimpleMaterial(
+            string materialSubtype,
+            byte mapValue,
+            float maxDepth)
+        {
             MyPlanetMaterialDefinition[] existing =
                 Builder.CustomMaterialTable;
 
@@ -530,14 +587,6 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
 
             Builder.CustomMaterialTable =
                 output;
-
-            if (_usedMaterialMapValues != null)
-            {
-                _usedMaterialMapValues[mapValue] =
-                    true;
-            }
-
-            return true;
         }
 
 

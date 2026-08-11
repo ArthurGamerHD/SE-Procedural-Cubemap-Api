@@ -5,7 +5,6 @@ using VoxelCubemapApi.Api;
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Utils;
-using VRageMath;
 
 namespace VoxelCubemapExampleMod
 {
@@ -358,22 +357,17 @@ namespace VoxelCubemapExampleMod
                         "TerraformGrassRules",
                         "TerraformGrassSurface");
 
-                // Add the complex material first. Besides allocating the grass
-                // map value, this makes the server account for source-map values
-                // before the two simple materials request free byte slots.
                 byte grassMaterialMapValue =
                     template.AddComplexMaterial(
                         grassRules.MaterialGroup);
 
                 byte rockMaterialMapValue =
-                    AddSimpleMaterialAtFreeMapValue(
-                        template,
+                    template.AddMaterial(
                         "Rocks_grass",
                         5f);
 
                 byte sandMaterialMapValue =
-                    AddSimpleMaterialAtFreeMapValue(
-                        template,
+                    template.AddMaterial(
                         "Sand_02",
                         4f);
 
@@ -441,10 +435,22 @@ namespace VoxelCubemapExampleMod
                     bool useGrassNoise =
                         fractalFillPercent < 100;
 
+                    NoiseProvider noise =
+                        client._api.GetNoiseProvider();
+
+                    if (noise == null)
+                    {
+                        throw new Exception(
+                            "API noise provider is not available.");
+                    }
+
                     double grassNoiseMinimum =
                         useGrassNoise
-                            ? ComputeGrassBrushCoverageThreshold(
+                            ? noise.FractalBrownianMotionCoverage(
                                 planetSeed,
+                                2.15,
+                                4,
+                                0,
                                 fractalFillPercent)
                             : 0.0;
 
@@ -554,500 +560,48 @@ namespace VoxelCubemapExampleMod
             }
         }
 
-
-        private static byte AddSimpleMaterialAtFreeMapValue(
-            ModificationTemplate template,
-            string materialSubtype,
-            float maxDepth)
+        [ChatCommand("water", "vcma")]
+        public static void WaterLevel(int level)
         {
-            for (int candidate = 0;
-                candidate < byte.MaxValue;
-                candidate++)
+            GrassPlanetApiTestClient client = _instance;
+            
+            if (client._api == null)
             {
-                byte mapValue =
-                    (byte)candidate;
+                client.RequestApi();
 
-                if (template.AddMaterial(
-                    materialSubtype,
-                    mapValue,
-                    maxDepth))
+                if (client._api == null)
                 {
-                    return mapValue;
+                    ShowMessage(
+                        "Voxel Cubemap API is not ready.");
+
+                    return;
                 }
             }
-
-            throw new Exception(
-                "No free material-map byte remains for " +
-                materialSubtype +
-                ".");
+            
+            ShowMessage("Water double:" + _instance._api.GetWaterUtil().HeightmapUnitToWaterRadius(0, level));
         }
-
-
-        /// <summary>
-        /// Returns the normalized [0,1] brush threshold corresponding to the
-        /// legacy grass coverage percentile. This intentionally mirrors the
-        /// server's 129x129-per-face percentile sampling so GenerateOcean's
-        /// fractalFillPercent has the same meaning as testgrass coverage.
-        /// </summary>
-        private static double ComputeGrassBrushCoverageThreshold(
-            long planetSeed,
-            int coveragePercent)
+        
+        [ChatCommand("WaterToVoxel", "vcma")]
+        public static void WaterToVoxel(double level)
         {
-            if (coveragePercent <= 0)
-                return 1.0;
-
-            if (coveragePercent >= 100)
-                return 0.0;
-
-
-            const int SampleResolution =
-                129;
-
-            int sampleCount =
-                6 *
-                SampleResolution *
-                SampleResolution;
-
-            var samples =
-                new double[sampleCount];
-
-            int sampleIndex =
-                0;
-
-
-            for (int face = 0;
-                face < 6;
-                face++)
+            GrassPlanetApiTestClient client = _instance;
+            
+            
+            if (client._api == null)
             {
-                for (int y = 0;
-                    y < SampleResolution;
-                    y++)
+                client.RequestApi();
+
+                if (client._api == null)
                 {
-                    for (int x = 0;
-                        x < SampleResolution;
-                        x++)
-                    {
-                        Vector3D direction =
-                            GetCubemapSphereDirection(
-                                face,
-                                x,
-                                y,
-                                SampleResolution,
-                                SampleResolution);
+                    ShowMessage(
+                        "Voxel Cubemap API is not ready.");
 
-                        double raw =
-                            PlanetGrassFbm(
-                                direction,
-                                planetSeed);
-
-                        double normalized =
-                            (raw + 1.0) *
-                            0.5;
-
-                        if (normalized < 0.0)
-                            normalized = 0.0;
-                        else if (normalized > 1.0)
-                            normalized = 1.0;
-
-                        samples[sampleIndex++] =
-                            normalized;
-                    }
+                    return;
                 }
             }
-
-
-            Array.Sort(
-                samples);
-
-            int selectedSampleCount =
-                (sampleCount *
-                    coveragePercent +
-                    99) /
-                100;
-
-            int thresholdIndex =
-                sampleCount -
-                selectedSampleCount;
-
-            if (thresholdIndex < 0)
-                thresholdIndex = 0;
-
-            if (thresholdIndex >= sampleCount)
-                thresholdIndex = sampleCount - 1;
-
-            return samples[
-                thresholdIndex];
+            
+            ShowMessage("Voxel uint16:" + _instance._api.GetWaterUtil().WaterRadiusToHeightmapUnit(0, level));
         }
-
-
-        private static Vector3D GetCubemapSphereDirection(
-            int faceIndex,
-            int x,
-            int y,
-            int width,
-            int height)
-        {
-            double u =
-                width <= 1
-                    ? 0.0
-                    : (2.0 * x /
-                        (width - 1.0)) -
-                        1.0;
-
-            double v =
-                height <= 1
-                    ? 0.0
-                    : (2.0 * y /
-                        (height - 1.0)) -
-                        1.0;
-
-            Vector3D direction;
-
-            switch (faceIndex)
-            {
-                case 0:
-                    direction =
-                        new Vector3D(
-                            u,
-                            -v,
-                            1.0);
-                    break;
-
-                case 1:
-                    direction =
-                        new Vector3D(
-                            -u,
-                            -v,
-                            -1.0);
-                    break;
-
-                case 2:
-                    direction =
-                        new Vector3D(
-                            -1.0,
-                            -v,
-                            u);
-                    break;
-
-                case 3:
-                    direction =
-                        new Vector3D(
-                            1.0,
-                            -v,
-                            -u);
-                    break;
-
-                case 4:
-                    direction =
-                        new Vector3D(
-                            u,
-                            1.0,
-                            v);
-                    break;
-
-                case 5:
-                    direction =
-                        new Vector3D(
-                            -u,
-                            -1.0,
-                            v);
-                    break;
-
-                default:
-                    throw new ArgumentException(
-                        "faceIndex");
-            }
-
-
-            double lengthSquared =
-                direction.X * direction.X +
-                direction.Y * direction.Y +
-                direction.Z * direction.Z;
-
-            double inverseLength =
-                1.0 /
-                Math.Sqrt(
-                    lengthSquared);
-
-            return new Vector3D(
-                direction.X * inverseLength,
-                direction.Y * inverseLength,
-                direction.Z * inverseLength);
-        }
-
-
-        private static double PlanetGrassFbm(
-            Vector3D direction,
-            long planetSeed)
-        {
-            double frequency =
-                2.15;
-
-            double amplitude =
-                1.0;
-
-            double sum =
-                0.0;
-
-            double amplitudeSum =
-                0.0;
-
-
-            for (int octave = 0;
-                octave < 4;
-                octave++)
-            {
-                long octaveSeed =
-                    unchecked(
-                        planetSeed +
-                        octave * 104729L);
-
-                sum +=
-                    ValueNoise3D(
-                        direction.X * frequency,
-                        direction.Y * frequency,
-                        direction.Z * frequency,
-                        octaveSeed) *
-                    amplitude;
-
-                amplitudeSum +=
-                    amplitude;
-
-                frequency *=
-                    2.07;
-
-                amplitude *=
-                    0.5;
-            }
-
-            return sum /
-                amplitudeSum;
-        }
-
-
-        private static double ValueNoise3D(
-            double x,
-            double y,
-            double z,
-            long seed)
-        {
-            int x0 =
-                FastFloor(
-                    x);
-
-            int y0 =
-                FastFloor(
-                    y);
-
-            int z0 =
-                FastFloor(
-                    z);
-
-            int x1 =
-                x0 + 1;
-
-            int y1 =
-                y0 + 1;
-
-            int z1 =
-                z0 + 1;
-
-            double tx =
-                SmoothNoiseFraction(
-                    x - x0);
-
-            double ty =
-                SmoothNoiseFraction(
-                    y - y0);
-
-            double tz =
-                SmoothNoiseFraction(
-                    z - z0);
-
-
-            double n000 =
-                LatticeNoiseValue(
-                    x0,
-                    y0,
-                    z0,
-                    seed);
-
-            double n100 =
-                LatticeNoiseValue(
-                    x1,
-                    y0,
-                    z0,
-                    seed);
-
-            double n010 =
-                LatticeNoiseValue(
-                    x0,
-                    y1,
-                    z0,
-                    seed);
-
-            double n110 =
-                LatticeNoiseValue(
-                    x1,
-                    y1,
-                    z0,
-                    seed);
-
-            double n001 =
-                LatticeNoiseValue(
-                    x0,
-                    y0,
-                    z1,
-                    seed);
-
-            double n101 =
-                LatticeNoiseValue(
-                    x1,
-                    y0,
-                    z1,
-                    seed);
-
-            double n011 =
-                LatticeNoiseValue(
-                    x0,
-                    y1,
-                    z1,
-                    seed);
-
-            double n111 =
-                LatticeNoiseValue(
-                    x1,
-                    y1,
-                    z1,
-                    seed);
-
-
-            double nx00 =
-                LerpNoise(
-                    n000,
-                    n100,
-                    tx);
-
-            double nx10 =
-                LerpNoise(
-                    n010,
-                    n110,
-                    tx);
-
-            double nx01 =
-                LerpNoise(
-                    n001,
-                    n101,
-                    tx);
-
-            double nx11 =
-                LerpNoise(
-                    n011,
-                    n111,
-                    tx);
-
-            double nxy0 =
-                LerpNoise(
-                    nx00,
-                    nx10,
-                    ty);
-
-            double nxy1 =
-                LerpNoise(
-                    nx01,
-                    nx11,
-                    ty);
-
-            return LerpNoise(
-                nxy0,
-                nxy1,
-                tz);
-        }
-
-
-        private static int FastFloor(
-            double value)
-        {
-            int integer =
-                (int)value;
-
-            return value < integer
-                ? integer - 1
-                : integer;
-        }
-
-
-        private static double SmoothNoiseFraction(
-            double value)
-        {
-            return value *
-                value *
-                value *
-                (value *
-                    (value * 6.0 - 15.0) +
-                    10.0);
-        }
-
-
-        private static double LerpNoise(
-            double a,
-            double b,
-            double amount)
-        {
-            return a +
-                (b - a) *
-                amount;
-        }
-
-
-        private static double LatticeNoiseValue(
-            int x,
-            int y,
-            int z,
-            long seed)
-        {
-            uint hash =
-                unchecked(
-                    (uint)seed ^
-                    (uint)(seed >> 32));
-
-            unchecked
-            {
-                hash ^=
-                    (uint)x *
-                    0x9E3779B9u;
-
-                hash ^=
-                    (uint)y *
-                    0x85EBCA6Bu;
-
-                hash ^=
-                    (uint)z *
-                    0xC2B2AE35u;
-
-                hash ^=
-                    hash >> 16;
-
-                hash *=
-                    0x7FEB352Du;
-
-                hash ^=
-                    hash >> 15;
-
-                hash *=
-                    0x846CA68Bu;
-
-                hash ^=
-                    hash >> 16;
-            }
-
-            return
-                ((double)hash /
-                    4294967295.0) *
-                2.0 -
-                1.0;
-        }
-
 
         private static void LogWarning(
             string message,

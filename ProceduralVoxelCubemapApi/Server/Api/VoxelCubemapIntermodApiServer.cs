@@ -16,9 +16,15 @@ namespace VoxelCubemapApi.Server.Api
     {
         private static readonly Version _apiVersion = new Version(0, 0, 6);
         private readonly PlanetModificationCoordinator _coordinator;
+        private readonly ProceduralNoiseProvider _noiseProvider;
+        private readonly WaterUtil _waterUtil;
+
+
         public VoxelCubemapIntermodApiServer(PlanetModificationCoordinator modificationCoordinator)
         {
             _coordinator = modificationCoordinator;
+            _noiseProvider = new ProceduralNoiseProvider();
+            _waterUtil = new WaterUtil();
         }
 
 
@@ -30,6 +36,28 @@ namespace VoxelCubemapApi.Server.Api
         public Dictionary<string, Delegate> GetModificationTemplate(long entityId)
         {
             return _coordinator.CreateModificationTemplateApi(entityId);
+        }
+
+
+        /// <summary>
+        /// Returns the root-level procedural noise provider.
+        /// </summary>
+        [ApiMethod(typeof(ProceduralNoiseProvider))]
+        public Dictionary<string, Delegate> GetNoiseProvider()
+        {
+            return _noiseProvider.GetApi();
+        }
+
+
+
+
+        /// <summary>
+        /// Returns the root-level water/height conversion utility provider.
+        /// </summary>
+        [ApiMethod(typeof(WaterUtil))]
+        public Dictionary<string, Delegate> GetWaterUtil()
+        {
+            return _waterUtil.GetApi();
         }
 
 

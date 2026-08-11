@@ -83,7 +83,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
                         snapshot.FractalNoiseOperations[operationIndex];
 
                     operation.Threshold =
-                        CubemapNoise.ComputeGrassCoverageThreshold(
+                        FractalBrownianMotion.ComputeGrassCoverageThreshold(
                             snapshot.PlanetSeed,
                             operation.CoveragePercent);
                 }

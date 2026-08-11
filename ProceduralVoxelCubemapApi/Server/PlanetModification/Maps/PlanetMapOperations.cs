@@ -96,11 +96,11 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
             if (needsNoise)
             {
                 int faceIndex =
-                    CubemapNoise.GetCubemapFaceIndex(
+                    FractalBrownianMotion.GetCubemapFaceIndex(
                         faceFileName);
 
                 noiseGrid =
-                    CubemapNoise.BuildGrassNoiseGrid(
+                    FractalBrownianMotion.BuildGrassNoiseGrid(
                         faceIndex,
                         planetSeed);
             }
@@ -118,7 +118,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                 {
                     double score =
                         needsNoise
-                            ? CubemapNoise.SampleGrassNoiseGrid(
+                            ? FractalBrownianMotion.SampleGrassNoiseGrid(
                                 noiseGrid,
                                 x,
                                 y,
@@ -199,7 +199,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                 faceFileName);
 
             int faceIndex =
-                CubemapNoise.GetCubemapFaceIndex(
+                FractalBrownianMotion.GetCubemapFaceIndex(
                     faceFileName);
 
             for (int operationIndex = 0;
@@ -219,7 +219,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
 
                 double[] noiseGrid =
                     operation.UseNoise
-                        ? CubemapNoise.BuildBrushNoiseGrid(
+                        ? FractalBrownianMotion.BuildBrushNoiseGrid(
                             faceIndex,
                             planetSeed,
                             operation.NoiseFrequency,
@@ -306,7 +306,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                         }
 
                         double latitude =
-                            CubemapNoise.GetLatitudeDegrees(
+                            FractalBrownianMotion.GetLatitudeDegrees(
                                 faceIndex,
                                 x,
                                 y,
@@ -322,7 +322,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                         if (operation.UseNoise)
                         {
                             double score =
-                                CubemapNoise.SampleBrushNoiseGrid(
+                                FractalBrownianMotion.SampleBrushNoiseGrid(
                                     noiseGrid,
                                     x,
                                     y,

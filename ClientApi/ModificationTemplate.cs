@@ -19,6 +19,7 @@ namespace VoxelCubemapApi.Api
         private readonly Func<byte[]> _getUsedBiomes;
         private readonly Action<string, Action<int, int, byte[], byte[], byte[], byte[]>> _applyPlanetImage;
         private readonly Func<string, byte, float, bool> _addMaterial;
+        private readonly Func<string, float, byte> _addMaterial2;
         private readonly Func<MyPlanetMaterialGroup, byte> _addComplexMaterial;
         private readonly Func<PlanetEnvironmentItemMapping[], int> _addEnvironmentItems;
         private readonly Action<string> _setEnvironmentDefinition;
@@ -76,6 +77,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Func<string, byte, float, bool>>(
                     api,
                     "AddMaterial");
+
+            _addMaterial2 =
+                GetRequired<Func<string, float, byte>>(
+                    api,
+                    "AddMaterialSequential");
 
             _addComplexMaterial =
                 GetRequired<Func<MyPlanetMaterialGroup, byte>>(
@@ -204,6 +210,7 @@ namespace VoxelCubemapApi.Api
 
         /// <summary>
         /// Adds a simple voxel material definition at the requested map value.
+        /// The existing explicit-ID contract is preserved.
         /// </summary>
         public bool AddMaterial(
             string materialSubtype,
@@ -211,6 +218,19 @@ namespace VoxelCubemapApi.Api
             float maxDepth)
         {
             return _addMaterial(materialSubtype, mapValue, maxDepth);
+        }
+
+
+        /// <summary>
+        /// Adds a simple voxel material definition using a server-allocated map
+        /// value and returns that value. This is the preferred registration path
+        /// when the caller does not require a specific byte ID.
+        /// </summary>
+        public byte AddMaterial(
+            string materialSubtype,
+            float maxDepth)
+        {
+            return _addMaterial2(materialSubtype, maxDepth);
         }
 
 

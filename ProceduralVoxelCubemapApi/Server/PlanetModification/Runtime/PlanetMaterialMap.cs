@@ -53,7 +53,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
             if (nextCandidate >= 255)
             {
                 throw new Exception(
-                    "No free material-map byte remains for Grass overlay values.");
+                    "No free material-map byte remains for API material allocation.");
             }
 
 

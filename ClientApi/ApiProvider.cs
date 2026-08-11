@@ -10,6 +10,8 @@ namespace VoxelCubemapApi.Api
     public sealed class ApiProvider
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
+        private readonly Func<ApiData> _getNoiseProvider;
+        private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<Version> _getApiVersion;
 
 
@@ -23,6 +25,16 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Func<long, ApiData>>(
                     api,
                     "GetModificationTemplate");
+
+            _getNoiseProvider =
+                GetRequired<Func<ApiData>>(
+                    api,
+                    "GetNoiseProvider");
+
+            _getWaterUtil =
+                GetRequired<Func<ApiData>>(
+                    api,
+                    "GetWaterUtil");
 
             _getApiVersion =
                 GetRequired<Func<Version>>(
@@ -44,6 +56,34 @@ namespace VoxelCubemapApi.Api
             return nestedApi == null
                 ? null
                 : new ModificationTemplate(nestedApi);
+        }
+
+
+        /// <summary>
+        /// Returns the root-level procedural noise provider.
+        /// </summary>
+        public NoiseProvider GetNoiseProvider()
+        {
+            ApiData nestedApi =
+                _getNoiseProvider();
+
+            return nestedApi == null
+                ? null
+                : new NoiseProvider(nestedApi);
+        }
+
+
+        /// <summary>
+        /// Returns the root-level water/height conversion utility provider.
+        /// </summary>
+        public WaterUtil GetWaterUtil()
+        {
+            ApiData nestedApi =
+                _getWaterUtil();
+
+            return nestedApi == null
+                ? null
+                : new WaterUtil(nestedApi);
         }
 
 
