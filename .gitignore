@@ -10,3 +10,7 @@
 *.zip
 *.local.sh
 SpaceEngineers
+run-se1-unattended.sh
+verified-deploy.sh
+/WorkflowLauncher
+/ProceduralVoxelCubemapAutoTestMod

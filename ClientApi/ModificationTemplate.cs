@@ -23,6 +23,7 @@ namespace VoxelCubemapApi.Api
         private readonly Func<MyPlanetMaterialGroup, byte> _addComplexMaterial;
         private readonly Func<PlanetEnvironmentItemMapping[], int> _addEnvironmentItems;
         private readonly Action<string> _setEnvironmentDefinition;
+        private readonly Action<string> _setEnvironmentPreset;
         private readonly Action<byte, int> _applyFractalNoise;
         private readonly Action<byte, byte> _replaceBiome;
         private readonly Action<byte, int> _applyBiomeFractalNoise;
@@ -97,6 +98,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Action<string>>(
                     api,
                     "SetEnvironmentDefinition");
+
+            _setEnvironmentPreset =
+                GetRequired<Action<string>>(
+                    api,
+                    "SetEnvironmentPreset");
 
             _applyFractalNoise =
                 GetRequired<Action<byte, int>>(
@@ -264,6 +270,18 @@ namespace VoxelCubemapApi.Api
             string carrierPlanetGeneratorSubtype)
         {
             _setEnvironmentDefinition(carrierPlanetGeneratorSubtype);
+        }
+
+
+        /// <summary>
+        /// Selects and later remaps a vegetation/environment preset from the
+        /// loaded planet definition library. The last explicit/preset setter
+        /// wins.
+        /// </summary>
+        public void SetEnvironmentPreset(
+            string presetName)
+        {
+            _setEnvironmentPreset(presetName);
         }
 
 

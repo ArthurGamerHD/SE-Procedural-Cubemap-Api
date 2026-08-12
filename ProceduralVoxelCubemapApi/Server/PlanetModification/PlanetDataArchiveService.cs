@@ -570,6 +570,39 @@ namespace VoxelCubemapApi.Server.PlanetModification
         }
 
 
+        internal void ReplaceRuntimeArchive(
+            string archiveFileName,
+            Dictionary<string, byte[]> files)
+        {
+            if (string.IsNullOrWhiteSpace(archiveFileName))
+                throw new ArgumentException(
+                    "Runtime archive file name cannot be empty.",
+                    "archiveFileName");
+
+            if (files == null ||
+                files.Count == 0)
+            {
+                throw new ArgumentException(
+                    "Runtime archive replacement contains no files.",
+                    "files");
+            }
+
+            List<MinimalZip.Entry> entries =
+                files
+                    .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(x =>
+                        new MinimalZip.Entry(
+                            x.Key,
+                            x.Value,
+                            MinimalZip.CompressionMode.Deflate))
+                    .ToList();
+
+            _runtimePackages.SaveRuntimeArchive(
+                archiveFileName,
+                MinimalZip.WriteBytes(entries));
+        }
+
+
         private byte[] ReadSnapshotPlanetDataFile(
             PlanetModificationSnapshot snapshot,
             Dictionary<string, byte[]> runtimeSourceFiles,

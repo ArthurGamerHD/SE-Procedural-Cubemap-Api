@@ -11,6 +11,7 @@ using VoxelCubemapApi.Server.PlanetModification.Persistence;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
 using VoxelCubemapApi.Server.PlanetModification.World;
+using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
 
 using VRage.Game;
 using VRage.Game.ObjectBuilders.Definitions;
@@ -48,6 +49,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
         private readonly PlanetDataArchiveService _planetDataArchives;
         private readonly RuntimeGeneratorRegistry _runtimeGenerators;
         private readonly PlanetStorageService _planetStorage;
+        private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private readonly Func<bool> _isUnloading;
 
         private readonly Dictionary<long, List<Action<long, string>>>
@@ -66,6 +68,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
             PlanetDataArchiveService planetDataArchives,
             RuntimeGeneratorRegistry runtimeGenerators,
             PlanetStorageService planetStorage,
+            EnvironmentPresetCatalog environmentPresetCatalog,
             Func<bool> isUnloading)
         {
             if (runtimePackages == null)
@@ -79,6 +82,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
             if (planetStorage == null)
                 throw new ArgumentNullException("planetStorage");
+
+            if (environmentPresetCatalog == null)
+                throw new ArgumentNullException("environmentPresetCatalog");
 
             if (isUnloading == null)
                 throw new ArgumentNullException("isUnloading");
@@ -95,15 +101,15 @@ namespace VoxelCubemapApi.Server.PlanetModification
             _planetStorage =
                 planetStorage;
 
+            _environmentPresetCatalog =
+                environmentPresetCatalog;
+
             _isUnloading =
                 isUnloading;
         }
 
 
-        internal bool RequestInProgress
-        {
-            get { return _requestInProgress; }
-        }
+        internal bool RequestInProgress => _requestInProgress;
 
 
         internal ApiData CreateModificationTemplateApi(long planetEntityId)
@@ -208,7 +214,8 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     builder,
                     currentRuntimeEntry == null
                         ? null
-                        : currentRuntimeEntry.EnvironmentCarrierSubtype);
+                        : currentRuntimeEntry.EnvironmentCarrierSubtype,
+                    _environmentPresetCatalog);
 
 
             MyLog.Default.WriteLineAndConsole(
@@ -345,7 +352,6 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 packageStem +
                 GenericGeneratorFileSuffix;
 
-
             snapshot.Builder.Id =
                 new SerializableDefinitionId(
                     typeof(MyObjectBuilder_PlanetGeneratorDefinition),
@@ -362,6 +368,11 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     SourceSubtype = snapshot.SourceSubtype,
                     SourceEntityId = snapshot.TargetPlanet.EntityId,
                     EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
+                    EnvironmentPresetName = snapshot.EnvironmentPresetName,
+                    EnvironmentPresetSchemaVersion =
+                        string.IsNullOrWhiteSpace(snapshot.EnvironmentPresetName)
+                            ? 0
+                            : 1,
                     GeneratorFile = generatorFile,
                     ArchiveFile = archiveFile,
                     GrassMaterialValue = 0,
@@ -377,6 +388,66 @@ namespace VoxelCubemapApi.Server.PlanetModification
             _planetDataArchives.CreateModifiedArchive(
                 snapshot,
                 archiveFile);
+
+
+            if (!string.IsNullOrWhiteSpace(
+                snapshot.EnvironmentPresetName))
+            {
+                EnvironmentPresetSnapshot preset =
+                    _environmentPresetCatalog.Resolve(
+                        snapshot.EnvironmentPresetName);
+
+                EnvironmentPresetTargetMap targetMap =
+                    EnvironmentPresetTargetMap.Build(
+                        snapshot.Builder,
+                        _planetDataArchives.ReadRuntimeArchive(
+                            archiveFile));
+
+                RemappedEnvironmentPreset remapped =
+                    EnvironmentPresetRemapper.Remap(
+                        preset,
+                        targetMap);
+
+                Dictionary<string, byte[]> archiveFiles =
+                    _planetDataArchives.ReadRuntimeArchive(
+                        archiveFile);
+
+                int changedBiomePixels =
+                    EnvironmentPresetBiomeRemapper.Apply(
+                        preset,
+                        remapped,
+                        targetMap,
+                        archiveFiles,
+                        snapshot.PlanetSeed);
+
+                _planetDataArchives.ReplaceRuntimeArchive(
+                    archiveFile,
+                    archiveFiles);
+
+                MyPlanetGeneratorDefinition presetCarrier =
+                    RuntimeEnvironmentFactory.ResolveCarrier(
+                        preset);
+
+                snapshot.EnvironmentCarrierSubtype =
+                    presetCarrier.Id.SubtypeName;
+
+                pendingEntry.EnvironmentCarrierSubtype =
+                    presetCarrier.Id.SubtypeName;
+
+                pendingEntry.EnvironmentPresetSourceGeneratorSubtype =
+                    preset.SourceGeneratorSubtype;
+
+                LogEnvironmentPresetReport(
+                    preset,
+                    remapped,
+                    changedBiomePixels);
+
+                PlanetEnvironmentService.EnsureBiomeMapEnabled(
+                    snapshot.Builder);
+
+                snapshot.Builder.EnvironmentItems =
+                    null;
+            }
 
             _runtimePackages.SaveGeneratorBuilder(
                 generatorFile,
@@ -401,7 +472,6 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 runtimeGenerator,
                 snapshot.EnvironmentCarrierSubtype);
 
-
             _runtimePackages.Generators[
                 runtimeSubtype] =
                 runtimeGenerator;
@@ -421,6 +491,40 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 pendingEntry;
 
             return result;
+        }
+
+
+        private static void LogEnvironmentPresetReport(
+            EnvironmentPresetSnapshot preset,
+            RemappedEnvironmentPreset remapped,
+            int changedBiomePixels)
+        {
+            MyLog.Default.WriteLineAndConsole(
+                "[Voxel Cubemap API] Environment preset '" +
+                preset.Name +
+                "': source='" +
+                preset.SourceGeneratorSubtype +
+                "', source mappings=" +
+                preset.Mappings.Length +
+                ", emitted mappings=" +
+                remapped.Mappings.Count +
+                ", matched materials=[" +
+                string.Join(", ", remapped.MatchedMaterials.ToArray()) +
+                "], missing target materials=[" +
+                string.Join(", ", remapped.MissingTargetMaterials.ToArray()) +
+                "], missing definitions=[" +
+                string.Join(", ", remapped.MissingDefinitions.ToArray()) +
+                "], remapped biome pixels=" +
+                changedBiomePixels +
+                ", emitted biome distribution=[" +
+                string.Join(
+                    ", ",
+                    remapped.EmittedBiomePixels
+                        .OrderBy(x => x.Key)
+                        .Select(x => x.Key + "=" + x.Value)
+                        .ToArray()) +
+                "]" +
+                ".");
         }
 
 

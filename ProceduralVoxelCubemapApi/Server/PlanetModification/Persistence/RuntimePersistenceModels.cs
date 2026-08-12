@@ -36,6 +36,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         public string SourceSubtype;
         public long SourceEntityId;
         public string EnvironmentCarrierSubtype;
+        public string EnvironmentPresetName;
+        public string EnvironmentPresetSourceGeneratorSubtype;
+        public int EnvironmentPresetSchemaVersion;
         public string GeneratorFile;
         public string ArchiveFile;
         public byte GrassMaterialValue;
@@ -43,6 +46,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         public long PlanetSeed;
         public int GrassNoiseVersion;
     }
+
+
 
 
 }

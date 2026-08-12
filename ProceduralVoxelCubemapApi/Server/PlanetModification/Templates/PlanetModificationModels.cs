@@ -75,6 +75,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public List<BrushOperation> BrushOperations;
         public List<byte> AllocatedComplexMaterialValues;
         public string EnvironmentCarrierSubtype;
+        public string EnvironmentPresetName;
     }
 
 

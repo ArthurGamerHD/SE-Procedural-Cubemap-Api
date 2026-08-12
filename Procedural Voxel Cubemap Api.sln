@@ -9,6 +9,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Procedural Voxel Cubemap Ex
 		{3FA8ABF2-88BE-4B93-B03A-68A293672618} = {3FA8ABF2-88BE-4B93-B03A-68A293672618}
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Procedural Voxel Cubemap Auto-Test Mod", "ProceduralVoxelCubemapAutoTestMod\ProceduralVoxelCubemapAutoTestMod.csproj", "{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}"
+	ProjectSection(ProjectDependencies) = postProject
+		{3FA8ABF2-88BE-4B93-B03A-68A293672618} = {3FA8ABF2-88BE-4B93-B03A-68A293672618}
+	EndProjectSection
+EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "ClientApi", "ClientApi\ClientApi.shproj", "{53E94834-790B-4B11-BA55-10BB857884E5}"
 EndProject
 Global
@@ -29,11 +34,16 @@ Global
 		{839CD095-3B3B-422B-B376-C37553564656}.Debug|x64.Build.0 = Debug|x64
 		{839CD095-3B3B-422B-B376-C37553564656}.Release|x64.ActiveCfg = Release|x64
 		{839CD095-3B3B-422B-B376-C37553564656}.Release|x64.Build.0 = Release|x64
+		{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}.Debug|x64.ActiveCfg = Debug|x64
+		{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}.Debug|x64.Build.0 = Debug|x64
+		{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}.Release|x64.ActiveCfg = Release|x64
+		{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}.Release|x64.Build.0 = Release|x64
 		{53E94834-790B-4B11-BA55-10BB857884E5}.Debug|x64.ActiveCfg = Debug|x64
 		{53E94834-790B-4B11-BA55-10BB857884E5}.Release|x64.ActiveCfg = Release|x64
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		ClientApi\ClientApi.projitems*{839cd095-3b3b-422b-b376-c37553564656}*SharedItemsImports = 4
+		ClientApi\ClientApi.projitems*{75d3d1f0-fe32-48b8-b5ba-f9dccb0761a8}*SharedItemsImports = 4
 		ClientApi\ClientApi.projitems*{53e94834-790b-4b11-ba55-10bb857884e5}*SharedItemsImports = 13
 	EndGlobalSection
 EndGlobal

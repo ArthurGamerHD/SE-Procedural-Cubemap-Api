@@ -1790,9 +1790,11 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                     entry.GrassNoiseVersion > 0);
 
 
-            return PlanetEnvironmentService.BindRuntimeGenerator(
+            PlanetEnvironmentService.BindRuntimeGenerator(
                 runtimeGenerator,
                 entry.EnvironmentCarrierSubtype);
+
+            return runtimeGenerator;
         }
 
 

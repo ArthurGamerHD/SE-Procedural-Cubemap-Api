@@ -11,6 +11,7 @@ using VoxelCubemapApi.Server.PlanetModification;
 using VoxelCubemapApi.Server.PlanetModification.Persistence;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.World;
+using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
 
 using VRage.Game;
 using VRage.Game.Components;
@@ -32,6 +33,7 @@ namespace VoxelCubemapApi.Server
         private PlanetModificationCoordinator _modifications;
         private RuntimeGeneratorRegistry _runtimeGenerators;
         private PlanetStorageService _planetStorage;
+        private EnvironmentPresetCatalog _environmentPresets;
 
         private readonly VegetationClearScheduler _vegetationClearScheduler =
             new VegetationClearScheduler();
@@ -111,12 +113,17 @@ namespace VoxelCubemapApi.Server
                     _runtimePackages,
                     _planetStorage);
 
+            _environmentPresets =
+                new EnvironmentPresetCatalog(
+                    _runtimeGenerators);
+
             _modifications =
                 new PlanetModificationCoordinator(
                     _runtimePackages,
                     _planetDataArchives,
                     _runtimeGenerators,
                     _planetStorage,
+                    _environmentPresets,
                     delegate { return _unloading; });
 
             _runtimePackages.LoadPersistedRuntimeGenerators();
@@ -126,7 +133,8 @@ namespace VoxelCubemapApi.Server
 
             _intermodApi =
                 new VoxelCubemapIntermodApiServer(
-                    _modifications);
+                    _modifications,
+                    _environmentPresets);
 
             RegisterApiManager();
         }

@@ -76,6 +76,46 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
         }
 
 
+        internal static MyPlanetGeneratorDefinition ResolveEnvironmentGenerator(
+            string generatorSubtype)
+        {
+            if (string.IsNullOrWhiteSpace(generatorSubtype))
+            {
+                throw new ArgumentException(
+                    "Environment generator subtype cannot be empty.",
+                    "generatorSubtype");
+            }
+
+            MyPlanetGeneratorDefinition generator =
+                MyDefinitionManager.Static
+                    .GetPlanetsGeneratorsDefinitions()
+                    .FirstOrDefault(x =>
+                        x != null &&
+                        string.Equals(
+                            x.Id.SubtypeName,
+                            generatorSubtype,
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (generator == null)
+            {
+                throw new Exception(
+                    "Environment planet generator '" +
+                    generatorSubtype +
+                    "' is not registered.");
+            }
+
+            if (generator.EnvironmentDefinition == null)
+            {
+                throw new Exception(
+                    "Environment planet generator '" +
+                    generatorSubtype +
+                    "' has no resolved environment definition.");
+            }
+
+            return generator;
+        }
+
+
         internal static bool TryGetComponentByInstanceTypeName(
             MyPlanet planet,
             string instanceTypeFullName,
@@ -163,7 +203,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
 
 
             MyPlanetGeneratorDefinition carrier =
-                ResolveCarrierGenerator(
+                ResolveEnvironmentGenerator(
                     environmentCarrierSubtype);
 
             // Runtime planet definitions are registered after Keen's global

@@ -30,20 +30,11 @@ namespace VoxelCubemapApi.Server.Api
         private bool _closed;
 
 
-        internal long PlanetEntityId
-        {
-            get { return _snapshot.PlanetEntityId; }
-        }
+        internal long PlanetEntityId => _snapshot.PlanetEntityId;
 
-        internal string ProviderSubtype
-        {
-            get { return _snapshot.ProviderSubtype; }
-        }
+        internal string ProviderSubtype => _snapshot.ProviderSubtype;
 
-        internal PlanetMetadataSnapshot Snapshot
-        {
-            get { return _snapshot; }
-        }
+        internal PlanetMetadataSnapshot Snapshot => _snapshot;
 
 
         internal PlanetMetadataProvider(

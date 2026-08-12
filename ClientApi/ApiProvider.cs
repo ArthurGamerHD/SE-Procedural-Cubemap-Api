@@ -13,6 +13,7 @@ namespace VoxelCubemapApi.Api
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
+        private readonly Func<ApiData> _getEnvironmentPresets;
         private readonly Func<Version> _getApiVersion;
 
 
@@ -41,6 +42,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Func<ApiData>>(
                     api,
                     "GetWaterUtil");
+
+            _getEnvironmentPresets =
+                GetRequired<Func<ApiData>>(
+                    api,
+                    "GetEnvironmentPresets");
 
             _getApiVersion =
                 GetRequired<Func<Version>>(
@@ -107,6 +113,21 @@ namespace VoxelCubemapApi.Api
             return nestedApi == null
                 ? null
                 : new WaterUtil(nestedApi);
+        }
+
+
+        /// <summary>
+        /// Returns the catalog of vegetation/environment presets discovered
+        /// from all loaded compatible planet definitions.
+        /// </summary>
+        public EnvironmentPresetProvider GetEnvironmentPresets()
+        {
+            ApiData nestedApi =
+                _getEnvironmentPresets();
+
+            return nestedApi == null
+                ? null
+                : new EnvironmentPresetProvider(nestedApi);
         }
 
 

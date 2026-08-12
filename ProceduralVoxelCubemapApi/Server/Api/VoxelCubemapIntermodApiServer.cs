@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Generated;
 using VoxelCubemapApi.Server.PlanetModification;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
+using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
 
 namespace VoxelCubemapApi.Server.Api
 {
@@ -14,17 +15,26 @@ namespace VoxelCubemapApi.Server.Api
         ClientName = "ApiProvider")]
     internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version _apiVersion = new Version(0, 0, 7);
+        private static readonly Version _apiVersion = new Version(0, 0, 8);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
+        private readonly EnvironmentPresetProvider _environmentPresetProvider;
 
 
-        public VoxelCubemapIntermodApiServer(PlanetModificationCoordinator modificationCoordinator)
+        public VoxelCubemapIntermodApiServer(
+            PlanetModificationCoordinator modificationCoordinator,
+            EnvironmentPresetCatalog environmentPresetCatalog)
         {
+            if (environmentPresetCatalog == null)
+                throw new ArgumentNullException("environmentPresetCatalog");
+
             _coordinator = modificationCoordinator;
             _noiseProvider = new ProceduralNoiseProvider();
             _waterUtil = new WaterUtil();
+            _environmentPresetProvider =
+                new EnvironmentPresetProvider(
+                    environmentPresetCatalog);
         }
 
 
@@ -69,6 +79,17 @@ namespace VoxelCubemapApi.Server.Api
         public Dictionary<string, Delegate> GetWaterUtil()
         {
             return _waterUtil.GetApi();
+        }
+
+
+        /// <summary>
+        /// Returns the catalog of vegetation/environment presets discovered
+        /// from all loaded compatible planet definitions.
+        /// </summary>
+        [ApiMethod(typeof(EnvironmentPresetProvider))]
+        public Dictionary<string, Delegate> GetEnvironmentPresets()
+        {
+            return _environmentPresetProvider.GetApi();
         }
 
 

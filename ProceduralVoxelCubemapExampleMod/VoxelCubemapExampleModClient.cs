@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using Generated;
 using Sandbox.ModAPI;
 using VoxelCubemapApi.Api;
@@ -13,15 +14,15 @@ namespace VoxelCubemapExampleMod
     /// implementation is called directly from this component.
     /// </summary>
     [MySessionComponentDescriptor(MyUpdateOrder.NoUpdate)]
-    internal sealed class GrassPlanetApiTestClient : MySessionComponentBase
+    internal sealed class VoxelCubemapExampleModClient : MySessionComponentBase
     {
         private const long ReplyChannel =
             0x5643584150490002L;
 
-        private static readonly Version _clientApiVersion =
-            new Version(0, 0, 7);
+        private static readonly Version ClientApiVersion =
+            new Version(0, 0, 8);
 
-        private static GrassPlanetApiTestClient _instance;
+        private static VoxelCubemapExampleModClient _instance;
 
         private ApiProvider _api;
 
@@ -69,12 +70,12 @@ namespace VoxelCubemapExampleMod
                     api.GetApiVersion();
 
                 if (serverVersion == null ||
-                    !_clientApiVersion.Equals(
+                    !ClientApiVersion.Equals(
                         serverVersion))
                 {
                     throw new Exception(
                         "API version mismatch. Client=" +
-                        _clientApiVersion +
+                        ClientApiVersion +
                         ", server=" +
                         serverVersion +
                         ".");
@@ -101,13 +102,13 @@ namespace VoxelCubemapExampleMod
         public static void ApplyGrassPlanet(
             int grassCoveragePercent = 100)
         {
-            GrassPlanetApiTestClient client =
+            VoxelCubemapExampleModClient client =
                 _instance;
 
             if (client == null)
             {
                 ShowMessage(
-                    "Grass API client is not initialized.");
+                    "VCM API client is not initialized.");
 
                 return;
             }
@@ -229,7 +230,7 @@ namespace VoxelCubemapExampleMod
                     "VoxelCubemapGrassEnvironmentCarrier");
 
                 MyLog.Default.WriteLineAndConsole(
-                    "[Grass API Test Client] Random biome fractals: " +
+                    "[VCM API Test Client] Random biome fractals: " +
                     forestBiomes[0] +
                     "=" +
                     grassCoveragePercent +
@@ -281,6 +282,88 @@ namespace VoxelCubemapExampleMod
 
 
         /// <summary>
+        /// Applies environment from a loaded vanilla/modded planet definition
+        /// </summary>
+        [ChatCommand("applyenvironment", "vcma")]
+        public static void ApplyEnvironmentPreset(string presetName = "EarthLike")
+        {
+            VoxelCubemapExampleModClient client =
+                _instance;
+
+            if (client == null)
+            {
+                ShowMessage(
+                    "VCM API client is not initialized.");
+
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage(
+                        "Voxel Cubemap API is not ready.");
+
+                    return;
+                }
+            }
+
+            client.BeginEnvironmentPreset(
+                presetName,
+                delegate(bool success, string message)
+                {
+                    ShowMessage(
+                        string.IsNullOrWhiteSpace(message)
+                            ? success
+                                ? "Environment preset applied."
+                                : "Environment preset failed."
+                            : message);
+                },
+                true);
+        }
+
+        /// <summary>
+        /// Lists available environment presets.
+        /// </summary>
+        [ChatCommand("listenvironment", "vcma")]
+        public static void ListEnvironmentPreset(string presetName = "")
+        {
+            VoxelCubemapExampleModClient client =
+                _instance;
+
+            if (client == null)
+            {
+                ShowMessage(
+                    "VCM API client is not initialized.");
+
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage(
+                        "Voxel Cubemap API is not ready.");
+
+                    return;
+                }
+            }
+            
+            var names = client._api.GetEnvironmentPresets().GetPresetNames();
+
+            var sb = new StringBuilder("Found presets: ");
+            foreach (var name in names) sb.Append(name+", ");
+
+            ShowMessage(sb.ToString().TrimEnd(',', ' '));
+        }
+
+        /// <summary>
         /// Creates an ocean-style material transition around a caller-selected
         /// 16-bit height sample. Terrain at/below the height is Rocks_grass;
         /// terrain above it receives the same seamless fBm family used by the
@@ -292,13 +375,13 @@ namespace VoxelCubemapExampleMod
             int oceanHeight = 32768,
             int fractalFillPercent = 100)
         {
-            GrassPlanetApiTestClient client =
+            VoxelCubemapExampleModClient client =
                 _instance;
 
             if (client == null)
             {
                 ShowMessage(
-                    "Grass API client is not initialized.");
+                    "VCM API client is not initialized.");
 
                 return;
             }
@@ -375,37 +458,37 @@ namespace VoxelCubemapExampleMod
                 long planetSeed =
                     template.GetPlanetSeed();
 
-                const double GrassNoiseFrequency =
+                const double grassNoiseFrequency =
                     2.15;
 
-                const int GrassNoiseOctaves =
+                const int grassNoiseOctaves =
                     4;
 
-                const int SandBandHalfWidth =
+                const int sandBandHalfWidth =
                     1024;
 
-                const int SandCoreHalfWidth =
+                const int sandCoreHalfWidth =
                     384;
 
                 int sandMinimumAltitude =
                     Math.Max(
                         0,
-                        oceanHeight - SandBandHalfWidth);
+                        oceanHeight - sandBandHalfWidth);
 
                 int sandMaximumAltitude =
                     Math.Min(
                         ushort.MaxValue,
-                        oceanHeight + SandBandHalfWidth);
+                        oceanHeight + sandBandHalfWidth);
 
                 int sandCoreMinimumAltitude =
                     Math.Max(
                         0,
-                        oceanHeight - SandCoreHalfWidth);
+                        oceanHeight - sandCoreHalfWidth);
 
                 int sandCoreMaximumAltitude =
                     Math.Min(
                         ushort.MaxValue,
-                        oceanHeight + SandCoreHalfWidth);
+                        oceanHeight + sandCoreHalfWidth);
 
 
                 // Seabed / terrain below the requested waterline.
@@ -458,8 +541,8 @@ namespace VoxelCubemapExampleMod
                         "Material",
                         grassMaterialMapValue,
                         useGrassNoise,
-                        GrassNoiseFrequency,
-                        GrassNoiseOctaves,
+                        grassNoiseFrequency,
+                        grassNoiseOctaves,
                         0,
                         grassNoiseMinimum,
                         1.0,
@@ -512,7 +595,7 @@ namespace VoxelCubemapExampleMod
                     "VoxelCubemapGrassEnvironmentCarrier");
 
                 MyLog.Default.WriteLineAndConsole(
-                    "[Grass API Test Client] GenerateOcean: height=" +
+                    "[VCM API Test Client] GenerateOcean: height=" +
                     oceanHeight +
                     ", grass fractal fill=" +
                     fractalFillPercent +
@@ -563,7 +646,7 @@ namespace VoxelCubemapExampleMod
         [ChatCommand("water", "vcma")]
         public static void WaterLevel(int level)
         {
-            GrassPlanetApiTestClient client = _instance;
+            VoxelCubemapExampleModClient client = _instance;
             
             if (client._api == null)
             {
@@ -584,7 +667,7 @@ namespace VoxelCubemapExampleMod
         [ChatCommand("WaterToVoxel", "vcma")]
         public static void WaterToVoxel(double level)
         {
-            GrassPlanetApiTestClient client = _instance;
+            VoxelCubemapExampleModClient client = _instance;
             
             
             if (client._api == null)
@@ -603,12 +686,92 @@ namespace VoxelCubemapExampleMod
             ShowMessage("Voxel uint16:" + _instance._api.GetWaterUtil().WaterRadiusToHeightmapUnit(0, level));
         }
 
+
+        private void BeginEnvironmentPreset(
+            string presetName,
+            Action<bool, string> completed,
+            bool logFailure)
+        {
+            ModificationTemplate template =
+                null;
+
+            try
+            {
+                EnvironmentPresetProvider presets =
+                    _api.GetEnvironmentPresets();
+
+                if (presets == null)
+                {
+                    throw new Exception(
+                        "Environment preset provider is unavailable.");
+                }
+
+                if (!presets.HasPreset(presetName))
+                {
+                    throw new Exception(
+                        "Environment preset '" +
+                        presetName +
+                        "' is unavailable. Loaded presets: " +
+                        string.Join(", ", presets.GetPresetNames()));
+                }
+
+                template =
+                    _api.GetModificationTemplate(
+                        0);
+
+                if (template == null)
+                {
+                    throw new Exception(
+                        "Could not create a template for the nearest planet.");
+                }
+
+                template.SetEnvironmentPreset(
+                    presetName);
+
+                ModificationTemplate pushedTemplate =
+                    template;
+
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+
+                        if (completed != null)
+                        {
+                            completed(
+                                success,
+                                message);
+                        }
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                if (logFailure)
+                {
+                    LogWarning(
+                        "Environment preset failed",
+                        e);
+                }
+
+                if (completed != null)
+                {
+                    completed(
+                        false,
+                        e.Message);
+                }
+            }
+        }
+
+
         private static void LogWarning(
             string message,
             Exception e)
         {
             MyLog.Default.WriteLineAndConsole(
-                "[Grass API Test Client] " +
+                "[VCM API Test Client] " +
                 message +
                 ": " +
                 e);

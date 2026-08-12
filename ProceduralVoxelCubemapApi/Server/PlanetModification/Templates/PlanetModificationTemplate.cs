@@ -7,6 +7,7 @@ using Sandbox.Game.Entities;
 using Generated;
 using VoxelCubemapApi.Server.PlanetModification.Maps;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
+using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
 using VRage.Game;
 using VRage.ObjectBuilders;
 using VRage.Utils;
@@ -53,7 +54,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         private readonly List<byte> _allocatedComplexMaterialValues =
             new List<byte>();
 
+        private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private string _environmentCarrierSubtype;
+        private string _environmentPresetName;
 
         private bool _closed;
         private bool _pushStarted;
@@ -81,7 +84,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             string currentProviderSubtype,
             long planetSeed,
             MyObjectBuilder_PlanetGeneratorDefinition builder,
-            string environmentCarrierSubtype)
+            string environmentCarrierSubtype,
+            EnvironmentPresetCatalog environmentPresetCatalog)
         {
             if (coordinator == null)
                 throw new ArgumentNullException("coordinator");
@@ -89,11 +93,17 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             if (planetDataArchives == null)
                 throw new ArgumentNullException("planetDataArchives");
 
+            if (environmentPresetCatalog == null)
+                throw new ArgumentNullException("environmentPresetCatalog");
+
             _coordinator =
                 coordinator;
 
             _planetDataArchives =
                 planetDataArchives;
+
+            _environmentPresetCatalog =
+                environmentPresetCatalog;
 
             TargetPlanet =
                 targetPlanet;
@@ -274,7 +284,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushOperations,
                 AllocatedComplexMaterialValues = allocatedComplexValues,
-                EnvironmentCarrierSubtype = _environmentCarrierSubtype
+                EnvironmentCarrierSubtype = _environmentCarrierSubtype,
+                EnvironmentPresetName = _environmentPresetName
             };
         }
 
@@ -678,11 +689,13 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             EnsureEditable();
 
             if (!string.IsNullOrWhiteSpace(
-                _environmentCarrierSubtype))
+                _environmentCarrierSubtype) ||
+                !string.IsNullOrWhiteSpace(_environmentPresetName))
             {
                 throw new Exception(
-                    "This template already selected an explicit " +
-                    "WorldEnvironmentDefinition carrier.");
+                    "This template already uses an explicit or preset " +
+                    "WorldEnvironmentDefinition. Legacy EnvironmentItems " +
+                    "cannot be appended to it.");
             }
 
             if (mappings == null ||
@@ -797,6 +810,41 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
 
             _environmentCarrierSubtype =
                 carrier.Id.SubtypeName;
+
+            _environmentPresetName =
+                null;
+
+        }
+
+
+        /// <summary>
+        /// Selects and later remaps a vegetation/environment preset from the
+        /// loaded planet definition library. The last explicit/preset setter
+        /// wins.
+        /// </summary>
+        [ApiMethod]
+        private void SetEnvironmentPreset(
+            string presetName)
+        {
+            EnsureEditable();
+
+            EnvironmentPresetSnapshot preset =
+                _environmentPresetCatalog.Resolve(
+                    presetName);
+
+            EnsureBiomePlanetMapEnabled();
+
+            _environmentPresetName =
+                preset.Name;
+
+            _environmentCarrierSubtype =
+                null;
+
+            Builder.Environment =
+                null;
+
+            Builder.EnvironmentItems =
+                null;
         }
 
 
