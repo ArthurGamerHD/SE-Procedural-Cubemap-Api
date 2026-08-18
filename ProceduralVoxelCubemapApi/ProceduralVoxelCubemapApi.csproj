@@ -34,7 +34,7 @@
     <AdditionalFiles Include="Content\*\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </AdditionalFiles>
-    <AdditionalFiles Include="thumb.png" Condition="Exists('thumb.png')">
+    <AdditionalFiles Include="thumb.jpg" Condition="Exists('thumb.jpg')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </AdditionalFiles>
     <AdditionalFiles Remove="Content\*\**\*.cs" />
@@ -42,6 +42,17 @@
     <AdditionalFiles Remove="Content\Data\SBC files can go here" />
     <None Remove="thumb.png" />
   </ItemGroup>
+
+  <Target Name="Mapjpgtopng" BeforeTargets="PostBuildEvent">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\thumb.jpg"
+          DestinationFiles="$(MSBuildProjectDirectory)\thumb.png"
+          SkipUnchangedFiles="true"/>
+  </Target>
+
+  <Target Name="RemoveThumbAlias" AfterTargets="MdkPack;MdkDidNotPack">
+    <Delete Files="$(MSBuildProjectDirectory)\thumb.png" />
+  </Target>
+  
   <Import Project="..\External\Adk\Adk.Compression\Adk.Compression.projitems" Label="Shared" />
   <Import Project="..\External\Adk\Adk.Image\Adk.Image.projitems" Label="Shared" />
 

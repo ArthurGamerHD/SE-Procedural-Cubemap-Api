@@ -79,7 +79,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
             Vector3D direction;
 
 
-            // Orientation recovered from the actual Space Engineers planet-map
+            // Orientation from Space Engineers planet-map
             // edge relationships:
             //
             // front L == left R

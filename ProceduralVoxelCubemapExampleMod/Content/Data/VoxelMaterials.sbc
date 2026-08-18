@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <VoxelMaterials>
+    <!--
+      Purple Grass vegetation / voxel material template.
+      Based on the supplied legacy workshop mod's Grass foliage definition,
+      but uses a NEW subtype so it does not replace the vanilla Grass material.
+
+      To use this on a custom planet, reference the voxel material subtype
+      "PurpleGrass" in that planet's material/biome rules.
+    -->
+    <VoxelMaterial xsi:type="MyObjectBuilder_Dx11VoxelMaterialDefinition">
+      <Id>
+        <TypeId>VoxelMaterialDefinition</TypeId>
+        <SubtypeId>PurpleGrass</SubtypeId>
+      </Id>
+
+      <SpawnsInAsteroids>false</SpawnsInAsteroids>
+      <SpawnsFromMeteorites>false</SpawnsFromMeteorites>
+      <MaterialTypeName>Grass</MaterialTypeName>
+      <MinedOre>Stone</MinedOre>
+      <MinedOreRatio>5</MinedOreRatio>
+      <CanBeHarvested>true</CanBeHarvested>
+      <IsRare>false</IsRare>
+      <IsIndestructible>false</IsIndestructible>
+      <DamageRatio>1</DamageRatio>
+      <ParticleEffect>Collision_Meteor</ParticleEffect>
+
+      <!-- Purple voxel-surface material based on the supplied Grass_02 texture set. Color maps are purple-tinted; normal/additive data is preserved. -->
+      <DiffuseXZ>Textures\Voxels\Grass_ForAxisXZ_de.dds</DiffuseXZ>
+      <NormalXZ>Textures\Voxels\Grass_ForAxisXZ_ns.dds</NormalXZ>
+      <DiffuseY>Textures\Voxels\Grass_ForAxisY_de.dds</DiffuseY>
+      <NormalY>Textures\Voxels\Grass_ForAxisY_ns.dds</NormalY>
+      <ColorMetalXZnY>Textures\Voxels\PurpleGrass\PurpleGrass_02_cm.dds</ColorMetalXZnY>
+      <NormalGlossXZnY>Textures\Voxels\PurpleGrass\PurpleGrass_02_ng.dds</NormalGlossXZnY>
+      <ExtXZnY>Textures\Voxels\PurpleGrass\PurpleGrass_02_add.dds</ExtXZnY>
+
+      <SpecularPower>24</SpecularPower>
+      <SpecularShininess>0.364</SpecularShininess>
+
+      <ColorMetalXZnYFar1>Textures\Voxels\PurpleGrass\PurpleGrass_02_distance_cm.dds</ColorMetalXZnYFar1>
+      <NormalGlossXZnYFar1>Textures\Voxels\PurpleGrass\PurpleGrass_02_distance_ng.dds</NormalGlossXZnYFar1>
+      <ExtXZnYFar1>Textures\Voxels\PurpleGrass\PurpleGrass_02_add.dds</ExtXZnYFar1>
+
+      <ColorMetalXZnYFar2>Textures\Voxels\PurpleGrass\PurpleGrass_02_distance_cm.dds</ColorMetalXZnYFar2>
+      <NormalGlossXZnYFar2>Textures\Voxels\PurpleGrass\PurpleGrass_02_distance_ng.dds</NormalGlossXZnYFar2>
+      <ExtXZnYFar2>Textures\Voxels\PurpleGrass\PurpleGrass_02_add.dds</ExtXZnYFar2>
+
+      <ExtDetailScale>0.005</ExtDetailScale>
+      <Scale>2</Scale>
+      <Far1Distance>30</Far1Distance>
+      <Far2Distance>500</Far2Distance>
+      <Far1Scale>200</Far1Scale>
+      <Far2Scale>1000</Far2Scale>
+
+      <Far3Distance>5000</Far3Distance>
+      <Far3Color>
+        <X>0.12</X>
+        <Y>0.01</Y>
+        <Z>0.12</Z>
+        <W>1.0</W>
+      </Far3Color>
+
+      <!-- Purple foliage color array. Variant 07 is intentionally omitted because
+           it is 1024x1024 while the other foliage cards are 512x512. -->
+      <FoliageColorTextureArray>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_01_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_02_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_03_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_04_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_05_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_06_cm.dds</Color>
+        <Color>Textures\Models\Environment\Grass\PurpleGrass\PurpleGrass_08_cm.dds</Color>
+      </FoliageColorTextureArray>
+
+      <!-- Reuse vanilla grass normals; no purple normal maps were supplied. -->
+      <FoliageNormalTextureArray>
+        <Normal>Textures\Models\Environment\Grass\Grass_01_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_02_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_03_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_04_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_05_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_06_ng.dds</Normal>
+        <Normal>Textures\Models\Environment\Grass\Grass_08_ng.dds</Normal>
+      </FoliageNormalTextureArray>
+
+      <FoliageDensity>11.00</FoliageDensity>
+      <FoliageScale>
+        <X>0.9</X>
+        <Y>0.9</Y>
+      </FoliageScale>
+      <FoliageRandomRescaleMult>0.20</FoliageRandomRescaleMult>
+
+      <SpawnChannels>
+        <Channel>1</Channel>
+        <Channel>4</Channel>
+      </SpawnChannels>
+
+      <SpawnsFlora>true</SpawnsFlora>
+      <BiomeValueMin>255</BiomeValueMin>
+      <BiomeValueMax>255</BiomeValueMax>
+
+      <DamageThreashold>0.1</DamageThreashold>
+      <DamagedMaterial>Soil</DamagedMaterial>
+    </VoxelMaterial>
+  </VoxelMaterials>
+</Definitions>

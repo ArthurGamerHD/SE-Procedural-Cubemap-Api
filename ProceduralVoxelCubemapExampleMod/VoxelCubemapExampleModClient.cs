@@ -279,6 +279,115 @@ namespace VoxelCubemapExampleMod
                     e.Message);
             }
         }
+        
+        [ChatCommand("purpleGrass", "vcma")]
+        public static void ApplyPurpleGrass(int materialFilter, bool setBiome255 = true)
+        {
+            ModificationTemplate template = null;
+
+            try
+            {
+                VoxelCubemapExampleModClient client = _instance;
+                
+                if (client._api == null)
+                {
+                    client.RequestApi();
+
+                    if (client._api == null)
+                    {
+                        ShowMessage(
+                            "Voxel Cubemap API is not ready.");
+
+                        return;
+                    }
+                }
+                
+                template = _instance._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a modification template for the nearest planet.");
+
+                byte purpleGrassMapValue = template.AddMaterial("PurpleGrass", 5f);
+
+                // Apply biome first when filtering by the original material.
+                // Brush operations are queued; painting Material first could make
+                // the old material filter unavailable to the following Biome brush.
+                if (setBiome255)
+                {
+                    template.ApplyBrush(
+                        "Biome",
+                        255,
+                        false,
+                        0.0,
+                        0,
+                        0,
+                        0.0,
+                        1.0,
+                        -1,
+                        -1,
+                        -90.0,
+                        90.0,
+                        -1,
+                        materialFilter);
+                }
+
+                template.ApplyBrush(
+                    "Material",
+                    purpleGrassMapValue,
+                    false,
+                    0.0,
+                    0,
+                    0,
+                    0.0,
+                    1.0,
+                    -1,
+                    -1,
+                    -90.0,
+                    90.0,
+                    -1,
+                    materialFilter);
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(delegate(bool success, string message)
+                {
+                    try
+                    {
+                        pushedTemplate.Close();
+                    }
+                    catch
+                    {
+                    }
+
+                    if (string.IsNullOrWhiteSpace(message))
+                    {
+                        ShowMessage(success
+                            ? "PurpleGrass committed. Runtime map value=" + purpleGrassMapValue + "."
+                            : "PurpleGrass modification failed.");
+                    }
+                    else
+                    {
+                        ShowMessage(message);
+                    }
+                });
+
+                template = null;
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                {
+                    try
+                    {
+                        template.Close();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                MyLog.Default.WriteLineAndConsole("[PurpleGrass Runtime] Apply failed: " + e);
+                ShowMessage("PurpleGrass failed: " + e.Message);
+            }
+        }
 
 
         /// <summary>
