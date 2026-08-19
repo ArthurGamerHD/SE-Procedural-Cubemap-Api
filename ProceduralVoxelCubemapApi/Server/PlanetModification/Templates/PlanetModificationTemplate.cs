@@ -25,16 +25,13 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
     {
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly PlanetDataArchiveService _planetDataArchives;
-        private readonly Dictionary<string, PlanarPngBitmap> _images =
-            new Dictionary<string, PlanarPngBitmap>(
-                StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, PlanarPngBitmap> _images =
+            CreateImageDictionary();
 
-        private readonly Dictionary<string,
+        private Dictionary<string,
             List<Action<int, int, byte[], byte[], byte[], byte[]>>>
                 _imageTransforms =
-                    new Dictionary<string,
-                        List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
-                            StringComparer.OrdinalIgnoreCase);
+                    CreateImageTransformDictionary();
 
         private Dictionary<string, byte[]> _sourceArchiveFiles;
         private bool[] _usedMaterialMapValues;
@@ -162,34 +159,24 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 true;
 
 
-            var images =
-                new Dictionary<string, PlanarPngBitmap>(
-                    StringComparer.OrdinalIgnoreCase);
+            // Push makes the template immutable, so the background snapshot can
+            // take exclusive ownership of the already-loaded image state instead
+            // of synchronously deep-cloning every decoded cubemap plane.
+            //
+            // Detach both dictionaries from the template before returning the
+            // snapshot. This is important because Close() clears the template's
+            // current dictionaries; after the swap it cannot invalidate data that
+            // the background worker owns.
+            Dictionary<string, PlanarPngBitmap> images =
+                _images;
+            _images =
+                CreateImageDictionary();
 
-            foreach (KeyValuePair<string, PlanarPngBitmap> pair in _images)
-            {
-                PlanarPngBitmap source =
-                    pair.Value;
-                images.Add(
-                    pair.Key,
-                    source.Clone());
-            }
-
-
-            var transforms =
-                new Dictionary<string,
-                    List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
-                        StringComparer.OrdinalIgnoreCase);
-
-            foreach (KeyValuePair<string,
-                List<Action<int, int, byte[], byte[], byte[], byte[]>>> pair in
-                _imageTransforms)
-            {
-                transforms.Add(
-                    pair.Key,
-                    new List<Action<int, int, byte[], byte[], byte[], byte[]>>(
-                        pair.Value));
-            }
+            Dictionary<string,
+                List<Action<int, int, byte[], byte[], byte[], byte[]>>> transforms =
+                    _imageTransforms;
+            _imageTransforms =
+                CreateImageTransformDictionary();
 
 
             var fractalOperations =
@@ -1391,6 +1378,23 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             _coordinator.BeginPushModification(
                 this,
                 callback);
+        }
+
+
+        private static Dictionary<string, PlanarPngBitmap> CreateImageDictionary()
+        {
+            return new Dictionary<string, PlanarPngBitmap>(
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+
+        private static Dictionary<string,
+            List<Action<int, int, byte[], byte[], byte[], byte[]>>>
+                CreateImageTransformDictionary()
+        {
+            return new Dictionary<string,
+                List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
+                    StringComparer.OrdinalIgnoreCase);
         }
 
 

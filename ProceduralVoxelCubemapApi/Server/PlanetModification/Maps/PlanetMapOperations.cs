@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Adk.Image.Png;
+using Sandbox.ModAPI;
 using VoxelCubemapApi.Server.PlanetModification;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
 
@@ -202,82 +203,139 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                 FractalBrownianMotion.GetCubemapFaceIndex(
                     faceFileName);
 
-            for (int operationIndex = 0;
-                operationIndex < operations.Count;
-                operationIndex++)
+            // Preserve operation ordering, but collapse consecutive operations
+            // that target the same underlying image into one pixel traversal.
+            // Material/Biome/Ore all target materialImage, so typical surface
+            // repaint workloads become a single pass per cubemap face.
+            int batchStart = 0;
+            while (batchStart < operations.Count)
             {
-                BrushOperation operation =
-                    operations[operationIndex];
-
-                if (operation == null)
+                BrushOperation first = operations[batchStart];
+                if (first == null)
                     throw new ArgumentNullException("operations");
 
-                PlanarPngBitmap targetImage =
-                    operation.LayerIndex == 3
-                        ? heightImage
-                        : materialImage;
+                bool targetsHeight = first.LayerIndex == 3;
+                int batchEnd = batchStart + 1;
 
-                double[] noiseGrid =
-                    operation.UseNoise
-                        ? FractalBrownianMotion.BuildBrushNoiseGrid(
+                while (batchEnd < operations.Count)
+                {
+                    BrushOperation next = operations[batchEnd];
+                    if (next == null)
+                        throw new ArgumentNullException("operations");
+
+                    if ((next.LayerIndex == 3) != targetsHeight)
+                        break;
+
+                    batchEnd++;
+                }
+
+                ApplyBrushBatch(
+                    heightImage,
+                    materialImage,
+                    faceIndex,
+                    planetSeed,
+                    operations,
+                    batchStart,
+                    batchEnd,
+                    targetsHeight ? heightImage : materialImage);
+
+                batchStart = batchEnd;
+            }
+        }
+
+
+        private static void ApplyBrushBatch(
+            PlanarPngBitmap heightImage,
+            PlanarPngBitmap materialImage,
+            int faceIndex,
+            long planetSeed,
+            List<BrushOperation> operations,
+            int batchStart,
+            int batchEnd,
+            PlanarPngBitmap targetImage)
+        {
+            int batchCount = batchEnd - batchStart;
+            var noiseGrids = new double[batchCount][];
+            var latitudeRestricted = new bool[batchCount];
+
+            // Build each distinct noise grid only once for this face/batch.
+            // Paired Biome + Material brushes commonly share identical noise.
+            for (int localIndex = 0; localIndex < batchCount; localIndex++)
+            {
+                BrushOperation operation = operations[batchStart + localIndex];
+
+                latitudeRestricted[localIndex] =
+                    operation.MinimumLatitude > -90.0 ||
+                    operation.MaximumLatitude < 90.0;
+
+                if (!operation.UseNoise)
+                    continue;
+
+                for (int previous = 0; previous < localIndex; previous++)
+                {
+                    BrushOperation previousOperation =
+                        operations[batchStart + previous];
+
+                    if (previousOperation.UseNoise &&
+                        previousOperation.NoiseFrequency == operation.NoiseFrequency &&
+                        previousOperation.NoiseOctaves == operation.NoiseOctaves &&
+                        previousOperation.NoiseSeedOffset == operation.NoiseSeedOffset)
+                    {
+                        noiseGrids[localIndex] = noiseGrids[previous];
+                        break;
+                    }
+                }
+
+                if (noiseGrids[localIndex] == null)
+                {
+                    noiseGrids[localIndex] =
+                        FractalBrownianMotion.BuildBrushNoiseGrid(
                             faceIndex,
                             planetSeed,
                             operation.NoiseFrequency,
                             operation.NoiseOctaves,
-                            operation.NoiseSeedOffset)
-                        : null;
+                            operation.NoiseSeedOffset);
+                }
+            }
 
-                for (int y = 0;
-                    y < targetImage.Height;
-                    y++)
+            // Precompute coordinate mappings once instead of doing floating-point
+            // MapCoordinate() work for every brush/pixel pair.
+            int[] heightXMap = BuildCoordinateMap(
+                targetImage.Width,
+                heightImage.Width);
+            int[] heightYMap = BuildCoordinateMap(
+                targetImage.Height,
+                heightImage.Height);
+            int[] materialXMap = BuildCoordinateMap(
+                targetImage.Width,
+                materialImage.Width);
+            int[] materialYMap = BuildCoordinateMap(
+                targetImage.Height,
+                materialImage.Height);
+
+            byte[] biomePlane = materialImage.Planes[1];
+            byte[] materialPlane = materialImage.Planes[0];
+
+            for (int y = 0; y < targetImage.Height; y++)
+            {
+                int targetRow = y * targetImage.Width;
+                int heightRow = heightYMap[y] * heightImage.Width;
+                int materialRow = materialYMap[y] * materialImage.Width;
+
+                for (int x = 0; x < targetImage.Width; x++)
                 {
-                    for (int x = 0;
-                        x < targetImage.Width;
-                        x++)
+                    int targetOffset = targetRow + x;
+                    int heightOffset = heightRow + heightXMap[x];
+                    int materialOffset = materialRow + materialXMap[x];
+                    int altitude = ReadHeightSample(heightImage, heightOffset);
+
+                    bool latitudeCalculated = false;
+                    double latitude = 0.0;
+
+                    for (int localIndex = 0; localIndex < batchCount; localIndex++)
                     {
-                        int targetOffset =
-                            y *
-                                targetImage.Width +
-                            x;
-
-                        int heightX =
-                            MapCoordinate(
-                                x,
-                                targetImage.Width,
-                                heightImage.Width);
-
-                        int heightY =
-                            MapCoordinate(
-                                y,
-                                targetImage.Height,
-                                heightImage.Height);
-
-                        int materialX =
-                            MapCoordinate(
-                                x,
-                                targetImage.Width,
-                                materialImage.Width);
-
-                        int materialY =
-                            MapCoordinate(
-                                y,
-                                targetImage.Height,
-                                materialImage.Height);
-
-                        int heightOffset =
-                            heightY *
-                                heightImage.Width +
-                            heightX;
-
-                        int materialOffset =
-                            materialY *
-                                materialImage.Width +
-                            materialX;
-
-                        int altitude =
-                            ReadHeightSample(
-                                heightImage,
-                                heightOffset);
+                        BrushOperation operation =
+                            operations[batchStart + localIndex];
 
                         if (operation.MinimumAltitude >= 0 &&
                             altitude < operation.MinimumAltitude)
@@ -292,38 +350,45 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                         }
 
                         if (operation.BiomeFilter >= 0 &&
-                            materialImage.Planes[1][materialOffset] !=
-                                operation.BiomeFilter)
+                            biomePlane[materialOffset] != operation.BiomeFilter)
                         {
                             continue;
                         }
 
                         if (operation.MaterialFilter >= 0 &&
-                            materialImage.Planes[0][materialOffset] !=
-                                operation.MaterialFilter)
+                            materialPlane[materialOffset] != operation.MaterialFilter)
                         {
                             continue;
                         }
 
-                        double latitude =
-                            FractalBrownianMotion.GetLatitudeDegrees(
-                                faceIndex,
-                                x,
-                                y,
-                                targetImage.Width,
-                                targetImage.Height);
-
-                        if (latitude < operation.MinimumLatitude ||
-                            latitude > operation.MaximumLatitude)
+                        // Full [-90,+90] brushes skip cubemap->sphere latitude
+                        // conversion entirely. When needed, calculate once/pixel.
+                        if (latitudeRestricted[localIndex])
                         {
-                            continue;
+                            if (!latitudeCalculated)
+                            {
+                                latitude =
+                                    FractalBrownianMotion.GetLatitudeDegrees(
+                                        faceIndex,
+                                        x,
+                                        y,
+                                        targetImage.Width,
+                                        targetImage.Height);
+                                latitudeCalculated = true;
+                            }
+
+                            if (latitude < operation.MinimumLatitude ||
+                                latitude > operation.MaximumLatitude)
+                            {
+                                continue;
+                            }
                         }
 
                         if (operation.UseNoise)
                         {
                             double score =
                                 FractalBrownianMotion.SampleBrushNoiseGrid(
-                                    noiseGrid,
+                                    noiseGrids[localIndex],
                                     x,
                                     y,
                                     targetImage.Width,
@@ -341,9 +406,53 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                             materialImage,
                             operation,
                             targetOffset);
+
+                        // A height write can affect altitude filters of later
+                        // operations in the same height-target batch, matching
+                        // the observable per-pixel ordering of queued brushes.
+                        if (operation.LayerIndex == 3)
+                            altitude = operation.FillValue;
                     }
                 }
             }
+        }
+
+
+        private static int[] BuildCoordinateMap(
+            int fromSize,
+            int toSize)
+        {
+            var map = new int[fromSize];
+
+            if (fromSize <= 1 || toSize <= 1)
+                return map;
+
+            if (fromSize == toSize)
+            {
+                for (int i = 0; i < fromSize; i++)
+                    map[i] = i;
+
+                return map;
+            }
+
+            for (int i = 0; i < fromSize; i++)
+            {
+                double mapped =
+                    (double)i *
+                    (toSize - 1) /
+                    (fromSize - 1);
+
+                int result = (int)(mapped + 0.5);
+
+                if (result < 0)
+                    result = 0;
+                else if (result >= toSize)
+                    result = toSize - 1;
+
+                map[i] = result;
+            }
+
+            return map;
         }
 
 

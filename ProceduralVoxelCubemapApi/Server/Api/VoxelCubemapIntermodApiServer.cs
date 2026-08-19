@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Generated;
+using Sandbox.ModAPI;
 using VoxelCubemapApi.Server.PlanetModification;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
 using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
@@ -41,6 +42,10 @@ namespace VoxelCubemapApi.Server.Api
         /// <summary>
         /// Creates a mutable modification template for the requested planet and
         /// returns its nested delegate API.
+        ///
+        /// This template is thread-safe and can be used to modify the planet's procedural generation parameters.
+        /// Recommended to use this method in a background <seealso cref="VRage.Game.ModAPI.IMyParallelTask"/>
+        /// to avoid blocking the main game thread.
         /// </summary>
         [ApiMethod(typeof(PlanetModificationTemplate))]
         public Dictionary<string, Delegate> GetModificationTemplate(long entityId)

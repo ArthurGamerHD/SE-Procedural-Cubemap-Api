@@ -58,6 +58,10 @@ namespace VoxelCubemapApi.Api
         /// <summary>
         /// Creates a mutable modification template for the requested planet and
         /// returns its nested delegate API.
+        ///
+        /// This template is thread-safe and can be used to modify the planet's procedural generation parameters.
+        /// Recommended to use this method in a background <seealso cref="VRage.Game.ModAPI.IMyParallelTask"/>
+        /// to avoid blocking the main game thread.
         /// </summary>
         public ModificationTemplate GetModificationTemplate(
             long entityId)
