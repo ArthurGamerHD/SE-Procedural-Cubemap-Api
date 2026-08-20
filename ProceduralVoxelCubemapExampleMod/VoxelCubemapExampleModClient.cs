@@ -20,7 +20,7 @@ namespace VoxelCubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 8);
+            new Version(0, 0, 9);
 
         private static VoxelCubemapExampleModClient _instance;
 
@@ -88,6 +88,79 @@ namespace VoxelCubemapExampleMod
             {
                 LogWarning(
                     "API response binding failed",
+                    e);
+            }
+        }
+
+
+        /// <summary>
+        /// Prints every API-managed planet and its persistence/runtime details
+        /// to local chat and the Space Engineers log.
+        /// </summary>
+        [ChatCommand("planets", "vcma")]
+        public static void ShowApiPlanetDetails()
+        {
+            VoxelCubemapExampleModClient client =
+                _instance;
+
+            if (client == null)
+            {
+                ShowAndLog(
+                    "VCM API test client is not initialized.");
+
+                return;
+            }
+
+            try
+            {
+                if (client._api == null)
+                    client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowAndLog(
+                        "Voxel Cubemap API is not ready.");
+
+                    return;
+                }
+
+                string[] details =
+                    client._api.GetApiPlanetDetails();
+
+                if (details == null ||
+                    details.Length == 0)
+                {
+                    ShowAndLog(
+                        "No API-managed planets are registered.");
+
+                    return;
+                }
+
+                ShowAndLog(
+                    "API-managed planets: " +
+                    details.Length);
+
+                for (int index = 0;
+                    index < details.Length;
+                    index++)
+                {
+                    ShowAndLog(
+                        "[" +
+                        (index + 1) +
+                        "/" +
+                        details.Length +
+                        "]\n" +
+                        details[index]);
+                }
+            }
+            catch (Exception e)
+            {
+                ShowAndLog(
+                    "Could not retrieve API planet details: " +
+                    e.Message);
+
+                LogWarning(
+                    "API planet detail query failed",
                     e);
             }
         }
@@ -893,6 +966,21 @@ namespace VoxelCubemapExampleMod
             MyAPIGateway.Utilities.ShowMessage(
                 "Procedural Voxel Cubemap Api",
                 message);
+        }
+
+
+        private static void ShowAndLog(
+            string message)
+        {
+            string text =
+                message ?? string.Empty;
+
+            MyLog.Default.WriteLineAndConsole(
+                "[VCM API Test Client] " +
+                text);
+
+            ShowMessage(
+                text);
         }
     }
 }

@@ -80,11 +80,12 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     StringComparer.OrdinalIgnoreCase);
 
             Dictionary<string, byte[]> runtimeSourceFiles =
-                string.IsNullOrWhiteSpace(
-                    snapshot.SourceArchiveFile)
+                snapshot.SourceFiles ??
+                (string.IsNullOrWhiteSpace(
+                        snapshot.SourceArchiveFile)
                     ? null
                     : ReadRuntimeArchive(
-                        snapshot.SourceArchiveFile);
+                        snapshot.SourceArchiveFile));
 
             bool haveBrushOperations =
                 snapshot.BrushOperations != null &&
@@ -284,6 +285,114 @@ namespace VoxelCubemapApi.Server.PlanetModification
                         snapshot.PlanetSeed,
                         operation.CoveragePercent);
             }
+        }
+
+
+        internal Dictionary<string, byte[]> BuildProceduralRevisionFiles(
+            List<PlanetModificationSnapshot> revisions,
+            Dictionary<string, byte[]> sourceFiles)
+        {
+            if (revisions == null ||
+                revisions.Count == 0)
+            {
+                throw new ArgumentException(
+                    "At least one procedural revision is required.",
+                    "revisions");
+            }
+
+            PlanetModificationSnapshot root =
+                revisions[0];
+
+            var output =
+                new Dictionary<string, byte[]>(
+                    PlanetMapFileNames.All.Length,
+                    StringComparer.OrdinalIgnoreCase);
+
+            string[] faces =
+            {
+                "front",
+                "back",
+                "left",
+                "right",
+                "up",
+                "down"
+            };
+
+            for (int faceIndex = 0;
+                faceIndex < faces.Length;
+                faceIndex++)
+            {
+                string heightFileName =
+                    faces[faceIndex] + ".png";
+
+                string materialFileName =
+                    faces[faceIndex] + "_mat.png";
+
+                PlanarPngBitmap heightImage =
+                    PlanetMapOperations.DecodePlanetPng(
+                        heightFileName,
+                        ReadSnapshotPlanetDataFile(
+                            root,
+                            sourceFiles,
+                            heightFileName));
+
+                PlanarPngBitmap materialImage =
+                    PlanetMapOperations.DecodePlanetPng(
+                        materialFileName,
+                        ReadSnapshotPlanetDataFile(
+                            root,
+                            sourceFiles,
+                            materialFileName));
+
+                for (int revisionIndex = 0;
+                    revisionIndex < revisions.Count;
+                    revisionIndex++)
+                {
+                    PlanetModificationSnapshot revision =
+                        revisions[revisionIndex];
+
+                    if (revision.AllocatedComplexMaterialValues != null &&
+                        revision.AllocatedComplexMaterialValues.Count > 0)
+                    {
+                        PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
+                            materialImage,
+                            materialFileName,
+                            revision.AllocatedComplexMaterialValues);
+                    }
+
+                    PlanetMapOperations.ApplyBrushToPlanetImages(
+                        heightImage,
+                        materialImage,
+                        heightFileName,
+                        revision.PlanetSeed,
+                        revision.BrushOperations);
+
+                    for (int operationIndex = 0;
+                        operationIndex < revision.BiomeReplacementOperations.Count;
+                        operationIndex++)
+                    {
+                        PlanetMapOperations.ApplyBiomeReplacementToPlanetImage(
+                            materialImage,
+                            revision.BiomeReplacementOperations[operationIndex]);
+                    }
+
+                    PlanetMapOperations.ApplyFractalNoiseToPlanetImage(
+                        materialImage,
+                        materialFileName,
+                        revision.PlanetSeed,
+                        revision.FractalNoiseOperations);
+                }
+
+                output.Add(
+                    heightFileName,
+                    heightImage.Encode());
+
+                output.Add(
+                    materialFileName,
+                    materialImage.Encode());
+            }
+
+            return output;
         }
 
 
@@ -694,6 +803,55 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 PlanetMapOperations.DecodePlanetPng(
                     fileName,
                     data);
+
+                entries.Add(
+                    new MinimalZip.Entry(
+                        fileName,
+                        data,
+                        MinimalZip.CompressionMode.Deflate));
+            }
+
+            return MinimalZip.WriteBytes(
+                entries);
+        }
+
+
+        internal byte[] PackProceduralArchive(
+            IDictionary<string, byte[]> files)
+        {
+            if (files == null ||
+                files.Count != PlanetMapFileNames.All.Length)
+            {
+                throw new ArgumentException(
+                    "A procedural archive must contain all planet PNGs.",
+                    "files");
+            }
+
+            var entries =
+                new List<MinimalZip.Entry>(
+                    PlanetMapFileNames.All.Length);
+
+            for (int index = 0;
+                index < PlanetMapFileNames.All.Length;
+                index++)
+            {
+                string fileName =
+                    PlanetMapFileNames.All[index];
+
+                byte[] data;
+
+                if (!files.TryGetValue(
+                        fileName,
+                        out data) ||
+                    data == null ||
+                    data.Length == 0)
+                {
+                    throw new ArgumentException(
+                        "Procedural archive is missing '" +
+                        fileName +
+                        "'.",
+                        "files");
+                }
 
                 entries.Add(
                     new MinimalZip.Entry(

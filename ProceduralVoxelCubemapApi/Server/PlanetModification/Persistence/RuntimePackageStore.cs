@@ -24,6 +24,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         private const string PersistenceVariablePrefix =
             "VoxelCubemapApi.RuntimePersistence.v1.";
 
+        private const string RecipeVariablePrefix =
+            "VoxelCubemapApi.RuntimePersistence.v2.Recipe.";
+
         private const string RuntimeSettingsVariable =
             PersistenceVariablePrefix +
             "SettingsXml";
@@ -39,6 +42,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
 
         private const int MaxArchiveChunkCount =
             512;
+
+        private const int MaxRuntimeArchiveBytes =
+            512 * 1024 * 1024;
 
         private readonly VoxelCubemapApiServer _server;
         private readonly object _persistenceSync =
@@ -72,6 +78,10 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
 
         internal string BoundSavePath { get; set; }
 
+        internal Func<RuntimePlanetBuilderEntry,
+            RuntimeProceduralPlanetRecipe,
+            byte[]> ProceduralArchiveBuilder { get; set; }
+
 
         internal void LoadPersistedRuntimeGenerators()
         {
@@ -104,6 +114,20 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                 {
                     throw new Exception(
                         "Persisted settings contain an invalid runtime planet entry.");
+                }
+
+                RuntimePlanetPersistenceType persistenceType =
+                    GetPersistenceType(
+                        entry);
+
+                if (persistenceType ==
+                        RuntimePlanetPersistenceType.Procedural &&
+                    entry.RecipeSchemaVersion != 1)
+                {
+                    throw new Exception(
+                        "Persisted procedural runtime entry has an unsupported " +
+                        "recipe schema: " +
+                        entry.RecipeSchemaVersion);
                 }
             }
 
@@ -301,9 +325,34 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                         entry.GeneratorFile,
                         allowLegacyMigration);
 
-                    RestoreArchiveCache(
-                        entry.ArchiveFile,
-                        allowLegacyMigration);
+                    if (GetPersistenceType(entry) ==
+                        RuntimePlanetPersistenceType.Procedural)
+                    {
+                        if (ProceduralArchiveBuilder == null)
+                        {
+                            throw new Exception(
+                                "Procedural archive reconstruction is not configured.");
+                        }
+
+                        RuntimeProceduralPlanetRecipe recipe =
+                            LoadRuntimeRecipe(
+                                entry);
+
+                        byte[] archive =
+                            ProceduralArchiveBuilder(
+                                entry,
+                                recipe);
+
+                        WriteWorldStorageBinaryCache(
+                            entry.ArchiveFile,
+                            archive);
+                    }
+                    else
+                    {
+                        RestoreArchiveCache(
+                            entry.ArchiveFile,
+                            allowLegacyMigration);
+                    }
                 }
             }
         }
@@ -425,12 +474,112 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         }
 
 
+        internal void SaveDerivedRuntimeArchive(
+            string fileName,
+            byte[] archive)
+        {
+            if (archive == null ||
+                archive.Length == 0 ||
+                archive.Length > MaxRuntimeArchiveBytes)
+            {
+                throw new ArgumentException(
+                    "Derived runtime archive has an invalid size.",
+                    "archive");
+            }
+
+            lock (_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+                WriteWorldStorageBinaryCache(
+                    fileName,
+                    archive);
+            }
+        }
+
+
+        internal void SaveRuntimeRecipe(
+            RuntimePlanetBuilderEntry entry,
+            RuntimeProceduralPlanetRecipe recipe)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+            lock (_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+                ValidateRuntimeRecipe(
+                    recipe,
+                    entry);
+
+                string variableName =
+                    ResolveRecipeVariableName(
+                        entry);
+
+                string xml =
+                    MyAPIGateway.Utilities
+                        .SerializeToXML<RuntimeProceduralPlanetRecipe>(
+                            recipe);
+
+                if (string.IsNullOrWhiteSpace(xml))
+                    throw new Exception("Serialized procedural recipe is empty.");
+
+                MyAPIGateway.Utilities.SetVariable(
+                    variableName,
+                    xml);
+            }
+        }
+
+
+        internal RuntimeProceduralPlanetRecipe LoadRuntimeRecipe(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+            string variableName =
+                ResolveRecipeVariableName(
+                    entry);
+
+            string xml;
+
+            if (!MyAPIGateway.Utilities.GetVariable<string>(
+                    variableName,
+                    out xml) ||
+                string.IsNullOrWhiteSpace(xml))
+            {
+                throw new Exception(
+                    "Missing persisted procedural recipe variable: " +
+                    variableName);
+            }
+
+            RuntimeProceduralPlanetRecipe recipe =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<RuntimeProceduralPlanetRecipe>(
+                        xml);
+
+            ValidateRuntimeRecipe(
+                recipe,
+                entry);
+
+            return recipe;
+        }
+
+
         internal void SaveRuntimeArchiveVariables(
             string fileName,
             byte[] archive)
         {
             if (archive == null)
                 throw new ArgumentNullException("archive");
+
+            if (archive.Length > MaxRuntimeArchiveBytes)
+            {
+                throw new ArgumentException(
+                    "Runtime archive exceeds the persistence size limit.",
+                    "archive");
+            }
 
 
             string chunkCountVariable =
@@ -651,6 +800,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                         fileName),
                     out archiveLength) ||
                 archiveLength < 0 ||
+                archiveLength > MaxRuntimeArchiveBytes ||
                 chunkCount < 0)
             {
                 throw new Exception(
@@ -756,6 +906,15 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
             return
                 PersistenceVariablePrefix +
                 "GeneratorXml." +
+                fileName;
+        }
+
+
+        internal static string BuildRecipeVariableName(
+            string fileName)
+        {
+            return
+                RecipeVariablePrefix +
                 fileName;
         }
 
@@ -924,7 +1083,14 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                 SourceEntityId = entry.SourceEntityId,
                 GeneratorFile = entry.GeneratorFile,
                 ArchiveFile = entry.ArchiveFile,
-                ChunkCount = chunkCount,
+                ChunkCount =
+                    GetPersistenceType(entry) ==
+                        RuntimePlanetPersistenceType.Procedural
+                        ? 0
+                        : chunkCount,
+                PersistenceType = entry.PersistenceType,
+                RecipeSchemaVersion = entry.RecipeSchemaVersion,
+                RecipeVariable = entry.RecipeVariable,
                 Pending = false
             };
         }
@@ -985,7 +1151,19 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                     entry.ArchiveFile;
 
                 package.ChunkCount =
-                    chunkCount;
+                    GetPersistenceType(entry) ==
+                        RuntimePlanetPersistenceType.Procedural
+                        ? 0
+                        : chunkCount;
+
+                package.PersistenceType =
+                    entry.PersistenceType;
+
+                package.RecipeSchemaVersion =
+                    entry.RecipeSchemaVersion;
+
+                package.RecipeVariable =
+                    entry.RecipeVariable;
 
                 package.Pending =
                     true;
@@ -1112,7 +1290,14 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                             SourceEntityId = entry.SourceEntityId,
                             GeneratorFile = entry.GeneratorFile,
                             ArchiveFile = entry.ArchiveFile,
-                            ChunkCount = chunkCount,
+                            ChunkCount =
+                                GetPersistenceType(entry) ==
+                                    RuntimePlanetPersistenceType.Procedural
+                                    ? 0
+                                    : chunkCount,
+                            PersistenceType = entry.PersistenceType,
+                            RecipeSchemaVersion = entry.RecipeSchemaVersion,
+                            RecipeVariable = entry.RecipeVariable,
                             Pending = false
                         });
 
@@ -1202,6 +1387,14 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                     chunkCount,
                     package.ChunkCount));
 
+            if (GetPersistenceType(package) ==
+                RuntimePlanetPersistenceType.Procedural)
+            {
+                MyAPIGateway.Utilities.RemoveVariable(
+                    BuildRecipeVariableName(
+                        package.ArchiveFile));
+            }
+
             MyAPIGateway.Utilities.RemoveVariable(
                 BuildGeneratorVariableName(
                     package.GeneratorFile));
@@ -1252,22 +1445,31 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                 }
 
 
-                int chunkCount;
+                int chunkCount =
+                    0;
 
-                if (!MyAPIGateway.Utilities.GetVariable<int>(
-                    BuildArchiveChunkCountVariableName(
-                        entry.ArchiveFile),
-                    out chunkCount))
+                if (GetPersistenceType(entry) ==
+                    RuntimePlanetPersistenceType.Procedural)
                 {
-                    throw new Exception(
-                        "Pending runtime package has no chunk-count metadata: " +
+                    LoadRuntimeRecipe(
+                        entry);
+                }
+                else
+                {
+                    if (!MyAPIGateway.Utilities.GetVariable<int>(
+                        BuildArchiveChunkCountVariableName(
+                            entry.ArchiveFile),
+                        out chunkCount))
+                    {
+                        throw new Exception(
+                            "Pending runtime package has no chunk-count metadata: " +
+                            entry.ArchiveFile);
+                    }
+
+                    ValidateArchiveChunkCount(
+                        chunkCount,
                         entry.ArchiveFile);
                 }
-
-
-                ValidateArchiveChunkCount(
-                    chunkCount,
-                    entry.ArchiveFile);
 
                 package.Subtype =
                     entry.Subtype;
@@ -1280,6 +1482,15 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
 
                 package.ChunkCount =
                     chunkCount;
+
+                package.PersistenceType =
+                    entry.PersistenceType;
+
+                package.RecipeSchemaVersion =
+                    entry.RecipeSchemaVersion;
+
+                package.RecipeVariable =
+                    entry.RecipeVariable;
 
                 package.Pending =
                     false;
@@ -1946,6 +2157,304 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
                 entry.EnvironmentCarrierSubtype);
 
             return runtimeGenerator;
+        }
+
+
+        internal static RuntimePlanetPersistenceType GetPersistenceType(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null ||
+                entry.PersistenceType == 0)
+            {
+                return RuntimePlanetPersistenceType.PngSnapshot;
+            }
+
+            if (entry.PersistenceType ==
+                    (int)RuntimePlanetPersistenceType.Procedural ||
+                entry.PersistenceType ==
+                    (int)RuntimePlanetPersistenceType.PngSnapshot)
+            {
+                return (RuntimePlanetPersistenceType)entry.PersistenceType;
+            }
+
+            throw new Exception(
+                "Unsupported runtime persistence type: " +
+                entry.PersistenceType);
+        }
+
+
+        internal static RuntimePlanetPersistenceType GetPersistenceType(
+            RuntimePersistencePackageEntry entry)
+        {
+            if (entry == null ||
+                entry.PersistenceType == 0)
+            {
+                return RuntimePlanetPersistenceType.PngSnapshot;
+            }
+
+            if (entry.PersistenceType ==
+                    (int)RuntimePlanetPersistenceType.Procedural ||
+                entry.PersistenceType ==
+                    (int)RuntimePlanetPersistenceType.PngSnapshot)
+            {
+                return (RuntimePlanetPersistenceType)entry.PersistenceType;
+            }
+
+            throw new Exception(
+                "Unsupported runtime persistence package type: " +
+                entry.PersistenceType);
+        }
+
+
+        private static string ResolveRecipeVariableName(
+            RuntimePlanetBuilderEntry entry)
+        {
+            string expected =
+                BuildRecipeVariableName(
+                    entry.ArchiveFile);
+
+            if (!string.IsNullOrWhiteSpace(entry.RecipeVariable) &&
+                !string.Equals(
+                    entry.RecipeVariable,
+                    expected,
+                    StringComparison.Ordinal))
+            {
+                throw new Exception(
+                    "Procedural recipe variable does not match its runtime archive.");
+            }
+
+            return expected;
+        }
+
+
+        internal static void ValidateRuntimeRecipe(
+            RuntimeProceduralPlanetRecipe recipe,
+            RuntimePlanetBuilderEntry entry)
+        {
+            const int SupportedSchemaVersion = 1;
+            const int MaximumOperationCount = 16384;
+
+            if (recipe == null)
+                throw new Exception("Procedural planet recipe is null.");
+
+            if (recipe.SchemaVersion != SupportedSchemaVersion)
+            {
+                throw new Exception(
+                    "Unsupported procedural planet recipe schema: " +
+                    recipe.SchemaVersion);
+            }
+
+            if (entry != null &&
+                entry.RecipeSchemaVersion != 0 &&
+                entry.RecipeSchemaVersion != recipe.SchemaVersion)
+            {
+                throw new Exception(
+                    "Procedural recipe schema does not match its runtime entry.");
+            }
+
+            if (recipe.Source == null ||
+                string.IsNullOrWhiteSpace(recipe.Source.SourceSubtype) ||
+                string.IsNullOrWhiteSpace(recipe.Source.SourceFolderName))
+            {
+                throw new Exception(
+                    "Procedural recipe has no resolvable root source.");
+            }
+
+            if (recipe.Source.SourceSubtype.Length > 512 ||
+                recipe.Source.SourceFolderName.Length > 1024 ||
+                (recipe.Source.ModName != null &&
+                    recipe.Source.ModName.Length > 1024) ||
+                (recipe.Source.PublishedServiceName != null &&
+                    recipe.Source.PublishedServiceName.Length > 128))
+            {
+                throw new Exception(
+                    "Procedural recipe source identity is too long.");
+            }
+
+            if (recipe.Source.SourceFolderName.IndexOf(':') >= 0 ||
+                recipe.Source.SourceFolderName.EndsWith(
+                    ".zip",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception(
+                    "Procedural recipe root source folder is not content-relative.");
+            }
+
+            if (entry != null &&
+                entry.PlanetSeed != recipe.PlanetSeed)
+            {
+                throw new Exception(
+                    "Procedural recipe seed does not match its runtime entry.");
+            }
+
+            if (recipe.NoiseVersion != 1)
+            {
+                throw new Exception(
+                    "Unsupported procedural noise algorithm version: " +
+                    recipe.NoiseVersion);
+            }
+
+            if (recipe.Revisions == null)
+                recipe.Revisions = new List<RuntimeProceduralRevision>();
+
+            if (recipe.Revisions.Count > 4096)
+                throw new Exception("Procedural recipe revision limit exceeded.");
+
+            int operationCount = 0;
+
+            for (int revisionIndex = 0;
+                revisionIndex < recipe.Revisions.Count;
+                revisionIndex++)
+            {
+                RuntimeProceduralRevision revision =
+                    recipe.Revisions[revisionIndex];
+
+                if (revision == null)
+                    throw new Exception("Procedural recipe contains a null revision.");
+
+                if (revision.Brushes == null)
+                    revision.Brushes = new List<RuntimeProceduralBrushOperation>();
+                if (revision.BiomeReplacements == null)
+                    revision.BiomeReplacements = new List<RuntimeProceduralBiomeReplacement>();
+                if (revision.FractalNoise == null)
+                    revision.FractalNoise = new List<RuntimeProceduralFractalNoiseOperation>();
+                if (revision.AllocatedComplexMaterialValues == null)
+                    revision.AllocatedComplexMaterialValues = new List<byte>();
+                if (revision.EnvironmentRemap == null)
+                    revision.EnvironmentRemap =
+                        new List<RuntimeProceduralEnvironmentMapRule>();
+
+                if (revision.AllocatedComplexMaterialValues.Count > 256)
+                {
+                    throw new Exception(
+                        "Procedural recipe material-allocation limit exceeded.");
+                }
+
+                if (revision.EnvironmentRemap.Count > 256)
+                {
+                    throw new Exception(
+                        "Procedural environment remap rule limit exceeded.");
+                }
+
+                var environmentValues =
+                    new HashSet<byte>();
+
+                for (int i = 0;
+                    i < revision.EnvironmentRemap.Count;
+                    i++)
+                {
+                    RuntimeProceduralEnvironmentMapRule rule =
+                        revision.EnvironmentRemap[i];
+
+                    if (rule == null ||
+                        rule.CompatibleBiomes == null ||
+                        rule.CompatibleBiomes.Length == 0 ||
+                        rule.CompatibleBiomes.Length > 256 ||
+                        !environmentValues.Add(rule.MaterialMapValue))
+                    {
+                        throw new Exception(
+                            "Procedural recipe contains an invalid environment remap.");
+                    }
+                }
+
+                operationCount = checked(
+                    operationCount +
+                    revision.Brushes.Count +
+                    revision.BiomeReplacements.Count +
+                    revision.FractalNoise.Count +
+                    Math.Max(
+                        revision.EnvironmentRemap.Count,
+                        string.IsNullOrWhiteSpace(
+                            revision.EnvironmentPresetName)
+                            ? 0
+                            : 1));
+
+                if (revision.EnvironmentPresetName != null &&
+                    revision.EnvironmentPresetName.Length > 512)
+                {
+                    throw new Exception("Procedural environment preset name is too long.");
+                }
+
+                for (int i = 0; i < revision.FractalNoise.Count; i++)
+                {
+                    RuntimeProceduralFractalNoiseOperation operation =
+                        revision.FractalNoise[i];
+
+                    if (operation == null ||
+                        operation.PlaneIndex < 0 ||
+                        operation.PlaneIndex > 2 ||
+                        operation.CoveragePercent < 0 ||
+                        operation.CoveragePercent > 100 ||
+                        double.IsNaN(operation.Threshold) ||
+                        double.IsInfinity(operation.Threshold))
+                    {
+                        throw new Exception("Procedural recipe contains invalid fractal noise.");
+                    }
+                }
+
+                for (int i = 0;
+                    i < revision.BiomeReplacements.Count;
+                    i++)
+                {
+                    if (revision.BiomeReplacements[i] == null)
+                    {
+                        throw new Exception(
+                            "Procedural recipe contains a null biome replacement.");
+                    }
+                }
+
+                for (int i = 0; i < revision.Brushes.Count; i++)
+                {
+                    RuntimeProceduralBrushOperation operation =
+                        revision.Brushes[i];
+
+                    int maximumFill =
+                        operation != null && operation.LayerIndex == 3
+                            ? ushort.MaxValue
+                            : byte.MaxValue;
+
+                    if (operation == null ||
+                        operation.LayerIndex < 0 ||
+                        operation.LayerIndex > 3 ||
+                        operation.FillValue < 0 ||
+                        operation.FillValue > maximumFill ||
+                        operation.MinimumAltitude < -1 ||
+                        operation.MinimumAltitude > ushort.MaxValue ||
+                        operation.MaximumAltitude < -1 ||
+                        operation.MaximumAltitude > ushort.MaxValue ||
+                        operation.MinimumLatitude < -90.0 ||
+                        operation.MinimumLatitude > 90.0 ||
+                        operation.MaximumLatitude < -90.0 ||
+                        operation.MaximumLatitude > 90.0 ||
+                        operation.MinimumLatitude > operation.MaximumLatitude ||
+                        operation.BiomeFilter < -1 ||
+                        operation.BiomeFilter > byte.MaxValue ||
+                        operation.MaterialFilter < -1 ||
+                        operation.MaterialFilter > byte.MaxValue ||
+                        (operation.UseNoise &&
+                            (double.IsNaN(operation.NoiseFrequency) ||
+                             double.IsInfinity(operation.NoiseFrequency) ||
+                             operation.NoiseFrequency <= 0.0 ||
+                             operation.NoiseOctaves < 1 ||
+                             operation.NoiseOctaves > 8 ||
+                             operation.BlendNoiseMinimum < 0.0 ||
+                             operation.BlendNoiseMinimum > 1.0 ||
+                             operation.BlendNoiseMaximum < 0.0 ||
+                             operation.BlendNoiseMaximum > 1.0 ||
+                             operation.BlendNoiseMinimum >
+                                operation.BlendNoiseMaximum)))
+                    {
+                        throw new Exception("Procedural recipe contains an invalid brush.");
+                    }
+                }
+            }
+
+            if (operationCount > MaximumOperationCount)
+            {
+                throw new Exception(
+                    "Procedural recipe operation limit exceeded: " +
+                    operationCount);
+            }
         }
 
 

@@ -11,6 +11,7 @@ namespace VoxelCubemapApi.Api
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
+        private readonly Func<string[]> _getApiPlanetDetails;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<ApiData> _getEnvironmentPresets;
@@ -32,6 +33,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Func<long, bool, ApiData>>(
                     api,
                     "GetPlanetMetadata");
+
+            _getApiPlanetDetails =
+                GetRequired<Func<string[]>>(
+                    api,
+                    "GetApiPlanetDetails");
 
             _getNoiseProvider =
                 GetRequired<Func<ApiData>>(
@@ -89,6 +95,17 @@ namespace VoxelCubemapApi.Api
             return nestedApi == null
                 ? null
                 : new PlanetMetadataProvider(nestedApi);
+        }
+
+
+        /// <summary>
+        /// Returns one detailed, human-readable record for every planet
+        /// currently managed by the API. An empty array means that no runtime
+        /// planet packages are registered.
+        /// </summary>
+        public string[] GetApiPlanetDetails()
+        {
+            return _getApiPlanetDetails();
         }
 
 

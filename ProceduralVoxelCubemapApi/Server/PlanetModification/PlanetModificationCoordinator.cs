@@ -5,6 +5,7 @@ using Sandbox.ModAPI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 
 using VoxelCubemapApi.Server.Api;
 using VoxelCubemapApi.Server.PlanetModification.Persistence;
@@ -118,6 +119,243 @@ namespace VoxelCubemapApi.Server.PlanetModification
         internal bool RequestInProgress => _requestInProgress;
 
 
+        internal string[] GetApiPlanetDetails()
+        {
+            if (_runtimePackages.Settings == null ||
+                _runtimePackages.Settings.PlanetBuilders == null)
+            {
+                return new string[0];
+            }
+
+            List<RuntimePlanetBuilderEntry> entries =
+                _runtimePackages.Settings.PlanetBuilders
+                    .Where(x => x != null)
+                    .OrderBy(x => x.SourceEntityId)
+                    .ThenBy(x => x.RuntimeRevision)
+                    .ToList();
+
+            var details =
+                new string[entries.Count];
+
+            for (int index = 0;
+                index < entries.Count;
+                index++)
+            {
+                details[index] =
+                    BuildApiPlanetDetails(
+                        entries[index]);
+            }
+
+            return details;
+        }
+
+
+        private string BuildApiPlanetDetails(
+            RuntimePlanetBuilderEntry entry)
+        {
+            RuntimePlanetPersistenceType persistenceType =
+                RuntimePackageStore.GetPersistenceType(
+                    entry);
+
+            MyPlanet planet =
+                PlanetLocator.FindByEntityId(
+                    entry.SourceEntityId);
+
+            string liveProviderSubtype =
+                null;
+
+            string liveProviderError =
+                null;
+
+            if (planet != null)
+            {
+                try
+                {
+                    liveProviderSubtype =
+                        ReadCurrentProviderSubtype(
+                            planet);
+                }
+                catch (Exception e)
+                {
+                    liveProviderError =
+                        e.Message;
+                }
+            }
+
+            bool isLive =
+                !string.IsNullOrWhiteSpace(liveProviderSubtype) &&
+                string.Equals(
+                    liveProviderSubtype,
+                    entry.Subtype,
+                    StringComparison.OrdinalIgnoreCase);
+
+            RuntimePersistencePackageEntry package =
+                _runtimePackages.FindPersistenceManifestPackage(
+                    entry.ArchiveFile);
+
+            var report =
+                new StringBuilder();
+
+            report.Append("Planet entity=")
+                .Append(entry.SourceEntityId)
+                .Append(", storage='")
+                .Append(planet == null ? "<missing>" : planet.StorageName)
+                .Append("', live=")
+                .Append(isLive)
+                .AppendLine();
+
+            report.Append("  runtime subtype='")
+                .Append(entry.Subtype)
+                .Append("', live provider='")
+                .Append(string.IsNullOrWhiteSpace(liveProviderSubtype)
+                    ? "<unavailable>"
+                    : liveProviderSubtype)
+                .Append("', revision=")
+                .Append(entry.RuntimeRevision)
+                .Append(", persistence=")
+                .Append(persistenceType)
+                .AppendLine();
+
+            report.Append("  source subtype='")
+                .Append(entry.SourceSubtype)
+                .Append("', seed=")
+                .Append(entry.PlanetSeed)
+                .AppendLine();
+
+            report.Append("  generator='")
+                .Append(entry.GeneratorFile)
+                .Append("', runtime archive='")
+                .Append(entry.ArchiveFile)
+                .Append("'")
+                .AppendLine();
+
+            if (persistenceType ==
+                RuntimePlanetPersistenceType.Procedural)
+            {
+                AppendProceduralPlanetDetails(
+                    report,
+                    entry);
+            }
+            else
+            {
+                report.Append("  authoritative PNG chunks=")
+                    .Append(package == null ? 0 : package.ChunkCount)
+                    .AppendLine();
+            }
+
+            report.Append("  environment preset='")
+                .Append(string.IsNullOrWhiteSpace(entry.EnvironmentPresetName)
+                    ? "<none>"
+                    : entry.EnvironmentPresetName)
+                .Append("', carrier='")
+                .Append(string.IsNullOrWhiteSpace(entry.EnvironmentCarrierSubtype)
+                    ? "<none>"
+                    : entry.EnvironmentCarrierSubtype)
+                .Append("', preset source='")
+                .Append(string.IsNullOrWhiteSpace(
+                        entry.EnvironmentPresetSourceGeneratorSubtype)
+                    ? "<none>"
+                    : entry.EnvironmentPresetSourceGeneratorSubtype)
+                .Append("', preset schema=")
+                .Append(entry.EnvironmentPresetSchemaVersion);
+
+            if (!string.IsNullOrWhiteSpace(liveProviderError))
+            {
+                report.AppendLine()
+                    .Append("  live provider error: ")
+                    .Append(liveProviderError);
+            }
+
+            return report.ToString();
+        }
+
+
+        private void AppendProceduralPlanetDetails(
+            StringBuilder report,
+            RuntimePlanetBuilderEntry entry)
+        {
+            try
+            {
+                RuntimeProceduralPlanetRecipe recipe =
+                    _runtimePackages.LoadRuntimeRecipe(
+                        entry);
+
+                int brushCount =
+                    0;
+
+                int biomeReplacementCount =
+                    0;
+
+                int fractalCount =
+                    0;
+
+                int environmentRuleCount =
+                    0;
+
+                for (int index = 0;
+                    index < recipe.Revisions.Count;
+                    index++)
+                {
+                    RuntimeProceduralRevision revision =
+                        recipe.Revisions[index];
+
+                    brushCount += revision.Brushes.Count;
+                    biomeReplacementCount +=
+                        revision.BiomeReplacements.Count;
+                    fractalCount +=
+                        revision.FractalNoise.Count;
+                    environmentRuleCount +=
+                        revision.EnvironmentRemap.Count;
+                }
+
+                report.Append("  recipe schema=")
+                    .Append(recipe.SchemaVersion)
+                    .Append(", noise version=")
+                    .Append(recipe.NoiseVersion)
+                    .Append(", revisions=")
+                    .Append(recipe.Revisions.Count)
+                    .Append(", brushes=")
+                    .Append(brushCount)
+                    .Append(", biome replacements=")
+                    .Append(biomeReplacementCount)
+                    .Append(", fractals=")
+                    .Append(fractalCount)
+                    .Append(", environment rules=")
+                    .Append(environmentRuleCount)
+                    .AppendLine();
+
+                report.Append("  root folder='")
+                    .Append(recipe.Source.SourceFolderName)
+                    .Append("', base game=")
+                    .Append(recipe.Source.IsBaseGame)
+                    .Append(", workshop=")
+                    .Append(recipe.Source.PublishedFileId)
+                    .Append(", service='")
+                    .Append(string.IsNullOrWhiteSpace(
+                            recipe.Source.PublishedServiceName)
+                        ? "<none>"
+                        : recipe.Source.PublishedServiceName)
+                    .Append("', mod='")
+                    .Append(string.IsNullOrWhiteSpace(recipe.Source.ModName)
+                        ? "<none>"
+                        : recipe.Source.ModName)
+                    .Append("'")
+                    .AppendLine();
+
+                report.Append("  recipe variable='")
+                    .Append(entry.RecipeVariable)
+                    .Append("', authoritative PNG chunks=0")
+                    .AppendLine();
+            }
+            catch (Exception e)
+            {
+                report.Append("  recipe error: ")
+                    .Append(e.Message)
+                    .AppendLine();
+            }
+        }
+
+
         internal ApiData CreateModificationTemplateApi(long planetEntityId)
         {
             if (_isUnloading())
@@ -171,6 +409,19 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 FindRuntimeEntry(
                     currentProviderSubtype);
 
+            bool proceduralPersistenceEligible =
+                currentRuntimeEntry == null ||
+                RuntimePackageStore.GetPersistenceType(
+                    currentRuntimeEntry) ==
+                    RuntimePlanetPersistenceType.Procedural;
+
+            RuntimeProceduralPlanetRecipe inheritedProceduralRecipe =
+                currentRuntimeEntry != null &&
+                proceduralPersistenceEligible
+                    ? _runtimePackages.LoadRuntimeRecipe(
+                        currentRuntimeEntry)
+                    : null;
+
             string sourceArchiveFile =
                 currentRuntimeEntry == null
                     ? null
@@ -197,7 +448,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
 
             string sourceFolderName =
-                currentRuntimeEntry != null
+                inheritedProceduralRecipe != null
+                    ? inheritedProceduralRecipe.Source.SourceFolderName
+                    : currentRuntimeEntry != null
                     ? sourceSubtype
                     :
                 string.IsNullOrWhiteSpace(
@@ -219,6 +472,8 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     currentRuntimeEntry == null
                         ? 0
                         : currentRuntimeEntry.RuntimeRevision,
+                    proceduralPersistenceEligible,
+                    inheritedProceduralRecipe,
                     planetSeed,
                     builder,
                     currentRuntimeEntry == null
@@ -451,27 +706,52 @@ namespace VoxelCubemapApi.Server.PlanetModification
             _runtimePackages.BeginPendingPersistencePackage(
                 pendingEntry);
 
-
-            _planetDataArchives.CreateModifiedArchive(
-                snapshot,
-                archiveFile);
-
-
-            if (!string.IsNullOrWhiteSpace(
-                snapshot.EnvironmentPresetName))
+            if (RuntimePackageStore.GetPersistenceType(pendingEntry) ==
+                RuntimePlanetPersistenceType.Procedural)
             {
-                Dictionary<string, byte[]> archiveFiles =
-                    _planetDataArchives.ReadRuntimeArchive(
-                        archiveFile);
+                RuntimeProceduralPlanetRecipe recipe =
+                    BuildAccumulatedProceduralRecipe(
+                        snapshot);
 
-                ApplyEnvironmentPresetRecipe(
-                    snapshot,
+                byte[] archive =
+                    BuildProceduralArchive(
+                        recipe,
+                        snapshot.Builder,
+                        pendingEntry,
+                        snapshot.TargetPlanet,
+                        snapshot.TemplateId);
+
+                _runtimePackages.SaveRuntimeRecipe(
                     pendingEntry,
-                    archiveFiles);
+                    recipe);
 
-                _planetDataArchives.ReplaceRuntimeArchive(
+                _runtimePackages.SaveDerivedRuntimeArchive(
                     archiveFile,
-                    archiveFiles);
+                    archive);
+            }
+            else
+            {
+                _planetDataArchives.CreateModifiedArchive(
+                    snapshot,
+                    archiveFile);
+
+
+                if (!string.IsNullOrWhiteSpace(
+                    snapshot.EnvironmentPresetName))
+                {
+                    Dictionary<string, byte[]> archiveFiles =
+                        _planetDataArchives.ReadRuntimeArchive(
+                            archiveFile);
+
+                    ApplyEnvironmentPresetRecipe(
+                        snapshot,
+                        pendingEntry,
+                        archiveFiles);
+
+                    _planetDataArchives.ReplaceRuntimeArchive(
+                        archiveFile,
+                        archiveFiles);
+                }
             }
 
             _runtimePackages.SaveGeneratorBuilder(
@@ -529,6 +809,444 @@ namespace VoxelCubemapApi.Server.PlanetModification
         }
 
 
+        internal byte[] RebuildProceduralArchive(
+            RuntimePlanetBuilderEntry entry,
+            RuntimeProceduralPlanetRecipe recipe)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+            MyObjectBuilder_PlanetGeneratorDefinition builder =
+                _runtimePackages.LoadGeneratorBuilderFromWorldStorage(
+                    entry.GeneratorFile);
+
+            try
+            {
+                return BuildProceduralArchive(
+                    recipe,
+                    builder,
+                    entry,
+                    null,
+                    "persisted-" + entry.Subtype);
+            }
+            catch (Exception e)
+            {
+                throw new Exception(
+                    "Could not reconstruct procedural runtime package '" +
+                    entry.Subtype +
+                    "' for planet " +
+                    entry.SourceEntityId +
+                    " (recipe schema " +
+                    entry.RecipeSchemaVersion +
+                    "): " +
+                    e.Message,
+                    e);
+            }
+        }
+
+
+        private RuntimeProceduralPlanetRecipe
+            BuildAccumulatedProceduralRecipe(
+                PlanetModificationSnapshot snapshot)
+        {
+            RuntimeProceduralPlanetRecipe recipe =
+                snapshot.InheritedProceduralRecipe;
+
+            if (recipe == null)
+            {
+                recipe =
+                    new RuntimeProceduralPlanetRecipe
+                    {
+                        SchemaVersion = 1,
+                        Source = CaptureProceduralSource(snapshot),
+                        PlanetSeed = snapshot.PlanetSeed,
+                        NoiseVersion = 1,
+                        Revisions =
+                            new List<RuntimeProceduralRevision>()
+                    };
+            }
+
+            if (recipe.PlanetSeed != snapshot.PlanetSeed)
+            {
+                throw new Exception(
+                    "Procedural lineage planet seed changed from " +
+                    recipe.PlanetSeed +
+                    " to " +
+                    snapshot.PlanetSeed +
+                    ".");
+            }
+
+            var revision =
+                new RuntimeProceduralRevision
+                {
+                    EnvironmentPresetName =
+                        snapshot.EnvironmentPresetName
+                };
+
+            for (int i = 0;
+                i < snapshot.BrushOperations.Count;
+                i++)
+            {
+                BrushOperation operation =
+                    snapshot.BrushOperations[i];
+
+                revision.Brushes.Add(
+                    new RuntimeProceduralBrushOperation
+                    {
+                        LayerIndex = operation.LayerIndex,
+                        FillValue = operation.FillValue,
+                        UseNoise = operation.UseNoise,
+                        NoiseFrequency = operation.NoiseFrequency,
+                        NoiseOctaves = operation.NoiseOctaves,
+                        NoiseSeedOffset = operation.NoiseSeedOffset,
+                        BlendNoiseMinimum = operation.BlendNoiseMinimum,
+                        BlendNoiseMaximum = operation.BlendNoiseMaximum,
+                        MinimumAltitude = operation.MinimumAltitude,
+                        MaximumAltitude = operation.MaximumAltitude,
+                        MinimumLatitude = operation.MinimumLatitude,
+                        MaximumLatitude = operation.MaximumLatitude,
+                        BiomeFilter = operation.BiomeFilter,
+                        MaterialFilter = operation.MaterialFilter
+                    });
+            }
+
+            for (int i = 0;
+                i < snapshot.BiomeReplacementOperations.Count;
+                i++)
+            {
+                BiomeReplacementOperation operation =
+                    snapshot.BiomeReplacementOperations[i];
+
+                revision.BiomeReplacements.Add(
+                    new RuntimeProceduralBiomeReplacement
+                    {
+                        SourceBiome = operation.SourceBiome,
+                        TargetBiome = operation.TargetBiome
+                    });
+            }
+
+            for (int i = 0;
+                i < snapshot.FractalNoiseOperations.Count;
+                i++)
+            {
+                FractalNoiseOperation operation =
+                    snapshot.FractalNoiseOperations[i];
+
+                revision.FractalNoise.Add(
+                    new RuntimeProceduralFractalNoiseOperation
+                    {
+                        PlaneIndex = operation.PlaneIndex,
+                        TargetValue = operation.TargetValue,
+                        CoveragePercent = operation.CoveragePercent,
+                        Threshold = operation.Threshold
+                    });
+            }
+
+            revision.AllocatedComplexMaterialValues.AddRange(
+                snapshot.AllocatedComplexMaterialValues);
+
+            recipe.Revisions.Add(
+                revision);
+
+            RuntimePackageStore.ValidateRuntimeRecipe(
+                recipe,
+                null);
+
+            return recipe;
+        }
+
+
+        private byte[] BuildProceduralArchive(
+            RuntimeProceduralPlanetRecipe recipe,
+            MyObjectBuilder_PlanetGeneratorDefinition builder,
+            RuntimePlanetBuilderEntry entry,
+            MyPlanet targetPlanet,
+            string templateId)
+        {
+            RuntimePackageStore.ValidateRuntimeRecipe(
+                recipe,
+                entry);
+
+            MyPlanetGeneratorDefinition sourceGenerator =
+                ResolveProceduralSourceGenerator(
+                    recipe.Source);
+
+            Dictionary<string, byte[]> sourceFiles =
+                null;
+
+            var pendingStages =
+                new List<PlanetModificationSnapshot>();
+
+            for (int revisionIndex = 0;
+                revisionIndex < recipe.Revisions.Count;
+                revisionIndex++)
+            {
+                RuntimeProceduralRevision revision =
+                    recipe.Revisions[revisionIndex];
+
+                PlanetModificationSnapshot stage =
+                    CreateProceduralRevisionSnapshot(
+                        recipe,
+                        revision,
+                        sourceGenerator,
+                        builder,
+                        targetPlanet,
+                        templateId + "-r" + revisionIndex,
+                        sourceFiles);
+
+                pendingStages.Add(
+                    stage);
+
+                if (!string.IsNullOrWhiteSpace(
+                    revision.EnvironmentPresetName))
+                {
+                    sourceFiles =
+                        _planetDataArchives.BuildProceduralRevisionFiles(
+                            pendingStages,
+                            sourceFiles);
+
+                    pendingStages.Clear();
+
+                    if (revision.EnvironmentRemap.Count > 0)
+                    {
+                        EnvironmentPresetBiomeRemapper.ApplyResolved(
+                            revision.EnvironmentRemap,
+                            sourceFiles,
+                            recipe.PlanetSeed);
+                    }
+                    else
+                    {
+                        revision.EnvironmentRemap =
+                            ApplyEnvironmentPresetRecipe(
+                                stage,
+                                entry,
+                                sourceFiles);
+                    }
+                }
+            }
+
+            if (pendingStages.Count == 0 &&
+                sourceFiles == null)
+            {
+                pendingStages.Add(
+                    CreateProceduralRevisionSnapshot(
+                        recipe,
+                        new RuntimeProceduralRevision(),
+                        sourceGenerator,
+                        builder,
+                        targetPlanet,
+                        templateId,
+                        null));
+            }
+
+            if (pendingStages.Count > 0)
+            {
+                sourceFiles =
+                    _planetDataArchives.BuildProceduralRevisionFiles(
+                        pendingStages,
+                        sourceFiles);
+            }
+
+            return _planetDataArchives.PackProceduralArchive(
+                sourceFiles);
+        }
+
+
+        private static PlanetModificationSnapshot
+            CreateProceduralRevisionSnapshot(
+                RuntimeProceduralPlanetRecipe recipe,
+                RuntimeProceduralRevision revision,
+                MyPlanetGeneratorDefinition sourceGenerator,
+                MyObjectBuilder_PlanetGeneratorDefinition builder,
+                MyPlanet targetPlanet,
+                string templateId,
+                Dictionary<string, byte[]> sourceFiles)
+        {
+            var snapshot =
+                new PlanetModificationSnapshot
+                {
+                    TargetPlanet = targetPlanet,
+                    SourceContext = sourceGenerator.Context,
+                    SourceSubtype = recipe.Source.SourceSubtype,
+                    SourceFolderName = recipe.Source.SourceFolderName,
+                    SourceFiles = sourceFiles,
+                    PlanetSeed = recipe.PlanetSeed,
+                    TemplateId = templateId,
+                    Builder = builder,
+                    Images =
+                        new Dictionary<string, Adk.Image.Png.PlanarPngBitmap>(
+                            StringComparer.OrdinalIgnoreCase),
+                    ImageTransforms =
+                        new Dictionary<string,
+                            List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
+                                StringComparer.OrdinalIgnoreCase),
+                    FractalNoiseOperations =
+                        new List<FractalNoiseOperation>(),
+                    BiomeReplacementOperations =
+                        new List<BiomeReplacementOperation>(),
+                    BrushOperations =
+                        new List<BrushOperation>(),
+                    AllocatedComplexMaterialValues =
+                        new List<byte>(
+                            revision.AllocatedComplexMaterialValues),
+                    EnvironmentPresetName =
+                        revision.EnvironmentPresetName
+                };
+
+            for (int i = 0; i < revision.FractalNoise.Count; i++)
+            {
+                RuntimeProceduralFractalNoiseOperation operation =
+                    revision.FractalNoise[i];
+
+                snapshot.FractalNoiseOperations.Add(
+                    new FractalNoiseOperation
+                    {
+                        PlaneIndex = operation.PlaneIndex,
+                        TargetValue = operation.TargetValue,
+                        CoveragePercent = operation.CoveragePercent,
+                        Threshold = operation.Threshold
+                    });
+            }
+
+            for (int i = 0; i < revision.BiomeReplacements.Count; i++)
+            {
+                RuntimeProceduralBiomeReplacement operation =
+                    revision.BiomeReplacements[i];
+
+                snapshot.BiomeReplacementOperations.Add(
+                    new BiomeReplacementOperation
+                    {
+                        SourceBiome = operation.SourceBiome,
+                        TargetBiome = operation.TargetBiome
+                    });
+            }
+
+            for (int i = 0; i < revision.Brushes.Count; i++)
+            {
+                RuntimeProceduralBrushOperation operation =
+                    revision.Brushes[i];
+
+                snapshot.BrushOperations.Add(
+                    new BrushOperation
+                    {
+                        LayerIndex = operation.LayerIndex,
+                        FillValue = operation.FillValue,
+                        UseNoise = operation.UseNoise,
+                        NoiseFrequency = operation.NoiseFrequency,
+                        NoiseOctaves = operation.NoiseOctaves,
+                        NoiseSeedOffset = operation.NoiseSeedOffset,
+                        BlendNoiseMinimum = operation.BlendNoiseMinimum,
+                        BlendNoiseMaximum = operation.BlendNoiseMaximum,
+                        MinimumAltitude = operation.MinimumAltitude,
+                        MaximumAltitude = operation.MaximumAltitude,
+                        MinimumLatitude = operation.MinimumLatitude,
+                        MaximumLatitude = operation.MaximumLatitude,
+                        BiomeFilter = operation.BiomeFilter,
+                        MaterialFilter = operation.MaterialFilter
+                    });
+            }
+
+            return snapshot;
+        }
+
+
+        private static RuntimeProceduralSource CaptureProceduralSource(
+            PlanetModificationSnapshot snapshot)
+        {
+            if (snapshot.SourceContext == null)
+            {
+                throw new Exception(
+                    "Procedural persistence requires a source definition context.");
+            }
+
+            return new RuntimeProceduralSource
+            {
+                SourceSubtype = snapshot.SourceSubtype,
+                SourceFolderName = snapshot.SourceFolderName,
+                IsBaseGame = snapshot.SourceContext.IsBaseGame,
+                PublishedFileId =
+                    snapshot.SourceContext.IsBaseGame
+                        ? 0
+                        : snapshot.SourceContext.ModItem.PublishedFileId,
+                PublishedServiceName =
+                    snapshot.SourceContext.IsBaseGame
+                        ? null
+                        : snapshot.SourceContext.ModItem.PublishedServiceName,
+                ModName =
+                    string.IsNullOrWhiteSpace(snapshot.SourceContext.ModName)
+                        ? snapshot.SourceContext.ModItem.Name
+                        : snapshot.SourceContext.ModName
+            };
+        }
+
+
+        private static MyPlanetGeneratorDefinition
+            ResolveProceduralSourceGenerator(
+                RuntimeProceduralSource source)
+        {
+            List<MyPlanetGeneratorDefinition> candidates =
+                MyDefinitionManager.Static
+                    .GetPlanetsGeneratorsDefinitions()
+                    .Where(x =>
+                        x != null &&
+                        x.Context != null &&
+                        x.Id.SubtypeName.Equals(
+                            source.SourceSubtype,
+                            StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+            MyPlanetGeneratorDefinition resolved =
+                candidates.FirstOrDefault(x =>
+                    ProceduralSourceContextMatches(
+                        source,
+                        x.Context));
+
+            if (resolved == null)
+            {
+                throw new Exception(
+                    "Procedural root source '" +
+                    source.SourceSubtype +
+                    "' could not be resolved with its persisted content identity.");
+            }
+
+            return resolved;
+        }
+
+
+        private static bool ProceduralSourceContextMatches(
+            RuntimeProceduralSource source,
+            MyModContext context)
+        {
+            if (source.IsBaseGame)
+                return context.IsBaseGame;
+
+            if (context.IsBaseGame)
+                return false;
+
+            if (source.PublishedFileId != 0)
+            {
+                return context.ModItem.PublishedFileId ==
+                        source.PublishedFileId &&
+                    (string.IsNullOrWhiteSpace(
+                            source.PublishedServiceName) ||
+                     string.Equals(
+                        context.ModItem.PublishedServiceName,
+                        source.PublishedServiceName,
+                        StringComparison.OrdinalIgnoreCase));
+            }
+
+            return !string.IsNullOrWhiteSpace(source.ModName) &&
+                (string.Equals(
+                     context.ModName,
+                     source.ModName,
+                     StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(
+                     context.ModItem.Name,
+                     source.ModName,
+                     StringComparison.OrdinalIgnoreCase));
+        }
+
+
         private static RuntimePlanetBuilderEntry CreatePendingRuntimeEntry(
             PlanetModificationSnapshot snapshot)
         {
@@ -556,6 +1274,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
             snapshot.Builder.FolderName =
                 archiveFile;
 
+            bool procedural =
+                snapshot.ProceduralPersistenceEligible;
+
             return new RuntimePlanetBuilderEntry
             {
                 Subtype = runtimeSubtype,
@@ -573,6 +1294,17 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 GrassCoveragePercent = 0,
                 PlanetSeed = snapshot.PlanetSeed,
                 GrassNoiseVersion = 0,
+                PersistenceType =
+                    procedural
+                        ? (int)RuntimePlanetPersistenceType.Procedural
+                        : (int)RuntimePlanetPersistenceType.PngSnapshot,
+                RecipeSchemaVersion =
+                    procedural ? 1 : 0,
+                RecipeVariable =
+                    procedural
+                        ? RuntimePackageStore.BuildRecipeVariableName(
+                            archiveFile)
+                        : null,
                 RuntimeRevision =
                     checked(snapshot.BaseRuntimeRevision + 1)
             };
@@ -630,7 +1362,8 @@ namespace VoxelCubemapApi.Server.PlanetModification
         }
 
 
-        private void ApplyEnvironmentPresetRecipe(
+        private List<RuntimeProceduralEnvironmentMapRule>
+            ApplyEnvironmentPresetRecipe(
             PlanetModificationSnapshot snapshot,
             RuntimePlanetBuilderEntry pendingEntry,
             Dictionary<string, byte[]> archiveFiles)
@@ -647,6 +1380,12 @@ namespace VoxelCubemapApi.Server.PlanetModification
             RemappedEnvironmentPreset remapped =
                 EnvironmentPresetRemapper.Remap(
                     preset,
+                    targetMap);
+
+            List<RuntimeProceduralEnvironmentMapRule> resolvedRules =
+                EnvironmentPresetBiomeRemapper.BuildResolvedRules(
+                    preset,
+                    remapped,
                     targetMap);
 
             int changedBiomePixels =
@@ -680,6 +1419,8 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
             snapshot.Builder.EnvironmentItems =
                 null;
+
+            return resolvedRules;
         }
 
 

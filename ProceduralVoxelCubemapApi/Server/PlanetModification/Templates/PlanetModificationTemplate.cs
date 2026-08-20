@@ -8,6 +8,7 @@ using Generated;
 using VoxelCubemapApi.Server.PlanetModification.Maps;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
+using VoxelCubemapApi.Server.PlanetModification.Persistence;
 using VRage.Game;
 using VRage.ObjectBuilders;
 using VRage.Utils;
@@ -55,6 +56,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         private string _environmentCarrierSubtype;
         private string _environmentPresetName;
         private bool _requiresAuthoritativeImageSync;
+        private readonly bool _proceduralPersistenceEligible;
+        private readonly RuntimeProceduralPlanetRecipe
+            _inheritedProceduralRecipe;
 
         private bool _closed;
         private bool _pushStarted;
@@ -82,6 +86,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             string sourceArchiveFile,
             string currentProviderSubtype,
             ulong baseRuntimeRevision,
+            bool proceduralPersistenceEligible,
+            RuntimeProceduralPlanetRecipe inheritedProceduralRecipe,
             long planetSeed,
             MyObjectBuilder_PlanetGeneratorDefinition builder,
             string environmentCarrierSubtype,
@@ -125,6 +131,12 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
 
             BaseRuntimeRevision =
                 baseRuntimeRevision;
+
+            _proceduralPersistenceEligible =
+                proceduralPersistenceEligible;
+
+            _inheritedProceduralRecipe =
+                inheritedProceduralRecipe;
 
             PlanetSeed =
                 planetSeed;
@@ -281,7 +293,12 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype,
                 EnvironmentPresetName = _environmentPresetName,
                 RequiresAuthoritativeImageSync =
-                    _requiresAuthoritativeImageSync
+                    _requiresAuthoritativeImageSync,
+                ProceduralPersistenceEligible =
+                    _proceduralPersistenceEligible &&
+                    !_requiresAuthoritativeImageSync,
+                InheritedProceduralRecipe =
+                    _inheritedProceduralRecipe
             };
         }
 

@@ -16,7 +16,7 @@ namespace VoxelCubemapApi.Server.Api
         ClientName = "ApiProvider")]
     internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version _apiVersion = new Version(0, 0, 8);
+        private static readonly Version _apiVersion = new Version(0, 0, 9);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
@@ -63,6 +63,18 @@ namespace VoxelCubemapApi.Server.Api
             return _coordinator.GetOrCreatePlanetMetadataProvider(
                 entityId,
                 includedVanilla);
+        }
+
+
+        /// <summary>
+        /// Returns one detailed, human-readable record for every planet
+        /// currently managed by the API. An empty array means that no runtime
+        /// planet packages are registered.
+        /// </summary>
+        [ApiMethod]
+        public string[] GetApiPlanetDetails()
+        {
+            return _coordinator.GetApiPlanetDetails();
         }
 
         /// <summary>

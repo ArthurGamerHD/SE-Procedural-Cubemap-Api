@@ -133,6 +133,9 @@ namespace VoxelCubemapApi.Server
                     _network,
                     delegate { return _unloading; });
 
+            _runtimePackages.ProceduralArchiveBuilder =
+                _modifications.RebuildProceduralArchive;
+
             _runtimePackages.LoadPersistedRuntimeGenerators();
 
             _runtimeSyncReceiver =

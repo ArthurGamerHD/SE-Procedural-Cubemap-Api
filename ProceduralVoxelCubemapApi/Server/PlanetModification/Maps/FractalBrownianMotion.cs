@@ -400,11 +400,15 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
             long planetSeed,
             int grassCoveragePercent)
         {
+            // Endpoint selections are handled directly by the rasterizer and
+            // never compare against Threshold. Keep their persisted/networked
+            // representation finite so XML recipes can be validated and
+            // replayed after a world reload.
             if (grassCoveragePercent <= 0)
-                return double.PositiveInfinity;
+                return 0.0;
 
             if (grassCoveragePercent >= 100)
-                return double.NegativeInfinity;
+                return 0.0;
 
 
             const int SampleResolution =

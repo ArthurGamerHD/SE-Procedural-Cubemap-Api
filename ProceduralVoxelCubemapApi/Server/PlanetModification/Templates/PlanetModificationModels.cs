@@ -65,6 +65,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public string SourceSubtype;
         public string SourceFolderName;
         public string SourceArchiveFile;
+        public Dictionary<string, byte[]> SourceFiles;
         public string CurrentProviderSubtype;
         public ulong BaseRuntimeRevision;
         public long PlanetSeed;
@@ -81,6 +82,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public string EnvironmentCarrierSubtype;
         public string EnvironmentPresetName;
         public bool RequiresAuthoritativeImageSync;
+        public bool ProceduralPersistenceEligible;
+        public RuntimeProceduralPlanetRecipe InheritedProceduralRecipe;
     }
 
 

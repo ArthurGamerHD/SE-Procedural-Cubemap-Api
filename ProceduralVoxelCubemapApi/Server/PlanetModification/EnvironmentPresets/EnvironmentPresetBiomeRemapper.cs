@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using VoxelCubemapApi.Server.PlanetModification.Maps;
+using VoxelCubemapApi.Server.PlanetModification.Persistence;
 
 namespace VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets
 {
@@ -154,6 +155,221 @@ namespace VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets
                         AddEmittedBiomePixel(
                             remapped,
                             targetBiome);
+
+                        if (targetBiome == currentBiome)
+                            continue;
+
+                        biomeValues[pixelIndex] =
+                            targetBiome;
+
+                        changed++;
+                    }
+                }
+
+                archiveFiles[faces[faceIndex]] =
+                    image.Encode();
+            }
+
+            return changed;
+        }
+
+
+        internal static List<RuntimeProceduralEnvironmentMapRule>
+            BuildResolvedRules(
+                EnvironmentPresetSnapshot preset,
+                RemappedEnvironmentPreset remapped,
+                EnvironmentPresetTargetMap targetMap)
+        {
+            if (preset == null)
+                throw new ArgumentNullException("preset");
+
+            if (remapped == null)
+                throw new ArgumentNullException("remapped");
+
+            if (targetMap == null)
+                throw new ArgumentNullException("targetMap");
+
+            Dictionary<string, byte[]> sourceBiomes =
+                BuildSourceBiomes(
+                    preset,
+                    remapped.MatchedMaterials);
+
+            var rules =
+                new List<RuntimeProceduralEnvironmentMapRule>();
+
+            for (int value = 0;
+                value <= byte.MaxValue;
+                value++)
+            {
+                HashSet<string> candidates;
+
+                if (!targetMap.TryGetMaterials(
+                    (byte)value,
+                    out candidates))
+                {
+                    continue;
+                }
+
+                string selectedMaterial =
+                    candidates
+                        .Where(sourceBiomes.ContainsKey)
+                        .OrderBy(
+                            candidate => candidate,
+                            StringComparer.OrdinalIgnoreCase)
+                        .FirstOrDefault();
+
+                if (selectedMaterial == null)
+                    continue;
+
+                byte[] compatibleBiomes =
+                    sourceBiomes[selectedMaterial];
+
+                var persistedBiomes =
+                    new byte[compatibleBiomes.Length];
+
+                Array.Copy(
+                    compatibleBiomes,
+                    persistedBiomes,
+                    compatibleBiomes.Length);
+
+                rules.Add(
+                    new RuntimeProceduralEnvironmentMapRule
+                    {
+                        MaterialMapValue = (byte)value,
+                        CompatibleBiomes = persistedBiomes
+                    });
+            }
+
+            if (rules.Count == 0)
+            {
+                throw new Exception(
+                    "Environment preset produced no persistent biome-map rules.");
+            }
+
+            return rules;
+        }
+
+
+        internal static int ApplyResolved(
+            List<RuntimeProceduralEnvironmentMapRule> rules,
+            Dictionary<string, byte[]> archiveFiles,
+            long planetSeed)
+        {
+            if (rules == null ||
+                rules.Count == 0)
+            {
+                throw new ArgumentException(
+                    "Resolved environment remap contains no rules.",
+                    "rules");
+            }
+
+            if (archiveFiles == null)
+                throw new ArgumentNullException("archiveFiles");
+
+            var compatibleBiomesByMaterial =
+                new Dictionary<byte, byte[]>();
+
+            for (int index = 0;
+                index < rules.Count;
+                index++)
+            {
+                RuntimeProceduralEnvironmentMapRule rule =
+                    rules[index];
+
+                compatibleBiomesByMaterial.Add(
+                    rule.MaterialMapValue,
+                    rule.CompatibleBiomes);
+            }
+
+            string[] faces =
+            {
+                "front_mat.png",
+                "back_mat.png",
+                "left_mat.png",
+                "right_mat.png",
+                "up_mat.png",
+                "down_mat.png"
+            };
+
+            double[][] distributionNoise =
+                BuildDistributionNoise(
+                    planetSeed);
+
+            double[] sortedDistributionSamples =
+                BuildSortedDistributionSamples(
+                    distributionNoise);
+
+            int changed =
+                0;
+
+            for (int faceIndex = 0;
+                faceIndex < faces.Length;
+                faceIndex++)
+            {
+                byte[] encoded;
+
+                if (!archiveFiles.TryGetValue(
+                    faces[faceIndex],
+                    out encoded))
+                {
+                    throw new Exception(
+                        "Runtime planet archive is missing material map '" +
+                        faces[faceIndex] +
+                        "'.");
+                }
+
+                PlanarPngBitmap image =
+                    PlanetMapOperations.DecodePlanetPng(
+                        faces[faceIndex],
+                        encoded);
+
+                byte[] materialValues =
+                    image.Planes[0];
+
+                byte[] biomeValues =
+                    image.Planes[1];
+
+                double[] faceNoise =
+                    distributionNoise[faceIndex];
+
+                for (int y = 0;
+                    y < image.Height;
+                    y++)
+                {
+                    for (int x = 0;
+                        x < image.Width;
+                        x++)
+                    {
+                        int pixelIndex =
+                            y * image.Width + x;
+
+                        byte[] compatibleBiomes;
+
+                        if (!compatibleBiomesByMaterial.TryGetValue(
+                            materialValues[pixelIndex],
+                            out compatibleBiomes))
+                        {
+                            continue;
+                        }
+
+                        byte currentBiome =
+                            biomeValues[pixelIndex];
+
+                        byte targetBiome =
+                            Array.IndexOf(
+                                compatibleBiomes,
+                                currentBiome) >= 0
+                                ? currentBiome
+                                : SelectDistributedBiome(
+                                    compatibleBiomes,
+                                    FractalBrownianMotion
+                                        .SampleBrushNoiseGrid(
+                                            faceNoise,
+                                            x,
+                                            y,
+                                            image.Width,
+                                            image.Height),
+                                    sortedDistributionSamples);
 
                         if (targetBiome == currentBiome)
                             continue;
