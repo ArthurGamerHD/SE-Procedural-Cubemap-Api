@@ -16,6 +16,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Procedural Voxel Cubemap Au
 EndProject
 Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "ClientApi", "ClientApi\ClientApi.shproj", "{53E94834-790B-4B11-BA55-10BB857884E5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Procedural Voxel Cubemap Noise CLI", "ProceduralVoxelCubemapNoiseCli\ProceduralVoxelCubemapNoiseCli.csproj", "{D699D83D-98F6-4907-B728-380038E92D65}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -40,6 +42,10 @@ Global
 		{75D3D1F0-FE32-48B8-B5BA-F9DCCB0761A8}.Release|x64.Build.0 = Release|x64
 		{53E94834-790B-4B11-BA55-10BB857884E5}.Debug|x64.ActiveCfg = Debug|x64
 		{53E94834-790B-4B11-BA55-10BB857884E5}.Release|x64.ActiveCfg = Release|x64
+		{D699D83D-98F6-4907-B728-380038E92D65}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D699D83D-98F6-4907-B728-380038E92D65}.Debug|x64.Build.0 = Debug|Any CPU
+		{D699D83D-98F6-4907-B728-380038E92D65}.Release|x64.ActiveCfg = Release|Any CPU
+		{D699D83D-98F6-4907-B728-380038E92D65}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SharedMSBuildProjectFiles) = preSolution
 		ClientApi\ClientApi.projitems*{839cd095-3b3b-422b-b376-c37553564656}*SharedItemsImports = 4

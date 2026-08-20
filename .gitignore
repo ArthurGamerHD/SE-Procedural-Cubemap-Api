@@ -14,3 +14,4 @@ run-se1-unattended.sh
 verified-deploy.sh
 /WorkflowLauncher
 /ProceduralVoxelCubemapAutoTestMod
+/ProceduralVoxelCubemapNoiseCli
