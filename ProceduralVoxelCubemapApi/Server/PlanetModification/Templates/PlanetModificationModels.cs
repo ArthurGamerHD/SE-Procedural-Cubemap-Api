@@ -4,6 +4,7 @@ using Adk.Image.Png;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using VoxelCubemapApi.Server.PlanetModification.Persistence;
+using Generated;
 using VRage.Game;
 
 namespace VoxelCubemapApi.Server.PlanetModification.Templates
@@ -17,6 +18,8 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public RuntimePlanetBuilderEntry NewEntry;
         public string EnvironmentCarrierSubtype;
         public string OperationName;
+        public NetworkPackage RuntimeSyncPacket;
+        public bool StorageCommitted;
     }
 
 
@@ -63,6 +66,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public string SourceFolderName;
         public string SourceArchiveFile;
         public string CurrentProviderSubtype;
+        public ulong BaseRuntimeRevision;
         public long PlanetSeed;
         public string TemplateId;
         public MyObjectBuilder_PlanetGeneratorDefinition Builder;
@@ -76,6 +80,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public List<byte> AllocatedComplexMaterialValues;
         public string EnvironmentCarrierSubtype;
         public string EnvironmentPresetName;
+        public bool RequiresAuthoritativeImageSync;
     }
 
 

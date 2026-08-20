@@ -12,6 +12,7 @@ using VoxelCubemapApi.Server.PlanetModification.Persistence;
 using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.World;
 using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
+using VoxelCubemapApi.Server.Networking;
 
 using VRage.Game;
 using VRage.Game.Components;
@@ -34,6 +35,8 @@ namespace VoxelCubemapApi.Server
         private RuntimeGeneratorRegistry _runtimeGenerators;
         private PlanetStorageService _planetStorage;
         private EnvironmentPresetCatalog _environmentPresets;
+        private VoxelNetworkSession _network;
+        private RuntimeSyncReceiver _runtimeSyncReceiver;
 
         private readonly VegetationClearScheduler _vegetationClearScheduler =
             new VegetationClearScheduler();
@@ -117,6 +120,9 @@ namespace VoxelCubemapApi.Server
                 new EnvironmentPresetCatalog(
                     _runtimeGenerators);
 
+            _network =
+                new VoxelNetworkSession();
+
             _modifications =
                 new PlanetModificationCoordinator(
                     _runtimePackages,
@@ -124,9 +130,18 @@ namespace VoxelCubemapApi.Server
                     _runtimeGenerators,
                     _planetStorage,
                     _environmentPresets,
+                    _network,
                     delegate { return _unloading; });
 
             _runtimePackages.LoadPersistedRuntimeGenerators();
+
+            _runtimeSyncReceiver =
+                new RuntimeSyncReceiver(
+                    _modifications,
+                    _runtimePackages,
+                    delegate { return _unloading; });
+
+            _network.Init();
 
             _environmentRestorer.Reset();
             _vegetationClearScheduler.Clear();
@@ -158,6 +173,22 @@ namespace VoxelCubemapApi.Server
         {
             _unloading =
                 true;
+
+            if (_network != null)
+            {
+                _network.Dispose();
+
+                _network =
+                    null;
+            }
+
+            if (_runtimeSyncReceiver != null)
+            {
+                _runtimeSyncReceiver.Dispose();
+
+                _runtimeSyncReceiver =
+                    null;
+            }
 
             if (_modifications != null)
             {
@@ -192,6 +223,8 @@ namespace VoxelCubemapApi.Server
                 return;
 
             _modifications.UpdatePlanetMetadataProviders();
+
+            _runtimeSyncReceiver.Update();
 
             _vegetationClearScheduler.Update();
 

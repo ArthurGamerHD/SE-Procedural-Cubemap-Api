@@ -12,6 +12,7 @@ using VoxelCubemapApi.Server.PlanetModification.Runtime;
 using VoxelCubemapApi.Server.PlanetModification.Templates;
 using VoxelCubemapApi.Server.PlanetModification.World;
 using VoxelCubemapApi.Server.PlanetModification.EnvironmentPresets;
+using VoxelCubemapApi.Server.Networking;
 
 using VRage.Game;
 using VRage.Game.ObjectBuilders.Definitions;
@@ -23,9 +24,6 @@ namespace VoxelCubemapApi.Server.PlanetModification
 {
     internal sealed class PlanetModificationCoordinator
     {
-        private const string RuntimeGeneratorDataFolderPrefix =
-            "PlanetGenerator_";
-
         private const string GenericGeneratorFileSuffix =
             ".generator.xml";
 
@@ -50,6 +48,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
         private readonly RuntimeGeneratorRegistry _runtimeGenerators;
         private readonly PlanetStorageService _planetStorage;
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
+        private readonly VoxelNetworkSession _network;
         private readonly Func<bool> _isUnloading;
 
         private readonly Dictionary<long, List<Action<long, string>>>
@@ -69,6 +68,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
             RuntimeGeneratorRegistry runtimeGenerators,
             PlanetStorageService planetStorage,
             EnvironmentPresetCatalog environmentPresetCatalog,
+            VoxelNetworkSession network,
             Func<bool> isUnloading)
         {
             if (runtimePackages == null)
@@ -85,6 +85,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
             if (environmentPresetCatalog == null)
                 throw new ArgumentNullException("environmentPresetCatalog");
+
+            if (network == null)
+                throw new ArgumentNullException("network");
 
             if (isUnloading == null)
                 throw new ArgumentNullException("isUnloading");
@@ -103,6 +106,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
             _environmentPresetCatalog =
                 environmentPresetCatalog;
+
+            _network =
+                network;
 
             _isUnloading =
                 isUnloading;
@@ -210,6 +216,9 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     sourceFolderName,
                     sourceArchiveFile,
                     currentProviderSubtype,
+                    currentRuntimeEntry == null
+                        ? 0
+                        : currentRuntimeEntry.RuntimeRevision,
                     planetSeed,
                     builder,
                     currentRuntimeEntry == null
@@ -249,6 +258,48 @@ namespace VoxelCubemapApi.Server.PlanetModification
             }
 
 
+            try
+            {
+                string liveProviderSubtype =
+                    ReadCurrentProviderSubtype(
+                        template.TargetPlanet);
+
+                RuntimePlanetBuilderEntry liveRuntimeEntry =
+                    FindRuntimeEntry(
+                        liveProviderSubtype);
+
+                ulong liveRevision =
+                    liveRuntimeEntry == null
+                        ? 0
+                        : liveRuntimeEntry.RuntimeRevision;
+
+                if (!string.Equals(
+                        liveProviderSubtype,
+                        template.CurrentProviderSubtype,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    liveRevision != template.BaseRuntimeRevision)
+                {
+                    DispatchPushResponse(
+                        callback,
+                        false,
+                        "Planet state changed after this modification template " +
+                        "was created. Create a new template and retry.");
+
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                DispatchPushResponse(
+                    callback,
+                    false,
+                    "Could not validate the modification base revision: " +
+                    e.Message);
+
+                return;
+            }
+
+
             PlanetModificationSnapshot snapshot;
 
             try
@@ -274,11 +325,52 @@ namespace VoxelCubemapApi.Server.PlanetModification
             PlanetModificationWorkResult workResult =
                 null;
 
+            RuntimePlanetBuilderEntry preparedEntry =
+                null;
+
             RuntimePlanetBuilderEntry pendingEntry =
                 null;
 
             Exception workError =
                 null;
+
+            bool recipePreparedEarly =
+                false;
+
+
+            if (!snapshot.RequiresAuthoritativeImageSync)
+            {
+                try
+                {
+                    preparedEntry =
+                        CreatePendingRuntimeEntry(
+                            snapshot);
+
+                    PlanetDataArchiveService.ResolveFractalThresholds(
+                        snapshot);
+
+                    _network.BroadcastToConnectedPlayers(
+                        RuntimeSyncBuilder.BuildOperation(
+                            snapshot,
+                            preparedEntry));
+
+                    recipePreparedEarly =
+                        true;
+                }
+                catch (Exception e)
+                {
+                    _requestInProgress =
+                        false;
+
+                    DispatchPushResponse(
+                        callback,
+                        false,
+                        "Could not start synchronized modification push: " +
+                        e.Message);
+
+                    return;
+                }
+            }
 
 
             try
@@ -291,6 +383,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
                             workResult =
                                 PrepareModificationPush(
                                     snapshot,
+                                    preparedEntry,
                                     out pendingEntry);
                         }
                         catch (Exception e)
@@ -307,12 +400,20 @@ namespace VoxelCubemapApi.Server.PlanetModification
                                     workResult,
                                     workError,
                                     pendingEntry,
+                                    recipePreparedEarly,
                                     callback);
                             });
                     });
             }
             catch (Exception e)
             {
+                if (recipePreparedEarly)
+                {
+                    BroadcastRuntimeRevisionDecision(
+                        preparedEntry,
+                        false);
+                }
+
                 _requestInProgress =
                     false;
 
@@ -327,59 +428,25 @@ namespace VoxelCubemapApi.Server.PlanetModification
 
         private PlanetModificationWorkResult PrepareModificationPush(
             PlanetModificationSnapshot snapshot,
+            RuntimePlanetBuilderEntry preparedEntry,
             out RuntimePlanetBuilderEntry pendingEntry)
         {
-            pendingEntry =
-                null;
-
             if (snapshot == null)
                 throw new ArgumentNullException("snapshot");
 
+            pendingEntry =
+                preparedEntry ??
+                CreatePendingRuntimeEntry(
+                    snapshot);
 
             string runtimeSubtype =
-                "PlanetModification_" +
-                snapshot.TemplateId;
-
-            string packageStem =
-                RuntimeGeneratorDataFolderPrefix +
-                runtimeSubtype;
+                pendingEntry.Subtype;
 
             string archiveFile =
-                packageStem +
-                ".zip";
+                pendingEntry.ArchiveFile;
 
             string generatorFile =
-                packageStem +
-                GenericGeneratorFileSuffix;
-
-            snapshot.Builder.Id =
-                new SerializableDefinitionId(
-                    typeof(MyObjectBuilder_PlanetGeneratorDefinition),
-                    runtimeSubtype);
-
-            snapshot.Builder.FolderName =
-                archiveFile;
-
-
-            pendingEntry =
-                new RuntimePlanetBuilderEntry
-                {
-                    Subtype = runtimeSubtype,
-                    SourceSubtype = snapshot.SourceSubtype,
-                    SourceEntityId = snapshot.TargetPlanet.EntityId,
-                    EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
-                    EnvironmentPresetName = snapshot.EnvironmentPresetName,
-                    EnvironmentPresetSchemaVersion =
-                        string.IsNullOrWhiteSpace(snapshot.EnvironmentPresetName)
-                            ? 0
-                            : 1,
-                    GeneratorFile = generatorFile,
-                    ArchiveFile = archiveFile,
-                    GrassMaterialValue = 0,
-                    GrassCoveragePercent = 0,
-                    PlanetSeed = snapshot.PlanetSeed,
-                    GrassNoiseVersion = 0
-                };
+                pendingEntry.GeneratorFile;
 
             _runtimePackages.BeginPendingPersistencePackage(
                 pendingEntry);
@@ -393,60 +460,18 @@ namespace VoxelCubemapApi.Server.PlanetModification
             if (!string.IsNullOrWhiteSpace(
                 snapshot.EnvironmentPresetName))
             {
-                EnvironmentPresetSnapshot preset =
-                    _environmentPresetCatalog.Resolve(
-                        snapshot.EnvironmentPresetName);
-
-                EnvironmentPresetTargetMap targetMap =
-                    EnvironmentPresetTargetMap.Build(
-                        snapshot.Builder,
-                        _planetDataArchives.ReadRuntimeArchive(
-                            archiveFile));
-
-                RemappedEnvironmentPreset remapped =
-                    EnvironmentPresetRemapper.Remap(
-                        preset,
-                        targetMap);
-
                 Dictionary<string, byte[]> archiveFiles =
                     _planetDataArchives.ReadRuntimeArchive(
                         archiveFile);
 
-                int changedBiomePixels =
-                    EnvironmentPresetBiomeRemapper.Apply(
-                        preset,
-                        remapped,
-                        targetMap,
-                        archiveFiles,
-                        snapshot.PlanetSeed);
+                ApplyEnvironmentPresetRecipe(
+                    snapshot,
+                    pendingEntry,
+                    archiveFiles);
 
                 _planetDataArchives.ReplaceRuntimeArchive(
                     archiveFile,
                     archiveFiles);
-
-                MyPlanetGeneratorDefinition presetCarrier =
-                    RuntimeEnvironmentFactory.ResolveCarrier(
-                        preset);
-
-                snapshot.EnvironmentCarrierSubtype =
-                    presetCarrier.Id.SubtypeName;
-
-                pendingEntry.EnvironmentCarrierSubtype =
-                    presetCarrier.Id.SubtypeName;
-
-                pendingEntry.EnvironmentPresetSourceGeneratorSubtype =
-                    preset.SourceGeneratorSubtype;
-
-                LogEnvironmentPresetReport(
-                    preset,
-                    remapped,
-                    changedBiomePixels);
-
-                PlanetEnvironmentService.EnsureBiomeMapEnabled(
-                    snapshot.Builder);
-
-                snapshot.Builder.EnvironmentItems =
-                    null;
             }
 
             _runtimePackages.SaveGeneratorBuilder(
@@ -490,7 +515,171 @@ namespace VoxelCubemapApi.Server.PlanetModification
             result.NewEntry =
                 pendingEntry;
 
+            result.RuntimeSyncPacket =
+                snapshot.RequiresAuthoritativeImageSync
+                    ? (Generated.NetworkPackage)
+                        RuntimeSyncBuilder.BuildImages(
+                            snapshot,
+                            pendingEntry,
+                            _planetDataArchives.ReadRuntimeArchive(
+                                archiveFile))
+                    : null;
+
             return result;
+        }
+
+
+        private static RuntimePlanetBuilderEntry CreatePendingRuntimeEntry(
+            PlanetModificationSnapshot snapshot)
+        {
+            string runtimeSubtype =
+                "PlanetModification_" +
+                snapshot.TemplateId;
+
+            string packageStem =
+                BuildRuntimePackageStem(
+                    snapshot);
+
+            string archiveFile =
+                packageStem +
+                ".zip";
+
+            string generatorFile =
+                packageStem +
+                GenericGeneratorFileSuffix;
+
+            snapshot.Builder.Id =
+                new SerializableDefinitionId(
+                    typeof(MyObjectBuilder_PlanetGeneratorDefinition),
+                    runtimeSubtype);
+
+            snapshot.Builder.FolderName =
+                archiveFile;
+
+            return new RuntimePlanetBuilderEntry
+            {
+                Subtype = runtimeSubtype,
+                SourceSubtype = snapshot.SourceSubtype,
+                SourceEntityId = snapshot.TargetPlanet.EntityId,
+                EnvironmentCarrierSubtype = snapshot.EnvironmentCarrierSubtype,
+                EnvironmentPresetName = snapshot.EnvironmentPresetName,
+                EnvironmentPresetSchemaVersion =
+                    string.IsNullOrWhiteSpace(snapshot.EnvironmentPresetName)
+                        ? 0
+                        : 1,
+                GeneratorFile = generatorFile,
+                ArchiveFile = archiveFile,
+                GrassMaterialValue = 0,
+                GrassCoveragePercent = 0,
+                PlanetSeed = snapshot.PlanetSeed,
+                GrassNoiseVersion = 0,
+                RuntimeRevision =
+                    checked(snapshot.BaseRuntimeRevision + 1)
+            };
+        }
+
+
+        private static string BuildRuntimePackageStem(
+            PlanetModificationSnapshot snapshot)
+        {
+            string planetIdentity =
+                snapshot.TargetPlanet.StorageName;
+
+            if (string.IsNullOrWhiteSpace(
+                planetIdentity))
+            {
+                planetIdentity =
+                    snapshot.SourceSubtype +
+                    "-" +
+                    snapshot.TargetPlanet.EntityId;
+            }
+
+            char[] safeIdentity =
+                planetIdentity.Trim().ToCharArray();
+
+            for (int index = 0;
+                index < safeIdentity.Length;
+                index++)
+            {
+                char value =
+                    safeIdentity[index];
+
+                bool safe =
+                    (value >= 'a' && value <= 'z') ||
+                    (value >= 'A' && value <= 'Z') ||
+                    (value >= '0' && value <= '9') ||
+                    value == '-' ||
+                    value == '_';
+
+                if (!safe)
+                    safeIdentity[index] = '-';
+            }
+
+            string safePlanetIdentity =
+                new string(
+                    safeIdentity)
+                    .Trim('-', '_');
+
+            if (safePlanetIdentity.Length == 0)
+                safePlanetIdentity = "Planet";
+
+            return
+                safePlanetIdentity +
+                "-Modification_" +
+                snapshot.TemplateId;
+        }
+
+
+        private void ApplyEnvironmentPresetRecipe(
+            PlanetModificationSnapshot snapshot,
+            RuntimePlanetBuilderEntry pendingEntry,
+            Dictionary<string, byte[]> archiveFiles)
+        {
+            EnvironmentPresetSnapshot preset =
+                _environmentPresetCatalog.Resolve(
+                    snapshot.EnvironmentPresetName);
+
+            EnvironmentPresetTargetMap targetMap =
+                EnvironmentPresetTargetMap.Build(
+                    snapshot.Builder,
+                    archiveFiles);
+
+            RemappedEnvironmentPreset remapped =
+                EnvironmentPresetRemapper.Remap(
+                    preset,
+                    targetMap);
+
+            int changedBiomePixels =
+                EnvironmentPresetBiomeRemapper.Apply(
+                    preset,
+                    remapped,
+                    targetMap,
+                    archiveFiles,
+                    snapshot.PlanetSeed);
+
+            MyPlanetGeneratorDefinition presetCarrier =
+                RuntimeEnvironmentFactory.ResolveCarrier(
+                    preset);
+
+            snapshot.EnvironmentCarrierSubtype =
+                presetCarrier.Id.SubtypeName;
+
+            pendingEntry.EnvironmentCarrierSubtype =
+                presetCarrier.Id.SubtypeName;
+
+            pendingEntry.EnvironmentPresetSourceGeneratorSubtype =
+                preset.SourceGeneratorSubtype;
+
+            LogEnvironmentPresetReport(
+                preset,
+                remapped,
+                changedBiomePixels);
+
+            PlanetEnvironmentService.EnsureBiomeMapEnabled(
+                snapshot.Builder);
+
+            snapshot.Builder.EnvironmentItems =
+                null;
         }
 
 
@@ -532,6 +721,7 @@ namespace VoxelCubemapApi.Server.PlanetModification
             PlanetModificationWorkResult workResult,
             Exception workError,
             RuntimePlanetBuilderEntry pendingEntry,
+            bool recipePreparedEarly,
             Action<bool, string> callback)
         {
             bool commitAttempted =
@@ -604,6 +794,30 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     workResult.TargetPlanet.EntityId,
                     workResult.NewEntry.Subtype);
 
+                try
+                {
+                    if (recipePreparedEarly)
+                    {
+                        BroadcastRuntimeRevisionDecision(
+                            workResult.NewEntry,
+                            true);
+                    }
+                    else
+                    {
+                        _network.BroadcastToConnectedPlayers(
+                            workResult.RuntimeSyncPacket);
+                    }
+                }
+                catch (Exception broadcastError)
+                {
+                    // The authoritative commit already succeeded. A transport
+                    // failure must not report the committed Push as rolled back.
+                    MyLog.Default.WriteLineAndConsole(
+                        "[Voxel Cubemap API] Runtime sync broadcast failed after " +
+                        "commit: " +
+                        broadcastError);
+                }
+
                 DispatchPushResponse(
                     callback,
                     true,
@@ -672,6 +886,16 @@ namespace VoxelCubemapApi.Server.PlanetModification
                         "the live provider could not be resolved safely.");
                 }
 
+                if (recipePreparedEarly)
+                {
+                    BroadcastRuntimeRevisionDecision(
+                        pendingEntry ??
+                        (workResult == null
+                            ? null
+                            : workResult.NewEntry),
+                        storageCommitted);
+                }
+
 
                 MyLog.Default.WriteLineAndConsole(
                     "[Voxel Cubemap API] Push failed: " +
@@ -686,6 +910,35 @@ namespace VoxelCubemapApi.Server.PlanetModification
             {
                 _requestInProgress =
                     false;
+            }
+        }
+
+
+        private void BroadcastRuntimeRevisionDecision(
+            RuntimePlanetBuilderEntry entry,
+            bool commit)
+        {
+            if (entry == null)
+                return;
+
+            try
+            {
+                _network.BroadcastToConnectedPlayers(
+                    new RuntimeRevisionDecision
+                    {
+                        PlanetEntityId = entry.SourceEntityId,
+                        Revision = entry.RuntimeRevision,
+                        Commit = commit,
+                        RuntimeSubtype = entry.Subtype
+                    });
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[Voxel Cubemap API] Runtime revision " +
+                    (commit ? "commit" : "abort") +
+                    " decision could not be broadcast: " +
+                    e);
             }
         }
 
@@ -710,6 +963,612 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     "[Voxel Cubemap API] Push callback failed: " +
                     e);
             }
+        }
+
+
+        internal PlanetModificationWorkResult PrepareRuntimeOperationReplay(
+            RuntimeOperationSync packet)
+        {
+            if (packet == null)
+                throw new ArgumentNullException("packet");
+
+            PlanetModificationSnapshot snapshot =
+                CreateRuntimeReplaySnapshot(
+                    packet.PlanetEntityId,
+                    packet.Revision,
+                    packet.RuntimeSubtype,
+                    packet.PlanetSeed,
+                    packet.GeneratorDefinitionXml,
+                    packet.EnvironmentCarrierSubtype,
+                    packet.EnvironmentPresetName);
+
+            snapshot.FractalNoiseOperations =
+                ConvertFractalNoiseOperations(
+                    packet.FractalNoiseOperations);
+
+            snapshot.BiomeReplacementOperations =
+                ConvertBiomeReplacementOperations(
+                    packet.BiomeReplacementOperations);
+
+            snapshot.BrushOperations =
+                ConvertBrushOperations(
+                    packet.BrushOperations);
+
+            snapshot.AllocatedComplexMaterialValues =
+                packet.AllocatedComplexMaterialValues == null
+                    ? new List<byte>()
+                    : new List<byte>(
+                        packet.AllocatedComplexMaterialValues);
+
+            Dictionary<string, byte[]> archiveFiles;
+
+            byte[] archive =
+                _planetDataArchives.BuildModifiedArchive(
+                    snapshot,
+                    false,
+                    out archiveFiles);
+
+            RuntimePlanetBuilderEntry entry =
+                CreateRuntimeReplayEntry(
+                    packet.PlanetEntityId,
+                    packet.Revision,
+                    packet.RuntimeSubtype,
+                    packet.GeneratorFile,
+                    packet.ArchiveFile,
+                    packet.SourceSubtype,
+                    packet.EnvironmentCarrierSubtype,
+                    packet.EnvironmentPresetName,
+                    packet.EnvironmentPresetSourceGeneratorSubtype,
+                    packet.EnvironmentPresetSchemaVersion,
+                    packet.PlanetSeed);
+
+            if (!string.IsNullOrWhiteSpace(
+                snapshot.EnvironmentPresetName))
+            {
+                ApplyEnvironmentPresetRecipe(
+                    snapshot,
+                    entry,
+                    archiveFiles);
+
+                archive =
+                    _planetDataArchives.BuildAuthoritativeImageArchive(
+                        archiveFiles);
+            }
+
+            return PrepareRuntimeReplaySwap(
+                snapshot,
+                entry,
+                packet.GeneratorDefinitionXml,
+                archive);
+        }
+
+
+        internal PlanetModificationWorkResult PrepareRuntimeImageReplay(
+            RuntimeImageSync packet)
+        {
+            if (packet == null)
+                throw new ArgumentNullException("packet");
+
+            PlanetModificationSnapshot snapshot =
+                CreateRuntimeReplaySnapshot(
+                    packet.PlanetEntityId,
+                    packet.Revision,
+                    packet.RuntimeSubtype,
+                    packet.PlanetSeed,
+                    packet.GeneratorDefinitionXml,
+                    packet.EnvironmentCarrierSubtype,
+                    packet.EnvironmentPresetName);
+
+            var images =
+                new Dictionary<string, byte[]>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            if (packet.Images == null)
+                throw new ArgumentException(
+                    "Runtime image packet has no images.",
+                    "packet");
+
+            long imageBytes =
+                0;
+
+            for (int index = 0;
+                index < packet.Images.Count;
+                index++)
+            {
+                SyncedCubemapImage image =
+                    packet.Images[index];
+
+                if (image == null ||
+                    image.PngData == null ||
+                    image.PngData.Length == 0)
+                {
+                    throw new ArgumentException(
+                        "Runtime image packet contains an empty image.",
+                        "packet");
+                }
+
+                string imageName =
+                    Maps.PlanetMapFileNames.Validate(
+                        image.ImageName);
+
+                if (images.ContainsKey(
+                    imageName))
+                {
+                    throw new ArgumentException(
+                        "Runtime image packet contains duplicate image '" +
+                        imageName +
+                        "'.",
+                        "packet");
+                }
+
+                imageBytes +=
+                    image.PngData.Length;
+
+                if (imageBytes >
+                    VoxelNetworkSession.MAX_RUNTIME_IMAGE_BYTES)
+                {
+                    throw new ArgumentException(
+                        "Runtime image packet exceeds the image-byte policy.",
+                        "packet");
+                }
+
+                images.Add(
+                    imageName,
+                    image.PngData);
+            }
+
+            byte[] archive =
+                _planetDataArchives.BuildAuthoritativeImageArchive(
+                    images);
+
+            RuntimePlanetBuilderEntry entry =
+                CreateRuntimeReplayEntry(
+                    packet.PlanetEntityId,
+                    packet.Revision,
+                    packet.RuntimeSubtype,
+                    packet.GeneratorFile,
+                    packet.ArchiveFile,
+                    packet.SourceSubtype,
+                    packet.EnvironmentCarrierSubtype,
+                    packet.EnvironmentPresetName,
+                    packet.EnvironmentPresetSourceGeneratorSubtype,
+                    packet.EnvironmentPresetSchemaVersion,
+                    packet.PlanetSeed);
+
+            return PrepareRuntimeReplaySwap(
+                snapshot,
+                entry,
+                packet.GeneratorDefinitionXml,
+                archive);
+        }
+
+
+        internal void CommitRuntimeReplay(
+            PlanetModificationWorkResult workResult)
+        {
+            if (workResult == null)
+                throw new ArgumentNullException("workResult");
+
+            if (MyAPIGateway.Session.IsServer)
+            {
+                throw new InvalidOperationException(
+                    "Authoritative servers cannot apply client runtime replay.");
+            }
+
+            _planetStorage.Commit(
+                workResult);
+
+            workResult.StorageCommitted =
+                true;
+
+            _runtimePackages.CommitTransientRuntimePackage(
+                workResult.NewEntry,
+                workResult.ReplacementGenerator);
+
+            InvalidatePlanetMetadataProvider(
+                workResult.TargetPlanet.EntityId,
+                workResult.NewEntry.Subtype);
+        }
+
+
+        internal void DiscardRuntimeReplay(
+            PlanetModificationWorkResult workResult)
+        {
+            if (workResult == null ||
+                workResult.StorageCommitted)
+            {
+                return;
+            }
+
+            _runtimePackages.DiscardTransientRuntimePackage(
+                workResult.NewEntry);
+        }
+
+
+        private PlanetModificationSnapshot CreateRuntimeReplaySnapshot(
+            long planetEntityId,
+            ulong revision,
+            string runtimeSubtype,
+            long planetSeed,
+            string generatorXml,
+            string environmentCarrierSubtype,
+            string environmentPresetName)
+        {
+            if (MyAPIGateway.Session.IsServer)
+            {
+                throw new InvalidOperationException(
+                    "Runtime replay is only valid on a remote client.");
+            }
+
+            MyPlanet targetPlanet =
+                PlanetLocator.FindByEntityId(
+                    planetEntityId);
+
+            if (targetPlanet == null ||
+                targetPlanet.Generator == null)
+            {
+                throw new Exception(
+                    "Runtime sync target planet " +
+                    planetEntityId +
+                    " is not loaded.");
+            }
+
+            long livePlanetSeed;
+            string currentProviderSubtype;
+
+            _planetStorage.ReadProviderIdentity(
+                targetPlanet,
+                out livePlanetSeed,
+                out currentProviderSubtype);
+
+            RuntimePlanetBuilderEntry currentEntry =
+                FindRuntimeEntry(
+                    currentProviderSubtype);
+
+            ulong currentRevision =
+                currentEntry == null
+                    ? 0
+                    : currentEntry.RuntimeRevision;
+
+            if (currentRevision == ulong.MaxValue ||
+                revision != currentRevision + 1)
+            {
+                throw new Exception(
+                    "Runtime replay base revision changed. Local=" +
+                    currentRevision +
+                    ", packet=" +
+                    revision +
+                    ".");
+            }
+
+            if (livePlanetSeed != planetSeed)
+            {
+                throw new Exception(
+                    "Runtime replay planet seed mismatch. Local=" +
+                    livePlanetSeed +
+                    ", packet=" +
+                    planetSeed +
+                    ".");
+            }
+
+            MyObjectBuilder_PlanetGeneratorDefinition builder =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<MyObjectBuilder_PlanetGeneratorDefinition>(
+                        generatorXml);
+
+            if (builder == null ||
+                !string.Equals(
+                    builder.Id.SubtypeName,
+                    runtimeSubtype,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception(
+                    "Runtime sync generator XML does not match subtype '" +
+                    runtimeSubtype +
+                    "'.");
+            }
+
+            string sourceSubtype;
+
+            MyPlanetGeneratorDefinition sourceGenerator =
+                ResolveOriginalSourceGenerator(
+                    targetPlanet,
+                    currentProviderSubtype,
+                    out sourceSubtype);
+
+            string sourceFolderName =
+                string.IsNullOrWhiteSpace(
+                    sourceGenerator.FolderName)
+                    ? sourceSubtype
+                    : sourceGenerator.FolderName;
+
+            return new PlanetModificationSnapshot
+            {
+                TargetPlanet = targetPlanet,
+                SourceContext = sourceGenerator.Context,
+                SourceSubtype = sourceSubtype,
+                SourceFolderName = sourceFolderName,
+                SourceArchiveFile =
+                    currentEntry == null
+                        ? null
+                        : currentEntry.ArchiveFile,
+                CurrentProviderSubtype = currentProviderSubtype,
+                BaseRuntimeRevision = currentRevision,
+                PlanetSeed = planetSeed,
+                TemplateId = runtimeSubtype,
+                Builder = builder,
+                Images =
+                    new Dictionary<string, Adk.Image.Png.PlanarPngBitmap>(
+                        StringComparer.OrdinalIgnoreCase),
+                ImageTransforms =
+                    new Dictionary<string,
+                        List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
+                            StringComparer.OrdinalIgnoreCase),
+                FractalNoiseOperations =
+                    new List<FractalNoiseOperation>(),
+                BiomeReplacementOperations =
+                    new List<BiomeReplacementOperation>(),
+                BrushOperations =
+                    new List<BrushOperation>(),
+                AllocatedComplexMaterialValues =
+                    new List<byte>(),
+                EnvironmentCarrierSubtype =
+                    environmentCarrierSubtype,
+                EnvironmentPresetName =
+                    environmentPresetName
+            };
+        }
+
+
+        private PlanetModificationWorkResult PrepareRuntimeReplaySwap(
+            PlanetModificationSnapshot snapshot,
+            RuntimePlanetBuilderEntry entry,
+            string generatorXml,
+            byte[] archive)
+        {
+            bool staged =
+                false;
+
+            try
+            {
+                snapshot.Builder.FolderName =
+                    entry.ArchiveFile;
+
+                string normalizedGeneratorXml =
+                    MyAPIGateway.Utilities.SerializeToXML(
+                        snapshot.Builder);
+
+                staged =
+                    true;
+
+                _runtimePackages.StageTransientRuntimePackage(
+                    entry,
+                    normalizedGeneratorXml,
+                    archive);
+
+                string currentSavePath =
+                    RuntimeGeneratorRegistry.NormalizePath(
+                        MyAPIGateway.Session.CurrentPath);
+
+                if (string.IsNullOrWhiteSpace(
+                    currentSavePath))
+                {
+                    throw new Exception(
+                        "The client's active save path is unavailable during " +
+                        "runtime replay.");
+                }
+
+                string absoluteFolder =
+                    _runtimeGenerators.BuildWorldStoragePath(
+                        currentSavePath,
+                        entry.ArchiveFile);
+
+                string expectedStorageRoot =
+                    currentSavePath.TrimEnd('/') +
+                    "/Storage/";
+
+                if (!RuntimeGeneratorRegistry.NormalizePath(
+                        absoluteFolder)
+                    .StartsWith(
+                        expectedStorageRoot,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new Exception(
+                        "Runtime replay archive resolved outside the client's " +
+                        "active save path. CurrentPath='" +
+                        currentSavePath +
+                        "', archive='" +
+                        absoluteFolder +
+                        "'.");
+                }
+
+                MyPlanetGeneratorDefinition runtimeGenerator =
+                    _runtimeGenerators.RegisterDefinition(
+                        snapshot.Builder,
+                        entry.Subtype,
+                        absoluteFolder,
+                        0,
+                        false);
+
+                PlanetEnvironmentService.BindRuntimeGenerator(
+                    runtimeGenerator,
+                    entry.EnvironmentCarrierSubtype);
+
+                PlanetModificationWorkResult result =
+                    _planetStorage.PrepareSwap(
+                        snapshot.TargetPlanet,
+                        runtimeGenerator,
+                        snapshot.CurrentProviderSubtype,
+                        "runtime multiplayer replay");
+
+                result.EnvironmentCarrierSubtype =
+                    entry.EnvironmentCarrierSubtype;
+
+                result.NewEntry =
+                    entry;
+
+                return result;
+            }
+            catch
+            {
+                if (staged)
+                {
+                    _runtimePackages.DiscardTransientRuntimePackage(
+                        entry);
+                }
+
+                throw;
+            }
+        }
+
+
+        private static RuntimePlanetBuilderEntry CreateRuntimeReplayEntry(
+            long planetEntityId,
+            ulong revision,
+            string runtimeSubtype,
+            string generatorFile,
+            string archiveFile,
+            string sourceSubtype,
+            string environmentCarrierSubtype,
+            string environmentPresetName,
+            string environmentPresetSourceGeneratorSubtype,
+            int environmentPresetSchemaVersion,
+            long planetSeed)
+        {
+            return new RuntimePlanetBuilderEntry
+            {
+                Subtype = runtimeSubtype,
+                SourceSubtype = sourceSubtype,
+                SourceEntityId = planetEntityId,
+                EnvironmentCarrierSubtype = environmentCarrierSubtype,
+                EnvironmentPresetName = environmentPresetName,
+                EnvironmentPresetSourceGeneratorSubtype =
+                    environmentPresetSourceGeneratorSubtype,
+                EnvironmentPresetSchemaVersion =
+                    environmentPresetSchemaVersion,
+                GeneratorFile = generatorFile,
+                ArchiveFile = archiveFile,
+                GrassMaterialValue = 0,
+                GrassCoveragePercent = 0,
+                PlanetSeed = planetSeed,
+                GrassNoiseVersion = 0,
+                RuntimeRevision = revision
+            };
+        }
+
+
+        private static List<FractalNoiseOperation>
+            ConvertFractalNoiseOperations(
+                List<SyncedFractalNoiseOperation> operations)
+        {
+            var result =
+                new List<FractalNoiseOperation>();
+
+            if (operations == null)
+                return result;
+
+            for (int index = 0;
+                index < operations.Count;
+                index++)
+            {
+                SyncedFractalNoiseOperation operation =
+                    operations[index];
+
+                if (operation == null)
+                    throw new ArgumentException(
+                        "Runtime packet contains a null fractal operation.",
+                        "operations");
+
+                result.Add(
+                    new FractalNoiseOperation
+                    {
+                        PlaneIndex = operation.PlaneIndex,
+                        TargetValue = operation.TargetValue,
+                        CoveragePercent = operation.CoveragePercent,
+                        Threshold = operation.Threshold
+                    });
+            }
+
+            return result;
+        }
+
+
+        private static List<BiomeReplacementOperation>
+            ConvertBiomeReplacementOperations(
+                List<SyncedBiomeReplacementOperation> operations)
+        {
+            var result =
+                new List<BiomeReplacementOperation>();
+
+            if (operations == null)
+                return result;
+
+            for (int index = 0;
+                index < operations.Count;
+                index++)
+            {
+                SyncedBiomeReplacementOperation operation =
+                    operations[index];
+
+                if (operation == null)
+                    throw new ArgumentException(
+                        "Runtime packet contains a null biome operation.",
+                        "operations");
+
+                result.Add(
+                    new BiomeReplacementOperation
+                    {
+                        SourceBiome = operation.SourceBiome,
+                        TargetBiome = operation.TargetBiome
+                    });
+            }
+
+            return result;
+        }
+
+
+        private static List<BrushOperation> ConvertBrushOperations(
+            List<SyncedBrushOperation> operations)
+        {
+            var result =
+                new List<BrushOperation>();
+
+            if (operations == null)
+                return result;
+
+            for (int index = 0;
+                index < operations.Count;
+                index++)
+            {
+                SyncedBrushOperation operation =
+                    operations[index];
+
+                if (operation == null)
+                    throw new ArgumentException(
+                        "Runtime packet contains a null brush operation.",
+                        "operations");
+
+                result.Add(
+                    new BrushOperation
+                    {
+                        LayerIndex = operation.LayerIndex,
+                        FillValue = operation.FillValue,
+                        UseNoise = operation.UseNoise,
+                        NoiseFrequency = operation.NoiseFrequency,
+                        NoiseOctaves = operation.NoiseOctaves,
+                        NoiseSeedOffset = operation.NoiseSeedOffset,
+                        BlendNoiseMinimum = operation.BlendNoiseMinimum,
+                        BlendNoiseMaximum = operation.BlendNoiseMaximum,
+                        MinimumAltitude = operation.MinimumAltitude,
+                        MaximumAltitude = operation.MaximumAltitude,
+                        MinimumLatitude = operation.MinimumLatitude,
+                        MaximumLatitude = operation.MaximumLatitude,
+                        BiomeFilter = operation.BiomeFilter,
+                        MaterialFilter = operation.MaterialFilter
+                    });
+            }
+
+            return result;
         }
 
         private RuntimePlanetBuilderEntry FindRuntimeEntry(

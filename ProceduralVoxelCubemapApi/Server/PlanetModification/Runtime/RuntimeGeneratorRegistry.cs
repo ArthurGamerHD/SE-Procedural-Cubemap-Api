@@ -535,6 +535,24 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
         private static string ResolveWorldSavePath(
             string fallbackSavePath)
         {
+            string normalizedFallback =
+                NormalizePath(
+                    fallbackSavePath);
+
+            // A joining client stores the downloaded world under its own
+            // CurrentPath. That local directory is not necessarily derived
+            // from the server's checkpoint Session.Name (notably, ':' may be
+            // removed instead of replaced with '-'). Runtime replay files are
+            // written through the client's world-storage API, so their rooted
+            // generator path must use that same local directory.
+            if (MyAPIGateway.Session != null &&
+                !MyAPIGateway.Session.IsServer &&
+                !string.IsNullOrWhiteSpace(
+                    normalizedFallback))
+            {
+                return normalizedFallback;
+            }
+
             string savesRoot =
                 NormalizePath(
                     MyAPIGateway.Utilities.GamePaths.SavesPath);
@@ -548,8 +566,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Runtime
             if (string.IsNullOrWhiteSpace(savesRoot) ||
                 string.IsNullOrWhiteSpace(sessionName))
             {
-                return NormalizePath(
-                    fallbackSavePath);
+                return normalizedFallback;
             }
 
 

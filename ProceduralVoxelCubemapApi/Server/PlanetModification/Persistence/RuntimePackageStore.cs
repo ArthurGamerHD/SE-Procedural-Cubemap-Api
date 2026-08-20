@@ -1626,6 +1626,157 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         }
 
 
+        internal void StageTransientRuntimePackage(
+            RuntimePlanetBuilderEntry entry,
+            string generatorXml,
+            byte[] archive)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+            if (string.IsNullOrWhiteSpace(generatorXml))
+                throw new ArgumentException(
+                    "Transient generator XML cannot be empty.",
+                    "generatorXml");
+
+            if (archive == null ||
+                archive.Length == 0)
+            {
+                throw new ArgumentException(
+                    "Transient runtime archive cannot be empty.",
+                    "archive");
+            }
+
+            if (MyAPIGateway.Session.IsServer)
+            {
+                throw new InvalidOperationException(
+                    "Transient runtime packages are client replay state only.");
+            }
+
+            lock (_persistenceSync)
+            {
+                ThrowIfPersistenceUnavailable();
+
+                WriteWorldStorageTextCache(
+                    entry.GeneratorFile,
+                    generatorXml);
+
+                WriteWorldStorageBinaryCache(
+                    entry.ArchiveFile,
+                    archive);
+
+                if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        entry.GeneratorFile,
+                        typeof(VoxelCubemapApiServer)) ||
+                    !MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        entry.ArchiveFile,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    throw new Exception(
+                        "Transient runtime package was not staged in the " +
+                        "client's active world storage.");
+                }
+            }
+        }
+
+
+        internal void CommitTransientRuntimePackage(
+            RuntimePlanetBuilderEntry entry,
+            MyPlanetGeneratorDefinition generator)
+        {
+            if (entry == null)
+                throw new ArgumentNullException("entry");
+
+            if (generator == null)
+                throw new ArgumentNullException("generator");
+
+            if (MyAPIGateway.Session.IsServer)
+            {
+                throw new InvalidOperationException(
+                    "Transient runtime packages are client replay state only.");
+            }
+
+            lock (_persistenceSync)
+            {
+                List<RuntimePlanetBuilderEntry> supersededEntries =
+                    Settings.PlanetBuilders
+                        .Where(x =>
+                            x != null &&
+                            x.SourceEntityId == entry.SourceEntityId &&
+                            !string.Equals(
+                                x.Subtype,
+                                entry.Subtype,
+                                StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                for (int index = 0;
+                    index < supersededEntries.Count;
+                    index++)
+                {
+                    RuntimePlanetBuilderEntry superseded =
+                        supersededEntries[index];
+
+                    Settings.PlanetBuilders.Remove(
+                        superseded);
+
+                    Generators.Remove(
+                        superseded.Subtype);
+
+                    TryDeleteWorldStorageCacheFile(
+                        superseded.GeneratorFile);
+
+                    TryDeleteWorldStorageCacheFile(
+                        superseded.ArchiveFile);
+
+                    _worldStorageCacheFiles.Remove(
+                        superseded.GeneratorFile);
+
+                    _worldStorageCacheFiles.Remove(
+                        superseded.ArchiveFile);
+                }
+
+                Settings.PlanetBuilders.RemoveAll(x =>
+                    x != null &&
+                    string.Equals(
+                        x.Subtype,
+                        entry.Subtype,
+                        StringComparison.OrdinalIgnoreCase));
+
+                Settings.PlanetBuilders.Add(
+                    entry);
+
+                Generators[entry.Subtype] =
+                    generator;
+            }
+        }
+
+
+        internal void DiscardTransientRuntimePackage(
+            RuntimePlanetBuilderEntry entry)
+        {
+            if (entry == null)
+                return;
+
+            lock (_persistenceSync)
+            {
+                Generators.Remove(
+                    entry.Subtype);
+
+                TryDeleteWorldStorageCacheFile(
+                    entry.GeneratorFile);
+
+                TryDeleteWorldStorageCacheFile(
+                    entry.ArchiveFile);
+
+                _worldStorageCacheFiles.Remove(
+                    entry.GeneratorFile);
+
+                _worldStorageCacheFiles.Remove(
+                    entry.ArchiveFile);
+            }
+        }
+
+
         internal void ClearWorldStorageCache()
         {
             lock (_persistenceSync)

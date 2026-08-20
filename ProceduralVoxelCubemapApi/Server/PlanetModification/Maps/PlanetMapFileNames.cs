@@ -4,6 +4,23 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
 {
     internal static class PlanetMapFileNames
     {
+        internal static readonly string[] All =
+        {
+            "front.png",
+            "back.png",
+            "left.png",
+            "right.png",
+            "up.png",
+            "down.png",
+            "front_mat.png",
+            "back_mat.png",
+            "left_mat.png",
+            "right_mat.png",
+            "up_mat.png",
+            "down_mat.png"
+        };
+
+
         internal static string Validate(
             string faceFileName)
         {
@@ -15,32 +32,16 @@ namespace VoxelCubemapApi.Server.PlanetModification.Maps
                     "faceFileName");
             }
 
-            string[] allowed =
-            {
-                "front.png",
-                "back.png",
-                "left.png",
-                "right.png",
-                "up.png",
-                "down.png",
-                "front_mat.png",
-                "back_mat.png",
-                "left_mat.png",
-                "right_mat.png",
-                "up_mat.png",
-                "down_mat.png"
-            };
-
             for (int i = 0;
-                i < allowed.Length;
+                i < All.Length;
                 i++)
             {
                 if (string.Equals(
-                    allowed[i],
+                    All[i],
                     faceFileName,
                     StringComparison.OrdinalIgnoreCase))
                 {
-                    return allowed[i];
+                    return All[i];
                 }
             }
 

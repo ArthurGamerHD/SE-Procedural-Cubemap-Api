@@ -54,6 +54,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private string _environmentCarrierSubtype;
         private string _environmentPresetName;
+        private bool _requiresAuthoritativeImageSync;
 
         private bool _closed;
         private bool _pushStarted;
@@ -65,6 +66,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
         public readonly string SourceFolderName;
         public readonly string SourceArchiveFile;
         public readonly string CurrentProviderSubtype;
+        public readonly ulong BaseRuntimeRevision;
         public readonly long PlanetSeed;
         public readonly string TemplateId;
         public readonly MyObjectBuilder_PlanetGeneratorDefinition Builder;
@@ -79,6 +81,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             string sourceFolderName,
             string sourceArchiveFile,
             string currentProviderSubtype,
+            ulong baseRuntimeRevision,
             long planetSeed,
             MyObjectBuilder_PlanetGeneratorDefinition builder,
             string environmentCarrierSubtype,
@@ -119,6 +122,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
 
             CurrentProviderSubtype =
                 currentProviderSubtype;
+
+            BaseRuntimeRevision =
+                baseRuntimeRevision;
 
             PlanetSeed =
                 planetSeed;
@@ -262,6 +268,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 SourceFolderName = SourceFolderName,
                 SourceArchiveFile = SourceArchiveFile,
                 CurrentProviderSubtype = CurrentProviderSubtype,
+                BaseRuntimeRevision = BaseRuntimeRevision,
                 PlanetSeed = PlanetSeed,
                 TemplateId = TemplateId,
                 Builder = Builder,
@@ -272,7 +279,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
                 BrushOperations = brushOperations,
                 AllocatedComplexMaterialValues = allocatedComplexValues,
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype,
-                EnvironmentPresetName = _environmentPresetName
+                EnvironmentPresetName = _environmentPresetName,
+                RequiresAuthoritativeImageSync =
+                    _requiresAuthoritativeImageSync
             };
         }
 
@@ -311,6 +320,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             string faceFileName)
         {
             EnsureEditable();
+
+            _requiresAuthoritativeImageSync =
+                true;
 
             PlanarPngBitmap image =
                 GetOrLoadImage(
@@ -441,6 +453,9 @@ namespace VoxelCubemapApi.Server.PlanetModification.Templates
             faceFileName =
                 PlanetMapFileNames.Validate(
                     faceFileName);
+
+            _requiresAuthoritativeImageSync =
+                true;
 
             List<Action<int, int, byte[], byte[], byte[], byte[]>> transforms;
 

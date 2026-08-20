@@ -45,6 +45,7 @@ namespace VoxelCubemapApi.Server.PlanetModification.Persistence
         public int GrassCoveragePercent;
         public long PlanetSeed;
         public int GrassNoiseVersion;
+        public ulong RuntimeRevision;
     }
 
 

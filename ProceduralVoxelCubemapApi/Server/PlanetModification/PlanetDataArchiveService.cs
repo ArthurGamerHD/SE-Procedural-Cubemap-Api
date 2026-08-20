@@ -34,29 +34,50 @@ namespace VoxelCubemapApi.Server.PlanetModification
             PlanetModificationSnapshot snapshot,
             string archiveFileName)
         {
+            byte[] archive =
+                BuildModifiedArchive(
+                    snapshot,
+                    true);
+
+            _runtimePackages.SaveRuntimeArchive(
+                archiveFileName,
+                archive);
+        }
+
+
+        internal byte[] BuildModifiedArchive(
+            PlanetModificationSnapshot snapshot,
+            bool resolveFractalThresholds)
+        {
+            Dictionary<string, byte[]> files;
+
+            return BuildModifiedArchive(
+                snapshot,
+                resolveFractalThresholds,
+                out files);
+        }
+
+
+        internal byte[] BuildModifiedArchive(
+            PlanetModificationSnapshot snapshot,
+            bool resolveFractalThresholds,
+            out Dictionary<string, byte[]> outputFiles)
+        {
             if (snapshot == null)
                 throw new ArgumentNullException("snapshot");
 
 
             string[] files =
-            {
-                "front.png",
-                "back.png",
-                "left.png",
-                "right.png",
-                "up.png",
-                "down.png",
-                "front_mat.png",
-                "back_mat.png",
-                "left_mat.png",
-                "right_mat.png",
-                "up_mat.png",
-                "down_mat.png"
-            };
+                PlanetMapFileNames.All;
 
             var entries =
                 new List<MinimalZip.Entry>(
                     files.Length);
+
+            outputFiles =
+                new Dictionary<string, byte[]>(
+                    files.Length,
+                    StringComparer.OrdinalIgnoreCase);
 
             Dictionary<string, byte[]> runtimeSourceFiles =
                 string.IsNullOrWhiteSpace(
@@ -73,20 +94,10 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 snapshot,
                 runtimeSourceFiles);
 
-            if (snapshot.FractalNoiseOperations != null)
+            if (resolveFractalThresholds)
             {
-                for (int operationIndex = 0;
-                    operationIndex < snapshot.FractalNoiseOperations.Count;
-                    operationIndex++)
-                {
-                    FractalNoiseOperation operation =
-                        snapshot.FractalNoiseOperations[operationIndex];
-
-                    operation.Threshold =
-                        FractalBrownianMotion.ComputeGrassCoverageThreshold(
-                            snapshot.PlanetSeed,
-                            operation.CoveragePercent);
-                }
+                ResolveFractalThresholds(
+                    snapshot);
             }
 
 
@@ -217,17 +228,16 @@ namespace VoxelCubemapApi.Server.PlanetModification
                         fileName,
                         data,
                         MinimalZip.CompressionMode.Deflate));
+
+                outputFiles.Add(
+                    fileName,
+                    data);
             }
 
 
             byte[] archive =
                 MinimalZip.WriteBytes(
                     entries);
-
-            _runtimePackages.SaveRuntimeArchive(
-                archiveFileName,
-                archive);
-
 
             MyLog.Default.WriteLineAndConsole(
                 "[Voxel Cubemap API] Packed modification template " +
@@ -248,6 +258,32 @@ namespace VoxelCubemapApi.Server.PlanetModification
                 ", archive bytes=" +
                 archive.Length +
                 ".");
+
+            return archive;
+        }
+
+
+        internal static void ResolveFractalThresholds(
+            PlanetModificationSnapshot snapshot)
+        {
+            if (snapshot == null)
+                throw new ArgumentNullException("snapshot");
+
+            if (snapshot.FractalNoiseOperations == null)
+                return;
+
+            for (int operationIndex = 0;
+                operationIndex < snapshot.FractalNoiseOperations.Count;
+                operationIndex++)
+            {
+                FractalNoiseOperation operation =
+                    snapshot.FractalNoiseOperations[operationIndex];
+
+                operation.Threshold =
+                    FractalBrownianMotion.ComputeGrassCoverageThreshold(
+                        snapshot.PlanetSeed,
+                        operation.CoveragePercent);
+            }
         }
 
 
@@ -543,30 +579,38 @@ namespace VoxelCubemapApi.Server.PlanetModification
                     sourceArchiveFile,
                     typeof(VoxelCubemapApiServer)))
             {
-                List<MinimalZip.Entry> entries =
-                    MinimalZip.Read(
-                        reader.BaseStream);
-
-                var output =
-                    new Dictionary<string, byte[]>(
-                        StringComparer.OrdinalIgnoreCase);
-
-                for (int i = 0;
-                    i < entries.Count;
-                    i++)
-                {
-                    MinimalZip.Entry entry =
-                        entries[i];
-
-                    if (entry != null)
-                    {
-                        output[entry.Name] =
-                            entry.Data;
-                    }
-                }
-
-                return output;
+                return ReadArchive(
+                    reader.BaseStream);
             }
+        }
+
+
+        private static Dictionary<string, byte[]> ReadArchive(
+            Stream stream)
+        {
+            List<MinimalZip.Entry> entries =
+                MinimalZip.Read(
+                    stream);
+
+            var output =
+                new Dictionary<string, byte[]>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            for (int i = 0;
+                i < entries.Count;
+                i++)
+            {
+                MinimalZip.Entry entry =
+                    entries[i];
+
+                if (entry != null)
+                {
+                    output[entry.Name] =
+                        entry.Data;
+                }
+            }
+
+            return output;
         }
 
 
@@ -600,6 +644,66 @@ namespace VoxelCubemapApi.Server.PlanetModification
             _runtimePackages.SaveRuntimeArchive(
                 archiveFileName,
                 MinimalZip.WriteBytes(entries));
+        }
+
+
+        internal byte[] BuildAuthoritativeImageArchive(
+            IDictionary<string, byte[]> files)
+        {
+            if (files == null)
+                throw new ArgumentNullException("files");
+
+            if (files.Count !=
+                PlanetMapFileNames.All.Length)
+            {
+                throw new ArgumentException(
+                    "An authoritative image transaction must contain all " +
+                    PlanetMapFileNames.All.Length +
+                    " planet PNGs.",
+                    "files");
+            }
+
+            var entries =
+                new List<MinimalZip.Entry>(
+                    PlanetMapFileNames.All.Length);
+
+            for (int index = 0;
+                index < PlanetMapFileNames.All.Length;
+                index++)
+            {
+                string fileName =
+                    PlanetMapFileNames.All[index];
+
+                byte[] data;
+
+                if (!files.TryGetValue(
+                        fileName,
+                        out data) ||
+                    data == null ||
+                    data.Length == 0)
+                {
+                    throw new ArgumentException(
+                        "Authoritative image transaction is missing '" +
+                        fileName +
+                        "'.",
+                        "files");
+                }
+
+                // Decode before accepting the transaction so malformed PNGs
+                // cannot reach the live generator registration path.
+                PlanetMapOperations.DecodePlanetPng(
+                    fileName,
+                    data);
+
+                entries.Add(
+                    new MinimalZip.Entry(
+                        fileName,
+                        data,
+                        MinimalZip.CompressionMode.Deflate));
+            }
+
+            return MinimalZip.WriteBytes(
+                entries);
         }
 
 
