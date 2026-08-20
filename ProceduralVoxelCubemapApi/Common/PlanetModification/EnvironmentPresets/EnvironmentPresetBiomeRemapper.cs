@@ -15,13 +15,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets
     /// </summary>
     internal static class EnvironmentPresetBiomeRemapper
     {
-        private const double DistributionNoiseFrequency =
+        private const double DISTRIBUTION_NOISE_FREQUENCY =
             2.15;
 
-        private const int DistributionNoiseOctaves =
+        private const int DISTRIBUTION_NOISE_OCTAVES =
             4;
 
-        private const int DistributionNoiseSeedOffset =
+        private const int DISTRIBUTION_NOISE_SEED_OFFSET =
             48611;
 
 
@@ -404,9 +404,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets
                     FractalBrownianMotion.BuildBrushNoiseGrid(
                         faceIndex,
                         planetSeed,
-                        DistributionNoiseFrequency,
-                        DistributionNoiseOctaves,
-                        DistributionNoiseSeedOffset);
+                        DISTRIBUTION_NOISE_FREQUENCY,
+                        DISTRIBUTION_NOISE_OCTAVES,
+                        DISTRIBUTION_NOISE_SEED_OFFSET);
             }
 
             return grids;

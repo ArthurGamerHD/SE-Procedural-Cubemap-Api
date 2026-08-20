@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Adk.Image.Png;
 using Generated;
@@ -55,6 +55,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public double MaximumLatitude;
         public int BiomeFilter;
         public int MaterialFilter;
+        public int NoiseType;
+        public int HeightBlendMode;
+        public int NoiseSamplingQuality;
+        public bool ScaleHeightByNoise;
     }
 
 

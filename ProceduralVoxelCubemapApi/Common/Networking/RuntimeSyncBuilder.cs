@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
@@ -107,7 +107,11 @@ namespace VoxelCubemapApi.Common.Networking
                             MinimumLatitude = operation.MinimumLatitude,
                             MaximumLatitude = operation.MaximumLatitude,
                             BiomeFilter = operation.BiomeFilter,
-                            MaterialFilter = operation.MaterialFilter
+                            MaterialFilter = operation.MaterialFilter,
+                            NoiseType = operation.NoiseType,
+                            HeightBlendMode = operation.HeightBlendMode,
+                            NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                            ScaleHeightByNoise = operation.ScaleHeightByNoise
                         });
                 }
             }

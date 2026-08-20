@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Generated;
 using ProtoBuf;
 
@@ -135,5 +135,17 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(14)]
         public int MaterialFilter;
+
+        [ProtoMember(15)]
+        public int NoiseType;
+
+        [ProtoMember(16)]
+        public int HeightBlendMode;
+
+        [ProtoMember(17)]
+        public bool ScaleHeightByNoise;
+
+        [ProtoMember(18)]
+        public int NoiseSamplingQuality;
     }
 }

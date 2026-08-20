@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 {
@@ -91,6 +91,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public double MaximumLatitude;
         public int BiomeFilter;
         public int MaterialFilter;
+        public int NoiseType;
+        public int HeightBlendMode;
+        public int NoiseSamplingQuality;
+        public bool ScaleHeightByNoise;
     }
 
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using Generated;
 using Sandbox.ModAPI;
@@ -20,7 +20,7 @@ namespace VoxelCubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 9);
+            new Version(0, 0, 10);
 
         private static VoxelCubemapExampleModClient _instance;
 
@@ -824,6 +824,138 @@ namespace VoxelCubemapExampleMod
                     e.Message);
             }
         }
+
+        /// <summary>
+        /// Repaints the nearest planet as sand and adds a seamless dune field
+        /// through the public brush/noise API. The client never edits PNG or
+        /// voxel data directly.
+        /// </summary>
+        [ChatCommand("testdune", "vcma")]
+        public static void ApplyDunePlanet(
+            int duneHeight = 128,
+            double duneFrequency = 64)
+        {
+            const int domainWarpWaveNoiseType = 9;
+            const int replaceHeightMode = 0;
+            const int addHeightMode = 1;
+
+            VoxelCubemapExampleModClient client = _instance;
+
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+
+            try
+            {
+                if (duneHeight < 1 || duneHeight > ushort.MaxValue)
+                    throw new ArgumentException("Dune height must be from 1 to 65535.", "duneHeight");
+
+                if (double.IsNaN(duneFrequency) ||
+                    double.IsInfinity(duneFrequency) ||
+                    duneFrequency <= 0.0)
+                {
+                    throw new ArgumentException("Dune frequency must be finite and greater than zero.", "duneFrequency");
+                }
+
+                template = client._api.GetModificationTemplate(0);
+
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                byte sandMaterialMapValue = template.AddMaterial(
+                    "Sand_02",
+                    4f);
+
+                // Add, rather than replace, so the existing continents and
+                // large terrain remain visible underneath the dune relief.
+                template.ApplyNoiseBrush(
+                    "Heightmap",
+                    duneHeight,
+                    domainWarpWaveNoiseType,
+                    addHeightMode,
+                    (int)NoiseSamplingQuality.High,
+                    duneFrequency,
+                    3,
+                    0x44554E45,
+                    0.0,
+                    1.0,
+                    -1,
+                    -1,
+                    -90.0,
+                    90.0,
+                    -1,
+                    -1);
+
+                // Exercise the same API-side noise brush for the material
+                // map as well. A full [0,1] selection paints every point sand.
+                template.ApplyNoiseBrush(
+                    "Material",
+                    sandMaterialMapValue,
+                    domainWarpWaveNoiseType,
+                    replaceHeightMode,
+                    (int)NoiseSamplingQuality.High,
+                    duneFrequency,
+                    3,
+                    0x44554E45,
+                    0.0,
+                    1.0,
+                    -1,
+                    -1,
+                    -90.0,
+                    90.0,
+                    -1,
+                    -1);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testdune: height=" +
+                    duneHeight +
+                    ", frequency=" +
+                    duneFrequency +
+                    ", sand map=" +
+                    sandMaterialMapValue +
+                    ", seed=" +
+                    template.GetPlanetSeed() +
+                    ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Sand dune planet committed."
+                                    : "Sand dune planet failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("Dune generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
 
         [ChatCommand("water", "vcma")]
         public static void WaterLevel(int level)

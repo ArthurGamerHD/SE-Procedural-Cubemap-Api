@@ -246,10 +246,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
                     "Cannot initialize planet environment: live storage is null.");
 
 
-            const string EnvironmentComponentName =
+            const string environmentComponentName =
                 "Sandbox.Game.Entities.Planet.MyPlanetEnvironmentComponent";
 
-            const string GravityComponentName =
+            const string gravityComponentName =
                 "Sandbox.Game.Entities.MySphericalNaturalGravityComponent";
 
 
@@ -260,7 +260,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
             bool hadOldEnvironment =
                 TryGetComponentByInstanceTypeName(
                     sourcePlanet,
-                    EnvironmentComponentName,
+                    environmentComponentName,
                     out oldEnvironmentType,
                     out oldEnvironmentBase,
                     out oldEnvironment);
@@ -272,7 +272,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
 
             if (!TryGetComponentByInstanceTypeName(
                 sourcePlanet,
-                GravityComponentName,
+                gravityComponentName,
                 out gravityComponentType,
                 out gravityComponentBase,
                 out gravityComponent) ||
@@ -459,7 +459,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
 
                 if (!TryGetComponentByInstanceTypeName(
                     sourcePlanet,
-                    EnvironmentComponentName,
+                    environmentComponentName,
                     out newEnvironmentType,
                     out newEnvironmentBase,
                     out newEnvironment) ||
@@ -549,7 +549,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
                 bool hasCurrentEnvironment =
                     TryGetComponentByInstanceTypeName(
                         sourcePlanet,
-                        EnvironmentComponentName,
+                        environmentComponentName,
                         out currentEnvironmentType,
                         out currentEnvironmentBase,
                         out currentEnvironment);

@@ -5,6 +5,7 @@ using System.Linq;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
+using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.PlanetModification.Runtime;
 using VoxelCubemapApi.Common.PlanetModification.World;
 using VRage.Game;
@@ -14,32 +15,32 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 {
     internal sealed class RuntimePackageStore
     {
-        private const string RuntimeSettingsFile =
+        private const string RUNTIME_SETTINGS_FILE =
             "settings.xml";
 
-        private const string PersistenceVariablePrefix =
+        private const string PERSISTENCE_VARIABLE_PREFIX =
             "VoxelCubemapApi.RuntimePersistence.v1.";
 
-        private const string RecipeVariablePrefix =
+        private const string RECIPE_VARIABLE_PREFIX =
             "VoxelCubemapApi.RuntimePersistence.v2.Recipe.";
 
-        private const string RuntimeSettingsVariable =
-            PersistenceVariablePrefix +
+        private const string RUNTIME_SETTINGS_VARIABLE =
+            PERSISTENCE_VARIABLE_PREFIX +
             "SettingsXml";
 
-        private const string PersistenceManifestVariable =
-            PersistenceVariablePrefix +
+        private const string PERSISTENCE_MANIFEST_VARIABLE =
+            PERSISTENCE_VARIABLE_PREFIX +
             "ManifestXml";
 
         // Utility variables must keep binary archives as ordinary Base64 strings
         // because Keen's checkpoint XML reader cannot consume typed byte arrays.
-        private const int ArchiveChunkSizeBytes =
+        private const int ARCHIVE_CHUNK_SIZE_BYTES =
             4 * 1024 * 1024;
 
-        private const int MaxArchiveChunkCount =
+        private const int MAX_ARCHIVE_CHUNK_COUNT =
             512;
 
-        private const int MaxRuntimeArchiveBytes =
+        private const int MAX_RUNTIME_ARCHIVE_BYTES =
             512 * 1024 * 1024;
 
         private readonly VoxelCubemapApiServer _server;
@@ -187,11 +188,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string xml;
 
             if (!MyAPIGateway.Utilities.GetVariable<string>(
-                RuntimeSettingsVariable,
+                RUNTIME_SETTINGS_VARIABLE,
                 out xml))
             {
                 if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                    RuntimeSettingsFile,
+                    RUNTIME_SETTINGS_FILE,
                     typeof(VoxelCubemapApiServer)))
                 {
                     return new RuntimePlanetGeneratorSettings();
@@ -200,7 +201,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
                 using (TextReader reader =
                     MyAPIGateway.Utilities.ReadFileInWorldStorage(
-                        RuntimeSettingsFile,
+                        RUNTIME_SETTINGS_FILE,
                         typeof(VoxelCubemapApiServer)))
                 {
                     xml =
@@ -209,7 +210,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
 
                 MyAPIGateway.Utilities.SetVariable(
-                    RuntimeSettingsVariable,
+                    RUNTIME_SETTINGS_VARIABLE,
                     xml);
 
                 migratedLegacyWorldStorage =
@@ -235,7 +236,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             {
                 throw new Exception(
                     "Could not deserialize " +
-                    RuntimeSettingsFile +
+                    RUNTIME_SETTINGS_FILE +
                     ".");
             }
 
@@ -258,11 +259,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
 
                 MyAPIGateway.Utilities.SetVariable(
-                    RuntimeSettingsVariable,
+                    RUNTIME_SETTINGS_VARIABLE,
                     xml);
 
                 WriteWorldStorageTextCache(
-                    RuntimeSettingsFile,
+                    RUNTIME_SETTINGS_FILE,
                     xml);
             }
         }
@@ -304,7 +305,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
 
                 WriteWorldStorageTextCache(
-                    RuntimeSettingsFile,
+                    RUNTIME_SETTINGS_FILE,
                     MyAPIGateway.Utilities
                         .SerializeToXML<RuntimePlanetGeneratorSettings>(
                             Settings));
@@ -476,7 +477,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         {
             if (archive == null ||
                 archive.Length == 0 ||
-                archive.Length > MaxRuntimeArchiveBytes)
+                archive.Length > MAX_RUNTIME_ARCHIVE_BYTES)
             {
                 throw new ArgumentException(
                     "Derived runtime archive has an invalid size.",
@@ -570,7 +571,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             if (archive == null)
                 throw new ArgumentNullException(nameof(archive));
 
-            if (archive.Length > MaxRuntimeArchiveBytes)
+            if (archive.Length > MAX_RUNTIME_ARCHIVE_BYTES)
             {
                 throw new ArgumentException(
                     "Runtime archive exceeds the persistence size limit.",
@@ -649,9 +650,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
             int chunkCount =
                 (int)(((long)archive.Length +
-                    ArchiveChunkSizeBytes -
+                    ARCHIVE_CHUNK_SIZE_BYTES -
                     1) /
-                    ArchiveChunkSizeBytes);
+                    ARCHIVE_CHUNK_SIZE_BYTES);
 
             ValidateArchiveChunkCount(
                 chunkCount,
@@ -689,11 +690,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                 {
                     int offset =
                         chunkIndex *
-                        ArchiveChunkSizeBytes;
+                        ARCHIVE_CHUNK_SIZE_BYTES;
 
                     int length =
                         Math.Min(
-                            ArchiveChunkSizeBytes,
+                            ARCHIVE_CHUNK_SIZE_BYTES,
                             archive.Length - offset);
 
                     string chunk =
@@ -796,7 +797,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                         fileName),
                     out archiveLength) ||
                 archiveLength < 0 ||
-                archiveLength > MaxRuntimeArchiveBytes ||
+                archiveLength > MAX_RUNTIME_ARCHIVE_BYTES ||
                 chunkCount < 0)
             {
                 throw new Exception(
@@ -807,9 +808,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
             int expectedChunkCount =
                 (int)(((long)archiveLength +
-                    ArchiveChunkSizeBytes -
+                    ARCHIVE_CHUNK_SIZE_BYTES -
                     1) /
-                    ArchiveChunkSizeBytes);
+                    ARCHIVE_CHUNK_SIZE_BYTES);
 
             if (chunkCount != expectedChunkCount)
             {
@@ -866,11 +867,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
                 int offset =
                     chunkIndex *
-                    ArchiveChunkSizeBytes;
+                    ARCHIVE_CHUNK_SIZE_BYTES;
 
                 int expectedLength =
                     Math.Min(
-                        ArchiveChunkSizeBytes,
+                        ARCHIVE_CHUNK_SIZE_BYTES,
                         archiveLength - offset);
 
                 if (chunk.Length != expectedLength)
@@ -900,7 +901,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string fileName)
         {
             return
-                PersistenceVariablePrefix +
+                PERSISTENCE_VARIABLE_PREFIX +
                 "GeneratorXml." +
                 fileName;
         }
@@ -910,7 +911,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string fileName)
         {
             return
-                RecipeVariablePrefix +
+                RECIPE_VARIABLE_PREFIX +
                 fileName;
         }
 
@@ -919,7 +920,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string fileName)
         {
             return
-                PersistenceVariablePrefix +
+                PERSISTENCE_VARIABLE_PREFIX +
                 "Archive." +
                 fileName +
                 ".ChunkCount";
@@ -930,7 +931,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string fileName)
         {
             return
-                PersistenceVariablePrefix +
+                PERSISTENCE_VARIABLE_PREFIX +
                 "Archive." +
                 fileName +
                 ".Length";
@@ -942,7 +943,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             int chunkIndex)
         {
             return
-                PersistenceVariablePrefix +
+                PERSISTENCE_VARIABLE_PREFIX +
                 "Archive." +
                 fileName +
                 ".Chunk." +
@@ -955,7 +956,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string xml;
 
             if (!MyAPIGateway.Utilities.GetVariable<string>(
-                    PersistenceManifestVariable,
+                    PERSISTENCE_MANIFEST_VARIABLE,
                     out xml) ||
                 string.IsNullOrWhiteSpace(xml))
             {
@@ -994,7 +995,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                         _manifest);
 
             MyAPIGateway.Utilities.SetVariable(
-                PersistenceManifestVariable,
+                PERSISTENCE_MANIFEST_VARIABLE,
                 xml);
         }
 
@@ -1313,7 +1314,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             string fileName)
         {
             if (chunkCount < 0 ||
-                chunkCount > MaxArchiveChunkCount)
+                chunkCount > MAX_ARCHIVE_CHUNK_COUNT)
             {
                 throw new Exception(
                     "Invalid runtime archive chunk count " +
@@ -1999,7 +2000,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                 _worldStorageCacheFiles.Clear();
 
                 TryDeleteWorldStorageCacheFile(
-                    RuntimeSettingsFile);
+                    RUNTIME_SETTINGS_FILE);
 
 
                 if (Settings == null ||
@@ -2227,13 +2228,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             RuntimeProceduralPlanetRecipe recipe,
             RuntimePlanetBuilderEntry entry)
         {
-            const int SupportedSchemaVersion = 1;
-            const int MaximumOperationCount = 16384;
+            const int supportedSchemaVersion = 1;
+            const int maximumOperationCount = 16384;
 
             if (recipe == null)
                 throw new Exception("Procedural planet recipe is null.");
 
-            if (recipe.SchemaVersion != SupportedSchemaVersion)
+            if (recipe.SchemaVersion != supportedSchemaVersion)
             {
                 throw new Exception(
                     "Unsupported procedural planet recipe schema: " +
@@ -2433,6 +2434,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                              operation.NoiseFrequency <= 0.0 ||
                              operation.NoiseOctaves < 1 ||
                              operation.NoiseOctaves > 8 ||
+                             operation.NoiseSamplingQuality <
+                                (int)NoiseSamplingQuality.Low ||
+                             operation.NoiseSamplingQuality >
+                                (int)NoiseSamplingQuality.Direct ||
                              operation.BlendNoiseMinimum < 0.0 ||
                              operation.BlendNoiseMinimum > 1.0 ||
                              operation.BlendNoiseMaximum < 0.0 ||
@@ -2445,7 +2450,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                 }
             }
 
-            if (operationCount > MaximumOperationCount)
+            if (operationCount > maximumOperationCount)
             {
                 throw new Exception(
                     "Procedural recipe operation limit exceeded: " +

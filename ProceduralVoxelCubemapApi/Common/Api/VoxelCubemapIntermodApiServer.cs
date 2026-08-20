@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Generated;
 using VoxelCubemapApi.Common.PlanetModification;
@@ -15,7 +15,7 @@ namespace VoxelCubemapApi.Common.Api
         ClientName = "ApiProvider")]
     internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version _apiVersion = new Version(0, 0, 9);
+        private static readonly Version ApiVersion = new Version(0, 0, 10);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
@@ -115,7 +115,7 @@ namespace VoxelCubemapApi.Common.Api
         [ApiMethod]
         private static Version GetApiVersion()
         {
-            return _apiVersion;
+            return ApiVersion;
         }
     }
 }

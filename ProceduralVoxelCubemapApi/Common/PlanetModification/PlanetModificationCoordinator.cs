@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -24,7 +24,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
 {
     internal sealed class PlanetModificationCoordinator
     {
-        private const string GenericGeneratorFileSuffix =
+        private const string GENERIC_GENERATOR_FILE_SUFFIX =
             ".generator.xml";
 
         private static readonly string[] MetadataMapFileNames =
@@ -905,7 +905,11 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         MinimumLatitude = operation.MinimumLatitude,
                         MaximumLatitude = operation.MaximumLatitude,
                         BiomeFilter = operation.BiomeFilter,
-                        MaterialFilter = operation.MaterialFilter
+                        MaterialFilter = operation.MaterialFilter,
+                        NoiseType = operation.NoiseType,
+                        HeightBlendMode = operation.HeightBlendMode,
+                        NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise
                     });
             }
 
@@ -1141,7 +1145,11 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         MinimumLatitude = operation.MinimumLatitude,
                         MaximumLatitude = operation.MaximumLatitude,
                         BiomeFilter = operation.BiomeFilter,
-                        MaterialFilter = operation.MaterialFilter
+                        MaterialFilter = operation.MaterialFilter,
+                        NoiseType = operation.NoiseType,
+                        HeightBlendMode = operation.HeightBlendMode,
+                        NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise
                     });
             }
 
@@ -1263,7 +1271,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
             string generatorFile =
                 packageStem +
-                GenericGeneratorFileSuffix;
+                GENERIC_GENERATOR_FILE_SUFFIX;
 
             snapshot.Builder.Id =
                 new SerializableDefinitionId(
@@ -2304,7 +2312,11 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         MinimumLatitude = operation.MinimumLatitude,
                         MaximumLatitude = operation.MaximumLatitude,
                         BiomeFilter = operation.BiomeFilter,
-                        MaterialFilter = operation.MaterialFilter
+                        MaterialFilter = operation.MaterialFilter,
+                        NoiseType = operation.NoiseType,
+                        HeightBlendMode = operation.HeightBlendMode,
+                        NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise
                     });
             }
 

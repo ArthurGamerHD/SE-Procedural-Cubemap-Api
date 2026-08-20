@@ -1,9 +1,10 @@
-#if VOXEL_CUBEMAP_NOISE_CLI
+﻿#if VOXEL_CUBEMAP_NOISE_CLI
 using Vector3D = VoxelCubemapApi.NoiseTestCli.NoiseVector3D;
 #else
 using VRageMath;
 #endif
 using System;
+using VoxelCubemapApi.Common.Noise;
 
 namespace VoxelCubemapApi.Common.Noise.fBm
 {
@@ -57,7 +58,7 @@ namespace VoxelCubemapApi.Common.Noise.fBm
         }
 
 
-        private static Vector3D GetCubemapSphereDirection(
+        public static Vector3D GetCubemapSphereDirection(
             int faceIndex,
             int x,
             int y,
@@ -173,24 +174,24 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             int faceIndex,
             long planetSeed)
         {
-            const int GridResolution =
+            const int gridResolution =
                 129;
 
             double[] grid =
                 new double[
-                    GridResolution *
-                    GridResolution];
+                    gridResolution *
+                    gridResolution];
 
             int offset =
                 0;
 
 
             for (int y = 0;
-                y < GridResolution;
+                y < gridResolution;
                 y++)
             {
                 for (int x = 0;
-                    x < GridResolution;
+                    x < gridResolution;
                     x++)
                 {
                     Vector3D direction =
@@ -198,8 +199,8 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                             faceIndex,
                             x,
                             y,
-                            GridResolution,
-                            GridResolution);
+                            gridResolution,
+                            gridResolution);
 
                     grid[offset++] =
                         PlanetGrassFbm(
@@ -220,60 +221,115 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             int octaves,
             int seedOffset)
         {
-            const int GridResolution =
-                129;
+            return BuildNoiseGrid(
+                faceIndex,
+                planetSeed,
+                (int)ProceduralNoiseKind.Fbm,
+                frequency,
+                octaves,
+                seedOffset);
+        }
 
-            double[] grid =
-                new double[
-                    GridResolution *
-                    GridResolution];
 
-            int offset =
-                0;
+        internal static double[] BuildNoiseGrid(
+            int faceIndex,
+            long planetSeed,
+            int noiseType,
+            double frequency,
+            int octaves,
+            int seedOffset)
+        {
+            return BuildNoiseGrid(
+                faceIndex,
+                planetSeed,
+                noiseType,
+                (int)NoiseSamplingQuality.Low,
+                frequency,
+                octaves,
+                seedOffset);
+        }
 
-            long seed =
-                unchecked(
-                    planetSeed +
-                    seedOffset);
 
-            for (int y = 0;
-                y < GridResolution;
-                y++)
+        internal static double[] BuildNoiseGrid(
+            int faceIndex,
+            long planetSeed,
+            int noiseType,
+            int samplingQuality,
+            double frequency,
+            int octaves,
+            int seedOffset)
+        {
+            int gridResolution = GetNoiseGridResolution(samplingQuality);
+            double[] grid = new double[gridResolution * gridResolution];
+            int offset = 0;
+            INoise3D noise = CreateNoise(
+                planetSeed,
+                noiseType,
+                frequency,
+                octaves,
+                seedOffset);
+
+            for (int y = 0; y < gridResolution; y++)
             {
-                for (int x = 0;
-                    x < GridResolution;
-                    x++)
+                for (int x = 0; x < gridResolution; x++)
                 {
-                    Vector3D direction =
-                        GetCubemapSphereDirection(
-                            faceIndex,
-                            x,
-                            y,
-                            GridResolution,
-                            GridResolution);
+                    Vector3D direction = GetCubemapSphereDirection(
+                        faceIndex,
+                        x,
+                        y,
+                        gridResolution,
+                        gridResolution);
 
-                    double raw =
-                        PlanetFbm(
-                            direction,
-                            seed,
-                            frequency,
-                            octaves);
-
-                    double normalized =
-                        (raw + 1.0) *
-                        0.5;
-
-                    if (normalized < 0.0)
-                        normalized = 0.0;
-                    else if (normalized > 1.0)
-                        normalized = 1.0;
-
-                    grid[offset++] =
-                        normalized;
+                    grid[offset++] = NoiseMath.To01(
+                        noise.Sample(direction.X, direction.Y, direction.Z));
                 }
             }
 
             return grid;
+        }
+
+
+        internal static INoise3D CreateNoise(
+            long planetSeed,
+            int noiseType,
+            double frequency,
+            int octaves,
+            int seedOffset)
+        {
+            long seed = unchecked(planetSeed + seedOffset);
+
+            return ProceduralNoiseField.Create(
+                (ProceduralNoiseKind)noiseType,
+                seed,
+                frequency,
+                octaves);
+        }
+
+
+        internal static int GetNoiseGridResolution(
+            int samplingQuality)
+        {
+            switch ((NoiseSamplingQuality)samplingQuality)
+            {
+                case NoiseSamplingQuality.Low:
+                    return 129;
+
+                case NoiseSamplingQuality.Medium:
+                    return 257;
+
+                case NoiseSamplingQuality.High:
+                    return 513;
+
+                case NoiseSamplingQuality.Direct:
+                    throw new ArgumentException(
+                        "Direct noise sampling does not use a grid.",
+                        nameof(samplingQuality));
+
+                default:
+                    throw new ArgumentException(
+                        "Unknown noise sampling quality.",
+                        nameof(samplingQuality));
+            }
         }
 
 
@@ -284,25 +340,41 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             int width,
             int height)
         {
-            const int GridResolution =
-                129;
+            return SampleNoiseGrid(
+                grid,
+                129,
+                x,
+                y,
+                width,
+                height);
+        }
 
-            const int GridMaximum =
-                GridResolution - 1;
+
+        private static double SampleNoiseGrid(
+            double[] grid,
+            int gridResolution,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+
+            int gridMaximum =
+                gridResolution - 1;
 
 
             double gridX =
                 width <= 1
                     ? 0.0
                     : (double)x *
-                        GridMaximum /
+                        gridMaximum /
                         (width - 1.0);
 
             double gridY =
                 height <= 1
                     ? 0.0
                     : (double)y *
-                        GridMaximum /
+                        gridMaximum /
                         (height - 1.0);
 
 
@@ -313,12 +385,12 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 (int)gridY;
 
             int x1 =
-                x0 < GridMaximum
+                x0 < gridMaximum
                     ? x0 + 1
                     : x0;
 
             int y1 =
-                y0 < GridMaximum
+                y0 < gridMaximum
                     ? y0 + 1
                     : y0;
 
@@ -334,11 +406,11 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 LerpNoise(
                     grid[
                         y0 *
-                        GridResolution +
+                        gridResolution +
                         x0],
                     grid[
                         y0 *
-                        GridResolution +
+                        gridResolution +
                         x1],
                     tx);
 
@@ -346,11 +418,11 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 LerpNoise(
                     grid[
                         y1 *
-                        GridResolution +
+                        gridResolution +
                         x0],
                     grid[
                         y1 *
-                        GridResolution +
+                        gridResolution +
                         x1],
                     tx);
 
@@ -375,6 +447,44 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 y,
                 width,
                 height);
+        }
+
+
+        internal static double SampleBrushNoiseGrid(
+            double[] grid,
+            int samplingQuality,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+            return SampleNoiseGrid(
+                grid,
+                GetNoiseGridResolution(samplingQuality),
+                x,
+                y,
+                width,
+                height);
+        }
+
+
+        internal static double SampleNoiseDirect(
+            INoise3D noise,
+            int faceIndex,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+            Vector3D direction = GetCubemapSphereDirection(
+                faceIndex,
+                x,
+                y,
+                width,
+                height);
+
+            return NoiseMath.To01(
+                noise.Sample(direction.X, direction.Y, direction.Z));
         }
 
 
@@ -414,13 +524,13 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 return 0.0;
 
 
-            const int SampleResolution =
+            const int sampleResolution =
                 129;
 
             int sampleCount =
                 6 *
-                SampleResolution *
-                SampleResolution;
+                sampleResolution *
+                sampleResolution;
 
             double[] samples =
                 new double[
@@ -435,11 +545,11 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 face++)
             {
                 for (int y = 0;
-                    y < SampleResolution;
+                    y < sampleResolution;
                     y++)
                 {
                     for (int x = 0;
-                        x < SampleResolution;
+                        x < sampleResolution;
                         x++)
                     {
                         Vector3D direction =
@@ -447,8 +557,8 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                                 face,
                                 x,
                                 y,
-                                SampleResolution,
-                                SampleResolution);
+                                sampleResolution,
+                                sampleResolution);
 
                         samples[sampleIndex++] =
                             PlanetGrassFbm(
@@ -497,13 +607,13 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 return 0.0;
 
 
-            const int SampleResolution =
+            const int sampleResolution =
                 129;
 
             int sampleCount =
                 6 *
-                SampleResolution *
-                SampleResolution;
+                sampleResolution *
+                sampleResolution;
 
             double[] samples =
                 new double[
@@ -518,11 +628,11 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 face++)
             {
                 for (int y = 0;
-                    y < SampleResolution;
+                    y < sampleResolution;
                     y++)
                 {
                     for (int x = 0;
-                        x < SampleResolution;
+                        x < sampleResolution;
                         x++)
                     {
                         Vector3D direction =
@@ -530,8 +640,8 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                                 face,
                                 x,
                                 y,
-                                SampleResolution,
-                                SampleResolution);
+                                sampleResolution,
+                                sampleResolution);
 
                         double raw =
                             PlanetGrassFbm(
@@ -602,13 +712,13 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             }
 
 
-            const int SampleResolution =
+            const int sampleResolution =
                 129;
 
             int sampleCount =
                 6 *
-                SampleResolution *
-                SampleResolution;
+                sampleResolution *
+                sampleResolution;
 
             double[] samples =
                 new double[
@@ -628,11 +738,11 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 face++)
             {
                 for (int y = 0;
-                    y < SampleResolution;
+                    y < sampleResolution;
                     y++)
                 {
                     for (int x = 0;
-                        x < SampleResolution;
+                        x < sampleResolution;
                         x++)
                     {
                         Vector3D direction =
@@ -640,8 +750,8 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                                 face,
                                 x,
                                 y,
-                                SampleResolution,
-                                SampleResolution);
+                                sampleResolution,
+                                sampleResolution);
 
                         double raw =
                             PlanetFbm(
@@ -711,214 +821,15 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             double frequency,
             int octaves)
         {
-
-            double amplitude =
-                1.0;
-
-            double sum =
-                0.0;
-
-            double amplitudeSum =
-                0.0;
-
-
-            for (int octave = 0;
-                octave < octaves;
-                octave++)
-            {
-                long octaveSeed =
-                    unchecked(
-                        planetSeed +
-                        octave * 104729L);
-
-                sum +=
-                    ValueNoise3D(
-                        direction.X * frequency,
-                        direction.Y * frequency,
-                        direction.Z * frequency,
-                        octaveSeed) *
-                    amplitude;
-
-                amplitudeSum +=
-                    amplitude;
-
-                frequency *=
-                    2.07;
-
-                amplitude *=
-                    0.5;
-            }
-
-
-            return sum /
-                amplitudeSum;
-        }
-
-
-        private static double ValueNoise3D(
-            double x,
-            double y,
-            double z,
-            long seed)
-        {
-            int x0 =
-                FastFloor(
-                    x);
-
-            int y0 =
-                FastFloor(
-                    y);
-
-            int z0 =
-                FastFloor(
-                    z);
-
-            int x1 =
-                x0 + 1;
-
-            int y1 =
-                y0 + 1;
-
-            int z1 =
-                z0 + 1;
-
-
-            double tx =
-                SmoothNoiseFraction(
-                    x - x0);
-
-            double ty =
-                SmoothNoiseFraction(
-                    y - y0);
-
-            double tz =
-                SmoothNoiseFraction(
-                    z - z0);
-
-
-            double n000 =
-                LatticeNoiseValue(
-                    x0,
-                    y0,
-                    z0,
-                    seed);
-
-            double n100 =
-                LatticeNoiseValue(
-                    x1,
-                    y0,
-                    z0,
-                    seed);
-
-            double n010 =
-                LatticeNoiseValue(
-                    x0,
-                    y1,
-                    z0,
-                    seed);
-
-            double n110 =
-                LatticeNoiseValue(
-                    x1,
-                    y1,
-                    z0,
-                    seed);
-
-            double n001 =
-                LatticeNoiseValue(
-                    x0,
-                    y0,
-                    z1,
-                    seed);
-
-            double n101 =
-                LatticeNoiseValue(
-                    x1,
-                    y0,
-                    z1,
-                    seed);
-
-            double n011 =
-                LatticeNoiseValue(
-                    x0,
-                    y1,
-                    z1,
-                    seed);
-
-            double n111 =
-                LatticeNoiseValue(
-                    x1,
-                    y1,
-                    z1,
-                    seed);
-
-
-            double nx00 =
-                LerpNoise(
-                    n000,
-                    n100,
-                    tx);
-
-            double nx10 =
-                LerpNoise(
-                    n010,
-                    n110,
-                    tx);
-
-            double nx01 =
-                LerpNoise(
-                    n001,
-                    n101,
-                    tx);
-
-            double nx11 =
-                LerpNoise(
-                    n011,
-                    n111,
-                    tx);
-
-            double nxy0 =
-                LerpNoise(
-                    nx00,
-                    nx10,
-                    ty);
-
-            double nxy1 =
-                LerpNoise(
-                    nx01,
-                    nx11,
-                    ty);
-
-
-            return LerpNoise(
-                nxy0,
-                nxy1,
-                tz);
-        }
-
-
-        private static int FastFloor(
-            double value)
-        {
-            int integer =
-                (int)value;
-
-            return value < integer
-                ? integer - 1
-                : integer;
-        }
-
-
-        private static double SmoothNoiseFraction(
-            double value)
-        {
-            // Quintic fade: continuous first and second derivatives.
-            return value *
-                value *
-                value *
-                (value *
-                    (value * 6.0 - 15.0) +
-                    10.0);
+            return FbmNoise3D.SampleFbm(
+                direction.X,
+                direction.Y,
+                direction.Z,
+                planetSeed,
+                frequency,
+                octaves,
+                2.07,
+                0.5);
         }
 
 
@@ -932,56 +843,6 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 amount;
         }
 
-
-        private static double LatticeNoiseValue(
-            int x,
-            int y,
-            int z,
-            long seed)
-        {
-            uint hash =
-                unchecked(
-                    (uint)seed ^
-                    (uint)(seed >> 32));
-
-
-            unchecked
-            {
-                hash ^=
-                    (uint)x *
-                    0x9E3779B9u;
-
-                hash ^=
-                    (uint)y *
-                    0x85EBCA6Bu;
-
-                hash ^=
-                    (uint)z *
-                    0xC2B2AE35u;
-
-                hash ^=
-                    hash >> 16;
-
-                hash *=
-                    0x7FEB352Du;
-
-                hash ^=
-                    hash >> 15;
-
-                hash *=
-                    0x846CA68Bu;
-
-                hash ^=
-                    hash >> 16;
-            }
-
-
-            return
-                ((double)hash /
-                    4294967295.0) *
-                2.0 -
-                1.0;
-        }
 
 
     }

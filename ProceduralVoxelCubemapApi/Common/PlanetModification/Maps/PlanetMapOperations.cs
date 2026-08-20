@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Adk.Image.Png;
+using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.Noise.fBm;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
 
@@ -255,6 +256,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
         {
             int batchCount = batchEnd - batchStart;
             var noiseGrids = new double[batchCount][];
+            var directNoiseFields = new INoise3D[batchCount];
             var latitudeRestricted = new bool[batchCount];
 
             // Build each distinct noise grid only once for this face/batch.
@@ -278,22 +280,42 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                     if (previousOperation.UseNoise &&
                         previousOperation.NoiseFrequency == operation.NoiseFrequency &&
                         previousOperation.NoiseOctaves == operation.NoiseOctaves &&
-                        previousOperation.NoiseSeedOffset == operation.NoiseSeedOffset)
+                        previousOperation.NoiseSeedOffset == operation.NoiseSeedOffset &&
+                        previousOperation.NoiseType == operation.NoiseType &&
+                        previousOperation.NoiseSamplingQuality == operation.NoiseSamplingQuality)
                     {
                         noiseGrids[localIndex] = noiseGrids[previous];
+                        directNoiseFields[localIndex] = directNoiseFields[previous];
                         break;
                     }
                 }
 
-                if (noiseGrids[localIndex] == null)
+                if (noiseGrids[localIndex] == null &&
+                    directNoiseFields[localIndex] == null)
                 {
-                    noiseGrids[localIndex] =
-                        FractalBrownianMotion.BuildBrushNoiseGrid(
-                            faceIndex,
-                            planetSeed,
-                            operation.NoiseFrequency,
-                            operation.NoiseOctaves,
-                            operation.NoiseSeedOffset);
+                    if (operation.NoiseSamplingQuality ==
+                        (int)NoiseSamplingQuality.Direct)
+                    {
+                        directNoiseFields[localIndex] =
+                            FractalBrownianMotion.CreateNoise(
+                                planetSeed,
+                                operation.NoiseType,
+                                operation.NoiseFrequency,
+                                operation.NoiseOctaves,
+                                operation.NoiseSeedOffset);
+                    }
+                    else
+                    {
+                        noiseGrids[localIndex] =
+                            FractalBrownianMotion.BuildNoiseGrid(
+                                faceIndex,
+                                planetSeed,
+                                operation.NoiseType,
+                                operation.NoiseSamplingQuality,
+                                operation.NoiseFrequency,
+                                operation.NoiseOctaves,
+                                operation.NoiseSeedOffset);
+                    }
                 }
             }
 
@@ -383,34 +405,48 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                             }
                         }
 
+                        double noiseScore = 1.0;
+
                         if (operation.UseNoise)
                         {
-                            double score =
-                                FractalBrownianMotion.SampleBrushNoiseGrid(
-                                    noiseGrids[localIndex],
-                                    x,
-                                    y,
-                                    targetImage.Width,
-                                    targetImage.Height);
+                            if (operation.NoiseSamplingQuality ==
+                                (int)NoiseSamplingQuality.Direct)
+                            {
+                                noiseScore =
+                                    FractalBrownianMotion.SampleNoiseDirect(
+                                        directNoiseFields[localIndex],
+                                        faceIndex,
+                                        x,
+                                        y,
+                                        targetImage.Width,
+                                        targetImage.Height);
+                            }
+                            else
+                            {
+                                noiseScore =
+                                    FractalBrownianMotion.SampleBrushNoiseGrid(
+                                        noiseGrids[localIndex],
+                                        operation.NoiseSamplingQuality,
+                                        x,
+                                        y,
+                                        targetImage.Width,
+                                        targetImage.Height);
+                            }
 
-                            if (score < operation.BlendNoiseMinimum ||
-                                score > operation.BlendNoiseMaximum)
+                            if (noiseScore < operation.BlendNoiseMinimum ||
+                                noiseScore > operation.BlendNoiseMaximum)
                             {
                                 continue;
                             }
                         }
 
-                        ApplyBrushFill(
+                        altitude = ApplyBrushFill(
                             heightImage,
                             materialImage,
                             operation,
-                            targetOffset);
-
-                        // A height write can affect altitude filters of later
-                        // operations in the same height-target batch, matching
-                        // the observable per-pixel ordering of queued brushes.
-                        if (operation.LayerIndex == 3)
-                            altitude = operation.FillValue;
+                            targetOffset,
+                            altitude,
+                            noiseScore);
                     }
                 }
             }
@@ -535,20 +571,51 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
         }
 
 
-        private static void ApplyBrushFill(
+        private static int ApplyBrushFill(
             PlanarPngBitmap heightImage,
             PlanarPngBitmap materialImage,
             BrushOperation operation,
-            int targetOffset)
+            int targetOffset,
+            int currentAltitude,
+            double noiseScore)
         {
             if (operation.LayerIndex == 3)
             {
+                int amount = operation.FillValue;
+
+                if (operation.ScaleHeightByNoise)
+                {
+                    amount = (int)(
+                        operation.FillValue * noiseScore + 0.5);
+                }
+
+                int value;
+                switch (operation.HeightBlendMode)
+                {
+                    case 1: // Add
+                        value = currentAltitude + amount;
+                        break;
+
+                    case 2: // Subtract
+                        value = currentAltitude - amount;
+                        break;
+
+                    default: // Replace
+                        value = amount;
+                        break;
+                }
+
+                if (value < 0)
+                    value = 0;
+                else if (value > ushort.MaxValue)
+                    value = ushort.MaxValue;
+
                 WriteHeightSample(
                     heightImage,
                     targetOffset,
-                    operation.FillValue);
+                    value);
 
-                return;
+                return value;
             }
 
             if (operation.LayerIndex < 0 ||
@@ -562,6 +629,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
 
             materialImage.Planes[operation.LayerIndex][targetOffset] =
                 (byte)operation.FillValue;
+
+            return currentAltitude;
         }
 
 

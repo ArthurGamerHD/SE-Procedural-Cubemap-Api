@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Adk.Image.Png;
 using Generated;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
+using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets;
 using VoxelCubemapApi.Common.PlanetModification.Maps;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
@@ -263,7 +264,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                         MinimumLatitude = operation.MinimumLatitude,
                         MaximumLatitude = operation.MaximumLatitude,
                         BiomeFilter = operation.BiomeFilter,
-                        MaterialFilter = operation.MaterialFilter
+                        MaterialFilter = operation.MaterialFilter,
+                        NoiseType = operation.NoiseType,
+                        HeightBlendMode = operation.HeightBlendMode,
+                        NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise
                     });
             }
 
@@ -1227,8 +1232,111 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     MinimumLatitude = minimumLatitude,
                     MaximumLatitude = maximumLatitude,
                     BiomeFilter = biomeFilter,
-                    MaterialFilter = materialFilter
+                    MaterialFilter = materialFilter,
+                    NoiseType = 0,
+                    HeightBlendMode = 0,
+                    NoiseSamplingQuality = (int)NoiseSamplingQuality.Low,
+                    ScaleHeightByNoise = false
                 });
+        }
+
+
+        /// <summary>
+        /// Queues a brush driven by one of the API-owned procedural noise
+        /// generators. For Heightmap brushes the sampled normalized noise
+        /// scales fillValue, then heightBlendMode selects Replace/Add/Subtract.
+        /// Non-height layers retain normal replacement semantics and use the
+        /// noise only for pixel selection.
+        /// </summary>
+        [ApiMethod]
+        private void ApplyNoiseBrush(string layer,
+            int fillValue,
+            int noiseType,
+            int heightBlendMode,
+            NoiseSamplingQuality samplingQuality,
+            double noiseFrequency,
+            int noiseOctaves,
+            int noiseSeedOffset,
+            double blendNoiseMinimum,
+            double blendNoiseMaximum,
+            int minimumAltitude,
+            int maximumAltitude,
+            double minimumLatitude,
+            double maximumLatitude,
+            int biomeFilter,
+            int materialFilter)
+        {
+            EnsureEditable();
+
+            int layerIndex = ParseBrushLayer(layer);
+            int maximumFillValue = layerIndex == 3 ? ushort.MaxValue : byte.MaxValue;
+
+            if (fillValue < 0 || fillValue > maximumFillValue)
+                throw new ArgumentException("Brush fill value is outside the target layer range.", nameof(fillValue));
+
+            if (noiseType < 0 || noiseType > 9)
+                throw new ArgumentException("Unknown procedural noise type.", nameof(noiseType));
+
+            if (heightBlendMode < 0 || heightBlendMode > 2)
+                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.", nameof(heightBlendMode));
+
+            if (samplingQuality < NoiseSamplingQuality.Low ||
+                samplingQuality > NoiseSamplingQuality.Direct)
+            {
+                throw new ArgumentException("Unknown noise sampling quality.", nameof(samplingQuality));
+            }
+
+            if (double.IsNaN(noiseFrequency) || double.IsInfinity(noiseFrequency) || noiseFrequency <= 0.0)
+                throw new ArgumentException("Noise frequency must be finite and greater than zero.", nameof(noiseFrequency));
+
+            if (noiseOctaves < 1 || noiseOctaves > 8)
+                throw new ArgumentException("Noise octaves must be from 1 to 8.", nameof(noiseOctaves));
+
+            ValidateUnitRange(blendNoiseMinimum, "blendNoiseMinimum");
+            ValidateUnitRange(blendNoiseMaximum, "blendNoiseMaximum");
+            if (blendNoiseMinimum > blendNoiseMaximum)
+                throw new ArgumentException("Blend noise minimum cannot exceed the maximum.", nameof(blendNoiseMinimum));
+
+            ValidateAltitudeBound(minimumAltitude, "minimumAltitude");
+            ValidateAltitudeBound(maximumAltitude, "maximumAltitude");
+            if (minimumAltitude >= 0 && maximumAltitude >= 0 && minimumAltitude > maximumAltitude)
+                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.", nameof(minimumAltitude));
+
+            ValidateLatitude(minimumLatitude, "minimumLatitude");
+            ValidateLatitude(maximumLatitude, "maximumLatitude");
+            if (minimumLatitude > maximumLatitude)
+                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.", nameof(minimumLatitude));
+
+            ValidateByteFilter(biomeFilter, "biomeFilter");
+            ValidateByteFilter(materialFilter, "materialFilter");
+
+            if (layerIndex == 0 && !PlanetMaterialMap.UsesValue(Builder, (byte)fillValue))
+                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.", nameof(fillValue));
+
+            if (layerIndex == 1)
+                EnsureBiomePlanetMapEnabled();
+
+            _brushOperations.Add(new BrushOperation
+            {
+                LayerIndex = layerIndex,
+                FillValue = fillValue,
+                UseNoise = true,
+                NoiseFrequency = noiseFrequency,
+                NoiseOctaves = noiseOctaves,
+                NoiseSeedOffset = noiseSeedOffset,
+                BlendNoiseMinimum = blendNoiseMinimum,
+                BlendNoiseMaximum = blendNoiseMaximum,
+                MinimumAltitude = minimumAltitude,
+                MaximumAltitude = maximumAltitude,
+                MinimumLatitude = minimumLatitude,
+                MaximumLatitude = maximumLatitude,
+                BiomeFilter = biomeFilter,
+                MaterialFilter = materialFilter,
+                NoiseType = noiseType,
+                HeightBlendMode = heightBlendMode,
+                NoiseSamplingQuality = (int)samplingQuality,
+                ScaleHeightByNoise = layerIndex == 3
+            });
         }
 
 
