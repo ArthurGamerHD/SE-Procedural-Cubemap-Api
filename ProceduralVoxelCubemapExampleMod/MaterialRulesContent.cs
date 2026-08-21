@@ -27,22 +27,22 @@ namespace VoxelCubemapExampleMod
             string materialGroupName)
         {
             if (modContext == null)
-                throw new ArgumentNullException("modContext");
+                throw new ArgumentNullException(nameof(modContext));
 
             if (string.IsNullOrWhiteSpace(relativeFile))
                 throw new ArgumentException(
                     "Material-rule file path cannot be empty.",
-                    "relativeFile");
+                    nameof(relativeFile));
 
             if (string.IsNullOrWhiteSpace(carrierSubtype))
                 throw new ArgumentException(
                     "Carrier planet-definition subtype cannot be empty.",
-                    "carrierSubtype");
+                    nameof(carrierSubtype));
 
             if (string.IsNullOrWhiteSpace(materialGroupName))
                 throw new ArgumentException(
                     "Material-group name cannot be empty.",
-                    "materialGroupName");
+                    nameof(materialGroupName));
 
 
             if (!MyAPIGateway.Utilities.FileExistsInModLocation(

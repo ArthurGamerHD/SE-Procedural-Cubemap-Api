@@ -367,6 +367,13 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         revision.PlanetSeed,
                         revision.BrushOperations);
 
+                    PlanetMapOperations.ApplyFeaturesToPlanetImages(
+                        heightImage,
+                        materialImage,
+                        heightFileName,
+                        revision.PlanetSeed,
+                        revision.FeatureOperations);
+
                     for (int operationIndex = 0;
                         operationIndex < revision.BiomeReplacementOperations.Count;
                         operationIndex++)
@@ -400,11 +407,10 @@ namespace VoxelCubemapApi.Common.PlanetModification
             PlanetModificationSnapshot snapshot,
             Dictionary<string, byte[]> runtimeSourceFiles)
         {
-            if (snapshot.BrushOperations == null ||
-                snapshot.BrushOperations.Count == 0)
-            {
+            bool haveBrushes = snapshot.BrushOperations != null && snapshot.BrushOperations.Count > 0;
+            bool haveFeatures = snapshot.FeatureOperations != null && snapshot.FeatureOperations.Count > 0;
+            if (!haveBrushes && !haveFeatures)
                 return;
-            }
 
             string[] faces =
             {
@@ -462,6 +468,13 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     heightFileName,
                     snapshot.PlanetSeed,
                     snapshot.BrushOperations);
+
+                PlanetMapOperations.ApplyFeaturesToPlanetImages(
+                    heightImage,
+                    materialImage,
+                    heightFileName,
+                    snapshot.PlanetSeed,
+                    snapshot.FeatureOperations);
             }
         }
 

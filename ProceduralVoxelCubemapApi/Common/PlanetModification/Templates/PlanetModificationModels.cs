@@ -59,6 +59,32 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public int HeightBlendMode;
         public int NoiseSamplingQuality;
         public bool ScaleHeightByNoise;
+        public bool UseRadial;
+        public double RadialCenterX;
+        public double RadialCenterY;
+        public double RadialCenterZ;
+        public double RadialRadiusDegrees;
+        public int RadialProfile;
+        public bool ScaleHeightByRadial;
+    }
+
+
+    internal sealed class FeatureOperation
+    {
+        public List<CraterFieldOperation> CraterFields =
+            new List<CraterFieldOperation>();
+    }
+
+
+    internal sealed class CraterFieldOperation
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumRadiusDegrees;
+        public double MaximumRadiusDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public float TargetSize;
     }
 
 
@@ -82,6 +108,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public List<FractalNoiseOperation> FractalNoiseOperations;
         public List<BiomeReplacementOperation> BiomeReplacementOperations;
         public List<BrushOperation> BrushOperations;
+        public List<FeatureOperation> FeatureOperations;
         public List<byte> AllocatedComplexMaterialValues;
         public string EnvironmentCarrierSubtype;
         public string EnvironmentPresetName;

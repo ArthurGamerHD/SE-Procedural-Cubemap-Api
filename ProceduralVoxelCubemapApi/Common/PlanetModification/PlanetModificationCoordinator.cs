@@ -909,8 +909,36 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         NoiseType = operation.NoiseType,
                         HeightBlendMode = operation.HeightBlendMode,
                         NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                        ScaleHeightByNoise = operation.ScaleHeightByNoise
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                            UseRadial = operation.UseRadial,
+                            RadialCenterX = operation.RadialCenterX,
+                            RadialCenterY = operation.RadialCenterY,
+                            RadialCenterZ = operation.RadialCenterZ,
+                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                            RadialProfile = operation.RadialProfile,
+                            ScaleHeightByRadial = operation.ScaleHeightByRadial
                     });
+            }
+
+            for (int featureIndex = 0; featureIndex < snapshot.FeatureOperations.Count; featureIndex++)
+            {
+                FeatureOperation feature = snapshot.FeatureOperations[featureIndex];
+                var persistedFeature = new RuntimeProceduralFeatureOperation();
+                for (int fieldIndex = 0; fieldIndex < feature.CraterFields.Count; fieldIndex++)
+                {
+                    CraterFieldOperation field = feature.CraterFields[fieldIndex];
+                    persistedFeature.CraterFields.Add(new RuntimeProceduralCraterField
+                    {
+                        Count = field.Count,
+                        SeedOffset = field.SeedOffset,
+                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
+                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
+                        MinimumDepth = field.MinimumDepth,
+                        MaximumDepth = field.MaximumDepth,
+                        TargetSize = field.TargetSize
+                    });
+                }
+                revision.Features.Add(persistedFeature);
             }
 
             for (int i = 0;
@@ -1089,6 +1117,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         new List<BiomeReplacementOperation>(),
                     BrushOperations =
                         new List<BrushOperation>(),
+                    FeatureOperations =
+                        new List<FeatureOperation>(),
                     AllocatedComplexMaterialValues =
                         new List<byte>(
                             revision.AllocatedComplexMaterialValues),
@@ -1124,6 +1154,25 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     });
             }
 
+            for (int featureIndex = 0; revision.Features != null && featureIndex < revision.Features.Count; featureIndex++)
+            {
+                RuntimeProceduralFeatureOperation persistedFeature = revision.Features[featureIndex];
+                var feature = new FeatureOperation();
+                for (int fieldIndex = 0; fieldIndex < persistedFeature.CraterFields.Count; fieldIndex++)
+                {
+                    RuntimeProceduralCraterField field = persistedFeature.CraterFields[fieldIndex];
+                    feature.CraterFields.Add(new CraterFieldOperation
+                    {
+                        Count = field.Count, SeedOffset = field.SeedOffset,
+                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
+                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
+                        MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
+                        TargetSize = field.TargetSize
+                    });
+                }
+                snapshot.FeatureOperations.Add(feature);
+            }
+
             for (int i = 0; i < revision.Brushes.Count; i++)
             {
                 RuntimeProceduralBrushOperation operation =
@@ -1149,7 +1198,14 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         NoiseType = operation.NoiseType,
                         HeightBlendMode = operation.HeightBlendMode,
                         NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                        ScaleHeightByNoise = operation.ScaleHeightByNoise
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                            UseRadial = operation.UseRadial,
+                            RadialCenterX = operation.RadialCenterX,
+                            RadialCenterY = operation.RadialCenterY,
+                            RadialCenterZ = operation.RadialCenterZ,
+                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                            RadialProfile = operation.RadialProfile,
+                            ScaleHeightByRadial = operation.ScaleHeightByRadial
                     });
             }
 
@@ -1742,6 +1798,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
                 ConvertBrushOperations(
                     packet.BrushOperations);
 
+            snapshot.FeatureOperations =
+                ConvertFeatureOperations(packet.FeatureOperations);
+
             snapshot.AllocatedComplexMaterialValues =
                 packet.AllocatedComplexMaterialValues == null
                     ? new List<byte>()
@@ -2058,6 +2117,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     new List<BiomeReplacementOperation>(),
                 BrushOperations =
                     new List<BrushOperation>(),
+                FeatureOperations =
+                    new List<FeatureOperation>(),
                 AllocatedComplexMaterialValues =
                     new List<byte>(),
                 EnvironmentCarrierSubtype =
@@ -2316,10 +2377,52 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         NoiseType = operation.NoiseType,
                         HeightBlendMode = operation.HeightBlendMode,
                         NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                        ScaleHeightByNoise = operation.ScaleHeightByNoise
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                            UseRadial = operation.UseRadial,
+                            RadialCenterX = operation.RadialCenterX,
+                            RadialCenterY = operation.RadialCenterY,
+                            RadialCenterZ = operation.RadialCenterZ,
+                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                            RadialProfile = operation.RadialProfile,
+                            ScaleHeightByRadial = operation.ScaleHeightByRadial
                     });
             }
 
+            return result;
+        }
+
+        private static List<FeatureOperation> ConvertFeatureOperations(
+            List<SyncedFeatureOperation> operations)
+        {
+            var result = new List<FeatureOperation>();
+            if (operations == null)
+                return result;
+
+            for (int index = 0; index < operations.Count; index++)
+            {
+                SyncedFeatureOperation synced = operations[index];
+                if (synced == null)
+                    continue;
+
+                var feature = new FeatureOperation();
+                if (synced.CraterFields != null)
+                {
+                    for (int fieldIndex = 0; fieldIndex < synced.CraterFields.Count; fieldIndex++)
+                    {
+                        SyncedCraterField field = synced.CraterFields[fieldIndex];
+                        if (field == null) continue;
+                        feature.CraterFields.Add(new CraterFieldOperation
+                        {
+                            Count = field.Count, SeedOffset = field.SeedOffset,
+                            MinimumRadiusDegrees = field.MinimumRadiusDegrees,
+                            MaximumRadiusDegrees = field.MaximumRadiusDegrees,
+                            MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
+                            TargetSize = field.TargetSize
+                        });
+                    }
+                }
+                result.Add(feature);
+            }
             return result;
         }
 

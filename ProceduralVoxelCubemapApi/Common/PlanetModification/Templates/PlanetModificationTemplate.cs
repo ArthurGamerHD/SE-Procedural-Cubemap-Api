@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Adk.Image.Png;
@@ -49,6 +49,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         private readonly List<BrushOperation>
             _brushOperations =
                 new List<BrushOperation>();
+
+        private readonly List<FeatureOperation>
+            _featureOperations =
+                new List<FeatureOperation>();
 
         private readonly List<byte> _allocatedComplexMaterialValues =
             new List<byte>();
@@ -268,8 +272,41 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                         NoiseType = operation.NoiseType,
                         HeightBlendMode = operation.HeightBlendMode,
                         NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                        ScaleHeightByNoise = operation.ScaleHeightByNoise
+                        ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                            UseRadial = operation.UseRadial,
+                            RadialCenterX = operation.RadialCenterX,
+                            RadialCenterY = operation.RadialCenterY,
+                            RadialCenterZ = operation.RadialCenterZ,
+                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                            RadialProfile = operation.RadialProfile,
+                            ScaleHeightByRadial = operation.ScaleHeightByRadial
                     });
+            }
+
+            var featureOperations =
+                new List<FeatureOperation>(_featureOperations.Count);
+
+            for (int i = 0; i < _featureOperations.Count; i++)
+            {
+                FeatureOperation sourceFeature = _featureOperations[i];
+                var targetFeature = new FeatureOperation();
+
+                for (int fieldIndex = 0; fieldIndex < sourceFeature.CraterFields.Count; fieldIndex++)
+                {
+                    CraterFieldOperation field = sourceFeature.CraterFields[fieldIndex];
+                    targetFeature.CraterFields.Add(new CraterFieldOperation
+                    {
+                        Count = field.Count,
+                        SeedOffset = field.SeedOffset,
+                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
+                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
+                        MinimumDepth = field.MinimumDepth,
+                        MaximumDepth = field.MaximumDepth,
+                        TargetSize = field.TargetSize
+                    });
+                }
+
+                featureOperations.Add(targetFeature);
             }
 
             var allocatedComplexValues =
@@ -294,6 +331,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushOperations,
+                FeatureOperations = featureOperations,
                 AllocatedComplexMaterialValues = allocatedComplexValues,
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype,
                 EnvironmentPresetName = _environmentPresetName,
@@ -1337,6 +1375,123 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 NoiseSamplingQuality = (int)samplingQuality,
                 ScaleHeightByNoise = layerIndex == 3
             });
+        }
+
+
+        /// <summary>
+        /// Queues a spherical radial field brush. Center coordinates are a planet-space
+        /// direction and are normalized by the API. Radius is expressed in angular degrees.
+        /// </summary>
+        [ApiMethod]
+        private void ApplyRadialBrush(
+            string layer,
+            int fillValue,
+            double centerX,
+            double centerY,
+            double centerZ,
+            double radiusDegrees,
+            int radialProfile,
+            int heightBlendMode,
+            int minimumAltitude,
+            int maximumAltitude,
+            double minimumLatitude,
+            double maximumLatitude,
+            int biomeFilter,
+            int materialFilter)
+        {
+            EnsureEditable();
+
+            int layerIndex = ParseBrushLayer(layer);
+            int maximumFillValue = layerIndex == 3 ? ushort.MaxValue : byte.MaxValue;
+
+            if (fillValue < 0 || fillValue > maximumFillValue)
+                throw new ArgumentException("Brush fill value is outside the target layer range.", nameof(fillValue));
+
+            if (double.IsNaN(centerX) || double.IsInfinity(centerX) ||
+                double.IsNaN(centerY) || double.IsInfinity(centerY) ||
+                double.IsNaN(centerZ) || double.IsInfinity(centerZ))
+            {
+                throw new ArgumentException("Radial center must contain finite coordinates.", "center");
+            }
+
+            double centerLengthSquared = centerX * centerX + centerY * centerY + centerZ * centerZ;
+            if (centerLengthSquared < 1e-12)
+                throw new ArgumentException("Radial center direction cannot be zero.", "center");
+
+            double inverseLength = 1.0 / Math.Sqrt(centerLengthSquared);
+            centerX *= inverseLength;
+            centerY *= inverseLength;
+            centerZ *= inverseLength;
+
+            if (double.IsNaN(radiusDegrees) || double.IsInfinity(radiusDegrees) ||
+                radiusDegrees <= 0.0 || radiusDegrees > 180.0)
+            {
+                throw new ArgumentException("Radial radius must be greater than zero and no more than 180 degrees.", nameof(radiusDegrees));
+            }
+
+            if (radialProfile < 0 || radialProfile > 3)
+                throw new ArgumentException("Unknown radial field profile.", nameof(radialProfile));
+
+            if (heightBlendMode < 0 || heightBlendMode > 2)
+                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.", nameof(heightBlendMode));
+
+            if (radialProfile == 3 && layerIndex != 3)
+                throw new ArgumentException("The signed Crater radial profile can only be applied to the Heightmap layer.", nameof(radialProfile));
+
+            ValidateAltitudeBound(minimumAltitude, "minimumAltitude");
+            ValidateAltitudeBound(maximumAltitude, "maximumAltitude");
+            if (minimumAltitude >= 0 && maximumAltitude >= 0 && minimumAltitude > maximumAltitude)
+                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.", nameof(minimumAltitude));
+
+            ValidateLatitude(minimumLatitude, "minimumLatitude");
+            ValidateLatitude(maximumLatitude, "maximumLatitude");
+            if (minimumLatitude > maximumLatitude)
+                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.", nameof(minimumLatitude));
+
+            ValidateByteFilter(biomeFilter, "biomeFilter");
+            ValidateByteFilter(materialFilter, "materialFilter");
+
+            if (layerIndex == 0 && !PlanetMaterialMap.UsesValue(Builder, (byte)fillValue))
+                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.", nameof(fillValue));
+
+            if (layerIndex == 1)
+                EnsureBiomePlanetMapEnabled();
+
+            _brushOperations.Add(new BrushOperation
+            {
+                LayerIndex = layerIndex,
+                FillValue = fillValue,
+                UseNoise = false,
+                MinimumAltitude = minimumAltitude,
+                MaximumAltitude = maximumAltitude,
+                MinimumLatitude = minimumLatitude,
+                MaximumLatitude = maximumLatitude,
+                BiomeFilter = biomeFilter,
+                MaterialFilter = materialFilter,
+                HeightBlendMode = heightBlendMode,
+                UseRadial = true,
+                RadialCenterX = centerX,
+                RadialCenterY = centerY,
+                RadialCenterZ = centerZ,
+                RadialRadiusDegrees = radiusDegrees,
+                RadialProfile = radialProfile,
+                ScaleHeightByRadial = layerIndex == 3
+            });
+        }
+
+
+        /// <summary>
+        /// Adds one reusable procedural feature pass and returns its nested template.
+        /// Feature generators are stored compactly and expanded only while baking.
+        /// </summary>
+        [ApiMethod(typeof(FeatureTemplate))]
+        private Dictionary<string, Delegate> AddFeature()
+        {
+            EnsureEditable();
+
+            var operation = new FeatureOperation();
+            _featureOperations.Add(operation);
+            return new FeatureTemplate(operation).GetApi();
         }
 
 

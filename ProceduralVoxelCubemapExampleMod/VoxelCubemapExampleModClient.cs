@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Text;
 using Generated;
 using Sandbox.ModAPI;
@@ -6,6 +6,8 @@ using VoxelCubemapApi.Api;
 using VRage.Game;
 using VRage.Game.Components;
 using VRage.Utils;
+using VRage.ModAPI;
+using VRageMath;
 
 namespace VoxelCubemapExampleMod
 {
@@ -220,7 +222,7 @@ namespace VoxelCubemapExampleMod
                 {
                     throw new ArgumentException(
                         "Grass coverage must be from 0 to 100.",
-                        "grassCoveragePercent");
+                        nameof(grassCoveragePercent));
                 }
 
 
@@ -592,7 +594,7 @@ namespace VoxelCubemapExampleMod
                 {
                     throw new ArgumentException(
                         "Ocean height must be from 0 to 65535.",
-                        "oceanHeight");
+                        nameof(oceanHeight));
                 }
 
                 if (fractalFillPercent < 0 ||
@@ -600,7 +602,7 @@ namespace VoxelCubemapExampleMod
                 {
                     throw new ArgumentException(
                         "Fractal fill must be from 0 to 100.",
-                        "fractalFillPercent");
+                        nameof(fractalFillPercent));
                 }
 
 
@@ -863,13 +865,13 @@ namespace VoxelCubemapExampleMod
             try
             {
                 if (duneHeight < 1 || duneHeight > ushort.MaxValue)
-                    throw new ArgumentException("Dune height must be from 1 to 65535.", "duneHeight");
+                    throw new ArgumentException("Dune height must be from 1 to 65535.", nameof(duneHeight));
 
                 if (double.IsNaN(duneFrequency) ||
                     double.IsInfinity(duneFrequency) ||
                     duneFrequency <= 0.0)
                 {
-                    throw new ArgumentException("Dune frequency must be finite and greater than zero.", "duneFrequency");
+                    throw new ArgumentException("Dune frequency must be finite and greater than zero.", nameof(duneFrequency));
                 }
 
                 template = client._api.GetModificationTemplate(0);
@@ -952,6 +954,224 @@ namespace VoxelCubemapExampleMod
                     template.Close();
 
                 LogWarning("Dune generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
+
+        /// <summary>
+        /// Creates a raised-rim crater on the nearest planet at the player's
+        /// current position. The player position is projected radially from the
+        /// planet center; all cubemap editing is performed by the API.
+        /// </summary>
+        [ChatCommand("createcrater", "vcma")]
+        public static void CreateCrater(
+            int depth = 4096,
+            double radiusDegrees = 3.0)
+        {
+            const int addHeightMode = 1;
+
+            VoxelCubemapExampleModClient client = _instance;
+
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+
+            try
+            {
+                if (depth < 1 || depth > ushort.MaxValue)
+                    throw new ArgumentException("Crater depth must be from 1 to 65535.", nameof(depth));
+
+                if (double.IsNaN(radiusDegrees) ||
+                    double.IsInfinity(radiusDegrees) ||
+                    radiusDegrees <= 0.0 ||
+                    radiusDegrees > 90.0)
+                {
+                    throw new ArgumentException("Crater radius must be greater than zero and no more than 90 degrees.", nameof(radiusDegrees));
+                }
+
+                if (MyAPIGateway.Session == null ||
+                    MyAPIGateway.Session.Player == null)
+                {
+                    throw new Exception("A local player is required to choose the crater center.");
+                }
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                IMyEntity planetEntity =
+                    MyAPIGateway.Entities.GetEntityById(
+                        template.GetPlanetEntityId());
+
+                if (planetEntity == null)
+                    throw new Exception("Could not resolve the nearest planet entity.");
+
+                Vector3D centerDirection =
+                    MyAPIGateway.Session.Player.GetPosition() -
+                    planetEntity.GetPosition();
+
+                if (centerDirection.LengthSquared() < 1.0)
+                    throw new Exception("Could not determine a valid radial direction for the crater center.");
+
+                centerDirection.Normalize();
+
+                template.ApplyRadialBrush(
+                    "Heightmap",
+                    depth,
+                    centerDirection.X,
+                    centerDirection.Y,
+                    centerDirection.Z,
+                    radiusDegrees,
+                    (int)RadialFieldProfile.Crater,
+                    addHeightMode,
+                    -1,
+                    -1,
+                    -90.0,
+                    90.0,
+                    -1,
+                    -1);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] createcrater: depth=" +
+                    depth +
+                    ", radiusDegrees=" +
+                    radiusDegrees +
+                    ", center=" +
+                    centerDirection +
+                    ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Crater committed."
+                                    : "Crater failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("Crater generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
+        /// <summary>
+        /// Covers the nearest planet with a deterministic, heavily cratered
+        /// lunar-style surface. The recipe stores one compact crater-field
+        /// feature instead of one radial operation per generated crater.
+        /// Crater overlap is intentionally allowed by the API feature pass.
+        /// </summary>
+        [ChatCommand("testmoon", "vcma")]
+        public static void TestMoon(
+            int craterCount = 4096,
+            int seedOffset = 0)
+        {
+            const double minimumRadiusDegrees = 0.05;
+            const double maximumRadiusDegrees = 9.0;
+            const int minimumDepth = 200;
+            const int maximumDepth = 8000;
+            const float targetSize = 0.1f;
+
+            VoxelCubemapExampleModClient client = _instance;
+
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+
+            try
+            {
+                if (craterCount < 1 || craterCount > 65535)
+                {
+                    throw new ArgumentException(
+                        "Crater count must be from 1 to 65535.",
+                        nameof(craterCount));
+                }
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                FeatureTemplate feature = template.AddFeature();
+                feature.AddCraterFieldBiased(
+                    craterCount,
+                    seedOffset,
+                    minimumRadiusDegrees,
+                    maximumRadiusDegrees,
+                    minimumDepth,
+                    maximumDepth,
+                    targetSize);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testmoon: craterField count=" +
+                    craterCount +
+                    ", seedOffset=" +
+                    seedOffset +
+                    ", targetSize=" +
+                    targetSize +
+                    ", planetSeed=" +
+                    template.GetPlanetSeed() +
+                    ". Overlap is enabled.");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Moon crater field committed."
+                                    : "Moon crater field failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("Moon crater generation failed", e);
                 ShowMessage("Failed: " + e.Message);
             }
         }

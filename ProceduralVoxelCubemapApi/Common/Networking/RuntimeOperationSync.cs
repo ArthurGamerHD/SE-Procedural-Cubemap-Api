@@ -63,6 +63,9 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(17)]
         public bool RequiresCommitDecision;
+
+        [ProtoMember(18)]
+        public List<SyncedFeatureOperation> FeatureOperations;
     }
 
     [ProtoContract]
@@ -147,5 +150,46 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(18)]
         public int NoiseSamplingQuality;
+
+        [ProtoMember(19)]
+        public bool UseRadial;
+
+        [ProtoMember(20)]
+        public double RadialCenterX;
+
+        [ProtoMember(21)]
+        public double RadialCenterY;
+
+        [ProtoMember(22)]
+        public double RadialCenterZ;
+
+        [ProtoMember(23)]
+        public double RadialRadiusDegrees;
+
+        [ProtoMember(24)]
+        public int RadialProfile;
+
+        [ProtoMember(25)]
+        public bool ScaleHeightByRadial;
+    }
+
+
+    [ProtoContract]
+    internal sealed class SyncedFeatureOperation
+    {
+        [ProtoMember(1)]
+        public List<SyncedCraterField> CraterFields;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedCraterField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumRadiusDegrees;
+        [ProtoMember(4)] public double MaximumRadiusDegrees;
+        [ProtoMember(5)] public int MinimumDepth;
+        [ProtoMember(6)] public int MaximumDepth;
+        [ProtoMember(7)] public float TargetSize;
     }
 }

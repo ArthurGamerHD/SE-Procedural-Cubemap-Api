@@ -111,8 +111,42 @@ namespace VoxelCubemapApi.Common.Networking
                             NoiseType = operation.NoiseType,
                             HeightBlendMode = operation.HeightBlendMode,
                             NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                            ScaleHeightByNoise = operation.ScaleHeightByNoise
+                            ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                            UseRadial = operation.UseRadial,
+                            RadialCenterX = operation.RadialCenterX,
+                            RadialCenterY = operation.RadialCenterY,
+                            RadialCenterZ = operation.RadialCenterZ,
+                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                            RadialProfile = operation.RadialProfile,
+                            ScaleHeightByRadial = operation.ScaleHeightByRadial
                         });
+                }
+            }
+
+            var features = new List<SyncedFeatureOperation>();
+            if (snapshot.FeatureOperations != null)
+            {
+                for (int featureIndex = 0; featureIndex < snapshot.FeatureOperations.Count; featureIndex++)
+                {
+                    FeatureOperation feature = snapshot.FeatureOperations[featureIndex];
+                    var syncedFeature = new SyncedFeatureOperation
+                    {
+                        CraterFields = new List<SyncedCraterField>()
+                    };
+
+                    for (int fieldIndex = 0; fieldIndex < feature.CraterFields.Count; fieldIndex++)
+                    {
+                        CraterFieldOperation field = feature.CraterFields[fieldIndex];
+                        syncedFeature.CraterFields.Add(new SyncedCraterField
+                        {
+                            Count = field.Count, SeedOffset = field.SeedOffset,
+                            MinimumRadiusDegrees = field.MinimumRadiusDegrees,
+                            MaximumRadiusDegrees = field.MaximumRadiusDegrees,
+                            MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
+                            TargetSize = field.TargetSize
+                        });
+                    }
+                    features.Add(syncedFeature);
                 }
             }
 
@@ -126,6 +160,7 @@ namespace VoxelCubemapApi.Common.Networking
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushes,
+                FeatureOperations = features,
                 AllocatedComplexMaterialValues =
                     snapshot.AllocatedComplexMaterialValues == null
                         ? new List<byte>()

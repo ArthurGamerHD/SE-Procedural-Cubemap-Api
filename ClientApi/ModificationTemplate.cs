@@ -29,6 +29,8 @@ namespace VoxelCubemapApi.Api
         private readonly Action<byte, int> _applyBiomeFractalNoise;
         private readonly Action<string, int, bool, double, int, int, double, double, int, int, double, double, int, int> _applyBrush;
         private readonly Action<string, int, int, int, int, double, int, int, double, double, int, int, double, double, int, int> _applyNoiseBrush;
+        private readonly Action<string, int, double, double, double, double, int, int, int, int, double, double, int, int> _applyRadialBrush;
+        private readonly Func<ApiData> _addFeature;
         private readonly Func<byte, bool> _removeMaterial;
         private readonly Action<Action<bool, string>> _push;
         private readonly Action _close;
@@ -129,6 +131,16 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Action<string, int, int, int, int, double, int, int, double, double, int, int, double, double, int, int>>(
                     api,
                     "ApplyNoiseBrush");
+
+            _applyRadialBrush =
+                GetRequired<Action<string, int, double, double, double, double, int, int, int, int, double, double, int, int>>(
+                    api,
+                    "ApplyRadialBrush");
+
+            _addFeature =
+                GetRequired<Func<ApiData>>(
+                    api,
+                    "AddFeature");
 
             _removeMaterial =
                 GetRequired<Func<byte, bool>>(
@@ -383,6 +395,45 @@ namespace VoxelCubemapApi.Api
             int materialFilter)
         {
             _applyNoiseBrush(layer, fillValue, noiseType, heightBlendMode, samplingQuality, noiseFrequency, noiseOctaves, noiseSeedOffset, blendNoiseMinimum, blendNoiseMaximum, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
+        }
+
+
+        /// <summary>
+        /// Queues a spherical radial field brush. Center coordinates are a planet-space
+        /// direction and are normalized by the API. Radius is expressed in angular degrees.
+        /// </summary>
+        public void ApplyRadialBrush(
+            string layer,
+            int fillValue,
+            double centerX,
+            double centerY,
+            double centerZ,
+            double radiusDegrees,
+            int radialProfile,
+            int heightBlendMode,
+            int minimumAltitude,
+            int maximumAltitude,
+            double minimumLatitude,
+            double maximumLatitude,
+            int biomeFilter,
+            int materialFilter)
+        {
+            _applyRadialBrush(layer, fillValue, centerX, centerY, centerZ, radiusDegrees, radialProfile, heightBlendMode, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
+        }
+
+
+        /// <summary>
+        /// Adds one reusable procedural feature pass and returns its nested template.
+        /// Feature generators are stored compactly and expanded only while baking.
+        /// </summary>
+        public FeatureTemplate AddFeature()
+        {
+            ApiData nestedApi =
+                _addFeature();
+
+            return nestedApi == null
+                ? null
+                : new FeatureTemplate(nestedApi);
         }
 
 

@@ -2443,7 +2443,23 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                              operation.BlendNoiseMaximum < 0.0 ||
                              operation.BlendNoiseMaximum > 1.0 ||
                              operation.BlendNoiseMinimum >
-                                operation.BlendNoiseMaximum)))
+                                operation.BlendNoiseMaximum)) ||
+                        (operation.UseRadial &&
+                            (double.IsNaN(operation.RadialCenterX) ||
+                             double.IsInfinity(operation.RadialCenterX) ||
+                             double.IsNaN(operation.RadialCenterY) ||
+                             double.IsInfinity(operation.RadialCenterY) ||
+                             double.IsNaN(operation.RadialCenterZ) ||
+                             double.IsInfinity(operation.RadialCenterZ) ||
+                             operation.RadialCenterX * operation.RadialCenterX +
+                                operation.RadialCenterY * operation.RadialCenterY +
+                                operation.RadialCenterZ * operation.RadialCenterZ < 1e-12 ||
+                             double.IsNaN(operation.RadialRadiusDegrees) ||
+                             double.IsInfinity(operation.RadialRadiusDegrees) ||
+                             operation.RadialRadiusDegrees <= 0.0 ||
+                             operation.RadialRadiusDegrees > 180.0 ||
+                             operation.RadialProfile < 0 ||
+                             operation.RadialProfile > 3)))
                     {
                         throw new Exception("Procedural recipe contains an invalid brush.");
                     }

@@ -2,6 +2,7 @@
 using Vector3D = VoxelCubemapApi.NoiseTestCli.NoiseVector3D;
 #else
 using VRageMath;
+using Sandbox.ModAPI;
 #endif
 using System;
 using VoxelCubemapApi.Common.Noise;
@@ -83,29 +84,17 @@ namespace VoxelCubemapApi.Common.Noise.fBm
             Vector3D direction;
 
 
-            // Orientation from Space Engineers planet-map
-            // edge relationships:
+            // Exact inverse of Space Engineers' planet heightmap mapping in
+            // Sandbox.Engine.Voxels.Planet.MyCubemapHelpers.CalculateSampleTexcoord.
             //
-            // front L == left R
-            // front R == right L
-            // front T == up B
-            // front B == reversed down B
-            // back  L == right R
-            // back  R == left L
-            //
-            // Sampling one continuous 3D field with these vectors makes shared
-            // face edges and all cube corners evaluate identically.
+            // This is important for localized fields: the center supplied by a
+            // client is a world/planet-space direction, so it must resolve to the
+            // same face and pixel that VRage samples from the planet cubemap.
+            // A merely seamless (but differently oriented) cube mapping is enough
+            // for global noise, but places craters/ravines on the wrong side.
             switch (faceIndex)
             {
-                case 0:
-                    direction =
-                        new Vector3D(
-                            u,
-                            -v,
-                            1.0);
-                    break;
-
-                case 1:
+                case 0: // front, -Z
                     direction =
                         new Vector3D(
                             -u,
@@ -113,15 +102,15 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                             -1.0);
                     break;
 
-                case 2:
+                case 1: // back, +Z
                     direction =
                         new Vector3D(
-                            -1.0,
+                            u,
                             -v,
-                            u);
+                            1.0);
                     break;
 
-                case 3:
+                case 2: // left map, +X
                     direction =
                         new Vector3D(
                             1.0,
@@ -129,20 +118,28 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                             -u);
                     break;
 
-                case 4:
+                case 3: // right map, -X
                     direction =
                         new Vector3D(
-                            u,
-                            1.0,
-                            v);
+                            -1.0,
+                            -v,
+                            u);
                     break;
 
-                case 5:
+                case 4: // up, +Y
                     direction =
                         new Vector3D(
                             -u,
+                            1.0,
+                            -v);
+                    break;
+
+                case 5: // down, -Y
+                    direction =
+                        new Vector3D(
+                            u,
                             -1.0,
-                            v);
+                            -v);
                     break;
 
                 default:
@@ -261,7 +258,6 @@ namespace VoxelCubemapApi.Common.Noise.fBm
         {
             int gridResolution = GetNoiseGridResolution(samplingQuality);
             double[] grid = new double[gridResolution * gridResolution];
-            int offset = 0;
             INoise3D noise = CreateNoise(
                 planetSeed,
                 noiseType,
@@ -269,8 +265,10 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                 octaves,
                 seedOffset);
 
+#if VOXEL_CUBEMAP_NOISE_CLI
             for (int y = 0; y < gridResolution; y++)
             {
+                int rowOffset = y * gridResolution;
                 for (int x = 0; x < gridResolution; x++)
                 {
                     Vector3D direction = GetCubemapSphereDirection(
@@ -280,10 +278,32 @@ namespace VoxelCubemapApi.Common.Noise.fBm
                         gridResolution,
                         gridResolution);
 
-                    grid[offset++] = NoiseMath.To01(
+                    grid[rowOffset + x] = NoiseMath.To01(
                         noise.Sample(direction.X, direction.Y, direction.Z));
                 }
             }
+#else
+            // Noise modules are immutable/stateless after construction, and each
+            // worker owns one independent grid row. This keeps expensive FBM /
+            // ridged / billow octave sampling off the simulation thread without
+            // introducing shared writes or locks.
+            MyAPIGateway.Parallel.For(0, gridResolution, y =>
+            {
+                int rowOffset = y * gridResolution;
+                for (int x = 0; x < gridResolution; x++)
+                {
+                    Vector3D direction = GetCubemapSphereDirection(
+                        faceIndex,
+                        x,
+                        y,
+                        gridResolution,
+                        gridResolution);
+
+                    grid[rowOffset + x] = NoiseMath.To01(
+                        noise.Sample(direction.X, direction.Y, direction.Z));
+                }
+            });
+#endif
 
             return grid;
         }

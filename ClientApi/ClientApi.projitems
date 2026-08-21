@@ -8,9 +8,11 @@
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)ApiProvider.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)EnvironmentPresetProvider.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)FeatureTemplate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ModificationTemplate.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)NoiseProvider.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)NoiseSamplingQuality.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)RadialFieldProfile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)PlanetMetadataProvider.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)VoxelCubemapApiClient.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)WaterUtil.cs" />

@@ -36,6 +36,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public List<RuntimeProceduralBrushOperation> Brushes =
             new List<RuntimeProceduralBrushOperation>();
 
+        public List<RuntimeProceduralFeatureOperation> Features =
+            new List<RuntimeProceduralFeatureOperation>();
+
         public List<RuntimeProceduralBiomeReplacement> BiomeReplacements =
             new List<RuntimeProceduralBiomeReplacement>();
 
@@ -95,6 +98,32 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public int HeightBlendMode;
         public int NoiseSamplingQuality;
         public bool ScaleHeightByNoise;
+        public bool UseRadial;
+        public double RadialCenterX;
+        public double RadialCenterY;
+        public double RadialCenterZ;
+        public double RadialRadiusDegrees;
+        public int RadialProfile;
+        public bool ScaleHeightByRadial;
+    }
+
+
+    public class RuntimeProceduralFeatureOperation
+    {
+        public List<RuntimeProceduralCraterField> CraterFields =
+            new List<RuntimeProceduralCraterField>();
+    }
+
+
+    public class RuntimeProceduralCraterField
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumRadiusDegrees;
+        public double MaximumRadiusDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public float TargetSize;
     }
 
 

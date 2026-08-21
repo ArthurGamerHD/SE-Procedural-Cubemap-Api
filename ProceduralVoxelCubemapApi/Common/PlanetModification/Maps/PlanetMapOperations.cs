@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using Adk.Image.Png;
+using Sandbox.ModAPI;
 using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.Noise.fBm;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
+using VRageMath;
 
 namespace VoxelCubemapApi.Common.PlanetModification.Maps
 {
@@ -257,6 +259,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
             int batchCount = batchEnd - batchStart;
             var noiseGrids = new double[batchCount][];
             var directNoiseFields = new INoise3D[batchCount];
+            var radialFields = new RadialField[batchCount];
             var latitudeRestricted = new bool[batchCount];
 
             // Build each distinct noise grid only once for this face/batch.
@@ -268,6 +271,17 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                 latitudeRestricted[localIndex] =
                     operation.MinimumLatitude > -90.0 ||
                     operation.MaximumLatitude < 90.0;
+
+                if (operation.UseRadial)
+                {
+                    radialFields[localIndex] =
+                        new RadialField(
+                            operation.RadialCenterX,
+                            operation.RadialCenterY,
+                            operation.RadialCenterZ,
+                            operation.RadialRadiusDegrees,
+                            operation.RadialProfile);
+                }
 
                 if (!operation.UseNoise)
                     continue;
@@ -337,7 +351,17 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
             byte[] biomePlane = materialImage.Planes[1];
             byte[] materialPlane = materialImage.Planes[0];
 
-            for (int y = 0; y < targetImage.Height; y++)
+            bool hasNoise = false;
+            for (int localIndex = 0; localIndex < batchCount; localIndex++)
+            {
+                if (operations[batchStart + localIndex].UseNoise)
+                {
+                    hasNoise = true;
+                    break;
+                }
+            }
+
+            Action<int> processRow = y =>
             {
                 int targetRow = y * targetImage.Width;
                 int heightRow = heightYMap[y] * heightImage.Width;
@@ -352,6 +376,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
 
                     bool latitudeCalculated = false;
                     double latitude = 0.0;
+                    bool radialDirectionCalculated = false;
+                    Vector3D radialDirection = Vector3D.Zero;
 
                     for (int localIndex = 0; localIndex < batchCount; localIndex++)
                     {
@@ -440,6 +466,33 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                             }
                         }
 
+                        if (operation.UseRadial)
+                        {
+                            if (!radialDirectionCalculated)
+                            {
+                                radialDirection =
+                                    FractalBrownianMotion.GetCubemapSphereDirection(
+                                        faceIndex,
+                                        x,
+                                        y,
+                                        targetImage.Width,
+                                        targetImage.Height);
+                                radialDirectionCalculated = true;
+                            }
+
+                            double radialScore =
+                                radialFields[localIndex].Sample(
+                                    radialDirection);
+
+                            // Signed radial profiles (for example Crater) use
+                            // negative values for carving and positive values
+                            // for raised features. Zero is the no-op boundary.
+                            if (radialScore == 0.0)
+                                continue;
+
+                            noiseScore = radialScore;
+                        }
+
                         altitude = ApplyBrushFill(
                             heightImage,
                             materialImage,
@@ -449,6 +502,19 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                             noiseScore);
                     }
                 }
+            };
+
+            if (hasNoise)
+            {
+                MyAPIGateway.Parallel.For(
+                    0,
+                    targetImage.Height,
+                    processRow);
+            }
+            else
+            {
+                for (int y = 0; y < targetImage.Height; y++)
+                    processRow(y);
             }
         }
 
@@ -583,10 +649,15 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
             {
                 int amount = operation.FillValue;
 
-                if (operation.ScaleHeightByNoise)
+                if (operation.ScaleHeightByNoise ||
+                    operation.ScaleHeightByRadial)
                 {
-                    amount = (int)(
-                        operation.FillValue * noiseScore + 0.5);
+                    double scaledAmount =
+                        operation.FillValue * noiseScore;
+
+                    amount = scaledAmount >= 0.0
+                        ? (int)(scaledAmount + 0.5)
+                        : (int)(scaledAmount - 0.5);
                 }
 
                 int value;
@@ -631,6 +702,259 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                 (byte)operation.FillValue;
 
             return currentAltitude;
+        }
+
+
+        internal static void ApplyFeaturesToPlanetImages(
+            PlanarPngBitmap heightImage,
+            PlanarPngBitmap materialImage,
+            string faceFileName,
+            long planetSeed,
+            List<FeatureOperation> operations)
+        {
+            if (heightImage == null)
+                throw new ArgumentNullException(nameof(heightImage));
+            if (materialImage == null)
+                throw new ArgumentNullException(nameof(materialImage));
+            if (operations == null || operations.Count == 0)
+                return;
+
+            ValidateBrushImages(heightImage, materialImage, faceFileName);
+            int faceIndex = FractalBrownianMotion.GetCubemapFaceIndex(faceFileName);
+            var craters = new List<GeneratedCrater>();
+
+            for (int featureIndex = 0; featureIndex < operations.Count; featureIndex++)
+            {
+                FeatureOperation feature = operations[featureIndex];
+                if (feature == null)
+                    continue;
+
+                for (int fieldIndex = 0; fieldIndex < feature.CraterFields.Count; fieldIndex++)
+                    ExpandCraterField(craters, planetSeed, feature.CraterFields[fieldIndex]);
+            }
+
+            if (craters.Count == 0)
+                return;
+
+            const int tileSize = 32;
+            FeatureTile[] tiles = BuildFeatureTiles(
+                faceIndex,
+                heightImage.Width,
+                heightImage.Height,
+                tileSize,
+                craters);
+
+            // Feature rasterization is pure data processing. Each parallel iteration
+            // owns a disjoint rectangle of the planar height buffer, while feature
+            // descriptors and tile candidate lists are immutable after construction.
+            MyAPIGateway.Parallel.For(0, tiles.Length, tileIndex =>
+            {
+                FeatureTile tile = tiles[tileIndex];
+                List<GeneratedCrater> candidates = tile.Craters;
+                if (candidates == null || candidates.Count == 0)
+                    return;
+
+                for (int y = tile.MinY; y < tile.MaxY; y++)
+                {
+                    int offset = y * heightImage.Width + tile.MinX;
+                    for (int x = tile.MinX; x < tile.MaxX; x++, offset++)
+                    {
+                        Vector3D direction = FractalBrownianMotion.GetCubemapSphereDirection(
+                            faceIndex, x, y, heightImage.Width, heightImage.Height);
+                        double totalDelta = 0.0;
+
+                        for (int craterIndex = 0; craterIndex < candidates.Count; craterIndex++)
+                        {
+                            GeneratedCrater crater = candidates[craterIndex];
+                            double score = crater.Field.Sample(direction);
+                            if (score != 0.0)
+                                totalDelta += score * crater.Depth;
+                        }
+
+                        if (totalDelta == 0.0)
+                            continue;
+
+                        int altitude = ReadHeightSample(heightImage, offset);
+                        int delta = totalDelta >= 0.0
+                            ? (int)(totalDelta + 0.5)
+                            : (int)(totalDelta - 0.5);
+                        int value = altitude + delta;
+                        if (value < 0) value = 0;
+                        else if (value > ushort.MaxValue) value = ushort.MaxValue;
+                        WriteHeightSample(heightImage, offset, value);
+                    }
+                }
+            });
+        }
+
+
+        private static FeatureTile[] BuildFeatureTiles(
+            int faceIndex,
+            int width,
+            int height,
+            int tileSize,
+            List<GeneratedCrater> craters)
+        {
+            int columns = (width + tileSize - 1) / tileSize;
+            int rows = (height + tileSize - 1) / tileSize;
+            var tiles = new FeatureTile[columns * rows];
+
+            // A tiny angular padding keeps the spherical cap conservative at tile
+            // boundaries and cubemap edges. This is roughly one output pixel.
+            double angularPadding = Math.PI / Math.Max(1, Math.Max(width, height));
+
+            for (int tileY = 0; tileY < rows; tileY++)
+            {
+                int minY = tileY * tileSize;
+                int maxY = Math.Min(height, minY + tileSize);
+
+                for (int tileX = 0; tileX < columns; tileX++)
+                {
+                    int minX = tileX * tileSize;
+                    int maxX = Math.Min(width, minX + tileSize);
+                    int tileIndex = tileY * columns + tileX;
+
+                    int centerX = (minX + maxX - 1) / 2;
+                    int centerY = (minY + maxY - 1) / 2;
+                    Vector3D center = FractalBrownianMotion.GetCubemapSphereDirection(
+                        faceIndex, centerX, centerY, width, height);
+
+                    double angularRadius = 0.0;
+                    angularRadius = Math.Max(angularRadius, AngularDistance(
+                        center,
+                        FractalBrownianMotion.GetCubemapSphereDirection(
+                            faceIndex, minX, minY, width, height)));
+                    angularRadius = Math.Max(angularRadius, AngularDistance(
+                        center,
+                        FractalBrownianMotion.GetCubemapSphereDirection(
+                            faceIndex, maxX - 1, minY, width, height)));
+                    angularRadius = Math.Max(angularRadius, AngularDistance(
+                        center,
+                        FractalBrownianMotion.GetCubemapSphereDirection(
+                            faceIndex, minX, maxY - 1, width, height)));
+                    angularRadius = Math.Max(angularRadius, AngularDistance(
+                        center,
+                        FractalBrownianMotion.GetCubemapSphereDirection(
+                            faceIndex, maxX - 1, maxY - 1, width, height)));
+                    angularRadius += angularPadding;
+
+                    double tileCos = Math.Cos(angularRadius);
+                    double tileSin = Math.Sin(angularRadius);
+                    var candidates = new List<GeneratedCrater>();
+
+                    for (int craterIndex = 0; craterIndex < craters.Count; craterIndex++)
+                    {
+                        GeneratedCrater crater = craters[craterIndex];
+                        double combinedRadius = crater.RadiusRadians + angularRadius;
+                        if (combinedRadius >= Math.PI)
+                        {
+                            candidates.Add(crater);
+                            continue;
+                        }
+
+                        // cos(a+b) avoids calling Math.Cos for every crater/tile pair.
+                        double threshold =
+                            crater.CosRadius * tileCos -
+                            crater.SinRadius * tileSin;
+                        if (Vector3D.Dot(center, crater.Center) >= threshold)
+                            candidates.Add(crater);
+                    }
+
+                    tiles[tileIndex] = new FeatureTile
+                    {
+                        MinX = minX,
+                        MinY = minY,
+                        MaxX = maxX,
+                        MaxY = maxY,
+                        Craters = candidates
+                    };
+                }
+            }
+
+            return tiles;
+        }
+
+
+        private static double AngularDistance(Vector3D a, Vector3D b)
+        {
+            double dot = Vector3D.Dot(a, b);
+            if (dot > 1.0) dot = 1.0;
+            else if (dot < -1.0) dot = -1.0;
+            return Math.Acos(dot);
+        }
+
+
+        private static void ExpandCraterField(
+            List<GeneratedCrater> output,
+            long planetSeed,
+            CraterFieldOperation field)
+        {
+            if (field == null || field.Count <= 0)
+                return;
+
+            long fieldSeed = NoiseMath.DeriveSeed(planetSeed, field.SeedOffset);
+            for (int i = 0; i < field.Count; i++)
+            {
+                long craterSeed = NoiseMath.DeriveSeed(fieldSeed, i + 1);
+                double u0 = NoiseMath.HashToUnit(i, 0, 0, craterSeed, 0xA341316Cu);
+                double u1 = NoiseMath.HashToUnit(i, 1, 0, craterSeed, 0xC8013EA4u);
+                double u2 = NoiseMath.HashToUnit(i, 2, 0, craterSeed, 0xAD90777Du);
+                double u3 = NoiseMath.HashToUnit(i, 3, 0, craterSeed, 0x7E95761Eu);
+
+                double z = u0 * 2.0 - 1.0;
+                double azimuth = u1 * Math.PI * 2.0;
+                double xy = Math.Sqrt(Math.Max(0.0, 1.0 - z * z));
+                Vector3D center = new Vector3D(
+                    xy * Math.Cos(azimuth),
+                    z,
+                    xy * Math.Sin(azimuth));
+
+                // Choose the power so the expected normalized crater size equals
+                // TargetSize. Legacy recipes have TargetSize == 0 and therefore
+                // retain the old square distribution (mean size 1/3).
+                double targetSize = field.TargetSize > 0.0f && field.TargetSize < 1.0f
+                    ? field.TargetSize
+                    : 1.0 / 3.0;
+                double sizeExponent = (1.0 - targetSize) / targetSize;
+                double size = Math.Pow(u2, sizeExponent);
+                double radius = field.MinimumRadiusDegrees +
+                    (field.MaximumRadiusDegrees - field.MinimumRadiusDegrees) * size;
+                double depthFactor = Math.Min(1.0, Math.Max(0.0, size * 0.85 + u3 * 0.15));
+                int depth = (int)(field.MinimumDepth +
+                    (field.MaximumDepth - field.MinimumDepth) * depthFactor + 0.5);
+                double radiusRadians = radius * (Math.PI / 180.0);
+
+                output.Add(new GeneratedCrater
+                {
+                    Field = new RadialField(center.X, center.Y, center.Z, radius, 3),
+                    Center = center,
+                    RadiusRadians = radiusRadians,
+                    CosRadius = Math.Cos(radiusRadians),
+                    SinRadius = Math.Sin(radiusRadians),
+                    Depth = depth
+                });
+            }
+        }
+
+
+        private sealed class FeatureTile
+        {
+            public int MinX;
+            public int MinY;
+            public int MaxX;
+            public int MaxY;
+            public List<GeneratedCrater> Craters;
+        }
+
+
+        private sealed class GeneratedCrater
+        {
+            public RadialField Field;
+            public Vector3D Center;
+            public double RadiusRadians;
+            public double CosRadius;
+            public double SinRadius;
+            public int Depth;
         }
 
 
