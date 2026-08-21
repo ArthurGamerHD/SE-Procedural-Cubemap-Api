@@ -8,6 +8,7 @@ using Sandbox.ModAPI;
 using VoxelCubemapApi.Common.Api;
 using VoxelCubemapApi.Common.Networking;
 using VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets;
+using VoxelCubemapApi.Common.PlanetModification.Features;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Runtime;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
@@ -922,23 +923,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
             for (int featureIndex = 0; featureIndex < snapshot.FeatureOperations.Count; featureIndex++)
             {
-                FeatureOperation feature = snapshot.FeatureOperations[featureIndex];
-                var persistedFeature = new RuntimeProceduralFeatureOperation();
-                for (int fieldIndex = 0; fieldIndex < feature.CraterFields.Count; fieldIndex++)
-                {
-                    CraterFieldOperation field = feature.CraterFields[fieldIndex];
-                    persistedFeature.CraterFields.Add(new RuntimeProceduralCraterField
-                    {
-                        Count = field.Count,
-                        SeedOffset = field.SeedOffset,
-                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
-                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
-                        MinimumDepth = field.MinimumDepth,
-                        MaximumDepth = field.MaximumDepth,
-                        TargetSize = field.TargetSize
-                    });
-                }
-                revision.Features.Add(persistedFeature);
+                revision.Features.Add(
+                    FeatureStepRegistry.ToRuntime(
+                        snapshot.FeatureOperations[featureIndex]));
             }
 
             for (int i = 0;
@@ -1154,23 +1141,13 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     });
             }
 
-            for (int featureIndex = 0; revision.Features != null && featureIndex < revision.Features.Count; featureIndex++)
+            for (int featureIndex = 0;
+                revision.Features != null && featureIndex < revision.Features.Count;
+                featureIndex++)
             {
-                RuntimeProceduralFeatureOperation persistedFeature = revision.Features[featureIndex];
-                var feature = new FeatureOperation();
-                for (int fieldIndex = 0; fieldIndex < persistedFeature.CraterFields.Count; fieldIndex++)
-                {
-                    RuntimeProceduralCraterField field = persistedFeature.CraterFields[fieldIndex];
-                    feature.CraterFields.Add(new CraterFieldOperation
-                    {
-                        Count = field.Count, SeedOffset = field.SeedOffset,
-                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
-                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
-                        MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
-                        TargetSize = field.TargetSize
-                    });
-                }
-                snapshot.FeatureOperations.Add(feature);
+                snapshot.FeatureOperations.Add(
+                    FeatureStepRegistry.FromRuntime(
+                        revision.Features[featureIndex]));
             }
 
             for (int i = 0; i < revision.Brushes.Count; i++)
@@ -2400,29 +2377,11 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
             for (int index = 0; index < operations.Count; index++)
             {
-                SyncedFeatureOperation synced = operations[index];
-                if (synced == null)
-                    continue;
-
-                var feature = new FeatureOperation();
-                if (synced.CraterFields != null)
-                {
-                    for (int fieldIndex = 0; fieldIndex < synced.CraterFields.Count; fieldIndex++)
-                    {
-                        SyncedCraterField field = synced.CraterFields[fieldIndex];
-                        if (field == null) continue;
-                        feature.CraterFields.Add(new CraterFieldOperation
-                        {
-                            Count = field.Count, SeedOffset = field.SeedOffset,
-                            MinimumRadiusDegrees = field.MinimumRadiusDegrees,
-                            MaximumRadiusDegrees = field.MaximumRadiusDegrees,
-                            MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
-                            TargetSize = field.TargetSize
-                        });
-                    }
-                }
-                result.Add(feature);
+                SyncedFeatureOperation operation = operations[index];
+                if (operation != null)
+                    result.Add(FeatureStepRegistry.FromSynced(operation));
             }
+
             return result;
         }
 

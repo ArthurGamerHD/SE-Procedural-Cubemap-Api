@@ -86,5 +86,151 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 TargetSize = targetSize
             });
         }
+
+
+        /// <summary>
+        /// Adds a compact deterministic volcano field. Volcano centers, radii and
+        /// heights are regenerated from planetSeed + seedOffset + index when the
+        /// feature pass executes. The profile includes a summit caldera.
+        /// </summary>
+        [ApiMethod]
+        private void AddVolcanoField(
+            int count,
+            int seedOffset,
+            double minimumRadiusDegrees,
+            double maximumRadiusDegrees,
+            int minimumHeight,
+            int maximumHeight)
+        {
+            AddVolcanoFieldBiased(
+                count, seedOffset, minimumRadiusDegrees, maximumRadiusDegrees,
+                minimumHeight, maximumHeight, 0.25f);
+        }
+
+        /// <summary>
+        /// Adds a deterministic volcano field with an explicit normalized target
+        /// size. Values below 0.5 increasingly favor smaller volcanoes.
+        /// </summary>
+        [ApiMethod("AddVolcanoFieldBiased")]
+        private void AddVolcanoFieldBiased(
+            int count,
+            int seedOffset,
+            double minimumRadiusDegrees,
+            double maximumRadiusDegrees,
+            int minimumHeight,
+            int maximumHeight,
+            float targetSize)
+        {
+            if (count < 1 || count > ushort.MaxValue)
+                throw new ArgumentException("Volcano count must be from 1 to 65535.", nameof(count));
+
+            if (double.IsNaN(minimumRadiusDegrees) || double.IsInfinity(minimumRadiusDegrees) ||
+                double.IsNaN(maximumRadiusDegrees) || double.IsInfinity(maximumRadiusDegrees) ||
+                minimumRadiusDegrees <= 0.0 || maximumRadiusDegrees > 90.0 ||
+                minimumRadiusDegrees > maximumRadiusDegrees)
+            {
+                throw new ArgumentException("Volcano radius range must be finite, greater than zero, no more than 90 degrees, and ordered.", "radius");
+            }
+
+            if (minimumHeight < 1 || maximumHeight > ushort.MaxValue || minimumHeight > maximumHeight)
+                throw new ArgumentException("Volcano height range must be from 1 to 65535 and ordered.", "height");
+
+            if (float.IsNaN(targetSize) || float.IsInfinity(targetSize) ||
+                targetSize <= 0.0f || targetSize >= 1.0f)
+            {
+                throw new ArgumentException("Volcano target size must be finite and between 0 and 1 (exclusive).", nameof(targetSize));
+            }
+
+            _operation.VolcanoFields.Add(new VolcanoFieldOperation
+            {
+                Count = count,
+                SeedOffset = seedOffset,
+                MinimumRadiusDegrees = minimumRadiusDegrees,
+                MaximumRadiusDegrees = maximumRadiusDegrees,
+                MinimumHeight = minimumHeight,
+                MaximumHeight = maximumHeight,
+                TargetSize = targetSize
+            });
+        }
+
+        /// <summary>
+        /// Adds a compact deterministic ravine field. Ravine paths are regenerated
+        /// from planetSeed + seedOffset + index when the feature pass executes.
+        /// </summary>
+        [ApiMethod]
+        private void AddRavineField(
+            int count,
+            int seedOffset,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth)
+        {
+            AddRavineFieldBiased(
+                count, seedOffset, minimumLengthDegrees, maximumLengthDegrees,
+                minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth,
+                0.35f);
+        }
+
+        /// <summary>
+        /// Adds a deterministic ravine field with an explicit normalized target
+        /// size. Values below 0.5 increasingly favor shorter/narrower ravines.
+        /// </summary>
+        [ApiMethod("AddRavineFieldBiased")]
+        private void AddRavineFieldBiased(
+            int count,
+            int seedOffset,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth,
+            float targetSize)
+        {
+            if (count < 1 || count > ushort.MaxValue)
+                throw new ArgumentException("Ravine count must be from 1 to 65535.", nameof(count));
+
+            if (double.IsNaN(minimumLengthDegrees) || double.IsInfinity(minimumLengthDegrees) ||
+                double.IsNaN(maximumLengthDegrees) || double.IsInfinity(maximumLengthDegrees) ||
+                minimumLengthDegrees <= 0.0 || maximumLengthDegrees > 180.0 ||
+                minimumLengthDegrees > maximumLengthDegrees)
+            {
+                throw new ArgumentException("Ravine length range must be finite, greater than zero, no more than 180 degrees, and ordered.", "length");
+            }
+
+            if (double.IsNaN(minimumWidthDegrees) || double.IsInfinity(minimumWidthDegrees) ||
+                double.IsNaN(maximumWidthDegrees) || double.IsInfinity(maximumWidthDegrees) ||
+                minimumWidthDegrees <= 0.0 || maximumWidthDegrees > 30.0 ||
+                minimumWidthDegrees > maximumWidthDegrees)
+            {
+                throw new ArgumentException("Ravine width range must be finite, greater than zero, no more than 30 degrees, and ordered.", "width");
+            }
+
+            if (minimumDepth < 1 || maximumDepth > ushort.MaxValue || minimumDepth > maximumDepth)
+                throw new ArgumentException("Ravine depth range must be from 1 to 65535 and ordered.", "depth");
+
+            if (float.IsNaN(targetSize) || float.IsInfinity(targetSize) ||
+                targetSize <= 0.0f || targetSize >= 1.0f)
+            {
+                throw new ArgumentException("Ravine target size must be finite and between 0 and 1 (exclusive).", nameof(targetSize));
+            }
+
+            _operation.RavineFields.Add(new RavineFieldOperation
+            {
+                Count = count,
+                SeedOffset = seedOffset,
+                MinimumLengthDegrees = minimumLengthDegrees,
+                MaximumLengthDegrees = maximumLengthDegrees,
+                MinimumWidthDegrees = minimumWidthDegrees,
+                MaximumWidthDegrees = maximumWidthDegrees,
+                MinimumDepth = minimumDepth,
+                MaximumDepth = maximumDepth,
+                TargetSize = targetSize
+            });
+        }
+
     }
 }

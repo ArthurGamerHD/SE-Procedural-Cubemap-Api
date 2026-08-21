@@ -179,6 +179,12 @@ namespace VoxelCubemapApi.Common.Networking
     {
         [ProtoMember(1)]
         public List<SyncedCraterField> CraterFields;
+
+        [ProtoMember(2)]
+        public List<SyncedVolcanoField> VolcanoFields;
+
+        [ProtoMember(3)]
+        public List<SyncedRavineField> RavineFields;
     }
 
     [ProtoContract]
@@ -192,4 +198,32 @@ namespace VoxelCubemapApi.Common.Networking
         [ProtoMember(6)] public int MaximumDepth;
         [ProtoMember(7)] public float TargetSize;
     }
+
+
+    [ProtoContract]
+    internal sealed class SyncedVolcanoField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumRadiusDegrees;
+        [ProtoMember(4)] public double MaximumRadiusDegrees;
+        [ProtoMember(5)] public int MinimumHeight;
+        [ProtoMember(6)] public int MaximumHeight;
+        [ProtoMember(7)] public float TargetSize;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedRavineField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumLengthDegrees;
+        [ProtoMember(4)] public double MaximumLengthDegrees;
+        [ProtoMember(5)] public double MinimumWidthDegrees;
+        [ProtoMember(6)] public double MaximumWidthDegrees;
+        [ProtoMember(7)] public int MinimumDepth;
+        [ProtoMember(8)] public int MaximumDepth;
+        [ProtoMember(9)] public float TargetSize;
+    }
+
 }

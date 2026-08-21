@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 using Generated;
 using Sandbox.ModAPI;
@@ -22,7 +22,7 @@ namespace VoxelCubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 10);
+            new Version(0, 0, 11);
 
         private static VoxelCubemapExampleModClient _instance;
 
@@ -1172,6 +1172,201 @@ namespace VoxelCubemapExampleMod
                     template.Close();
 
                 LogWarning("Moon crater generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
+
+        /// <summary>
+        /// Adds a small deterministic field of very large, tall volcanoes to the
+        /// nearest planet. This intentionally uses extreme values so the volcano
+        /// profile is easy to inspect in-game.
+        /// </summary>
+        [ChatCommand("testvolcano", "vcma")]
+        public static void TestVolcano(
+            int volcanoCount = 4,
+            int seedOffset = 0)
+        {
+            const double minimumRadiusDegrees = 2.5;
+            const double maximumRadiusDegrees = 7.0;
+            const int minimumHeight = 18000;
+            const int maximumHeight = 32000;
+            const float targetSize = 0.65f;
+
+            VoxelCubemapExampleModClient client = _instance;
+
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+
+            try
+            {
+                if (volcanoCount < 1 || volcanoCount > 16)
+                {
+                    throw new ArgumentException(
+                        "Volcano count must be from 1 to 16.",
+                        nameof(volcanoCount));
+                }
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                FeatureTemplate feature = template.AddFeature();
+                feature.AddVolcanoFieldBiased(
+                    volcanoCount,
+                    seedOffset,
+                    minimumRadiusDegrees,
+                    maximumRadiusDegrees,
+                    minimumHeight,
+                    maximumHeight,
+                    targetSize);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testvolcano: volcanoField count=" +
+                    volcanoCount +
+                    ", seedOffset=" +
+                    seedOffset +
+                    ", targetSize=" +
+                    targetSize +
+                    ", radiusDegrees=" +
+                    minimumRadiusDegrees +
+                    ".." +
+                    maximumRadiusDegrees +
+                    ", height=" +
+                    minimumHeight +
+                    ".." +
+                    maximumHeight +
+                    ", planetSeed=" +
+                    template.GetPlanetSeed() +
+                    ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Volcano field committed."
+                                    : "Volcano field failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("Volcano generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
+
+        /// <summary>
+        /// Carves several long deterministic ravines into the nearest planet.
+        /// This exercises spherical path generation, segment tiling and the
+        /// parallel feature raster pass.
+        /// </summary>
+        [ChatCommand("testravine", "vcma")]
+        public static void TestRavine(
+            int ravineCount = 8,
+            int seedOffset = 0)
+        {
+            const double minimumLengthDegrees = 10.0;
+            const double maximumLengthDegrees = 35.0;
+            const double minimumWidthDegrees = 0.35;
+            const double maximumWidthDegrees = 1.20;
+            const int minimumDepth = 3500;
+            const int maximumDepth = 10000;
+            const float targetSize = 0.45f;
+
+            VoxelCubemapExampleModClient client = _instance;
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+            try
+            {
+                if (ravineCount < 1 || ravineCount > 32)
+                    throw new ArgumentException("Ravine count must be from 1 to 32.", nameof(ravineCount));
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                FeatureTemplate feature = template.AddFeature();
+                feature.AddRavineFieldBiased(
+                    ravineCount,
+                    seedOffset,
+                    minimumLengthDegrees,
+                    maximumLengthDegrees,
+                    minimumWidthDegrees,
+                    maximumWidthDegrees,
+                    minimumDepth,
+                    maximumDepth,
+                    targetSize);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testravine: ravineField count=" +
+                    ravineCount +
+                    ", seedOffset=" + seedOffset +
+                    ", targetSize=" + targetSize +
+                    ", lengthDegrees=" + minimumLengthDegrees + ".." + maximumLengthDegrees +
+                    ", widthDegrees=" + minimumWidthDegrees + ".." + maximumWidthDegrees +
+                    ", depth=" + minimumDepth + ".." + maximumDepth +
+                    ", planetSeed=" + template.GetPlanetSeed() + ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Ravine field committed."
+                                    : "Ravine field failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("Ravine generation failed", e);
                 ShowMessage("Failed: " + e.Message);
             }
         }

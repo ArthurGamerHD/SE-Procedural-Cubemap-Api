@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Sandbox.ModAPI;
+using VoxelCubemapApi.Common.PlanetModification.Features;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
 
@@ -128,25 +129,8 @@ namespace VoxelCubemapApi.Common.Networking
             {
                 for (int featureIndex = 0; featureIndex < snapshot.FeatureOperations.Count; featureIndex++)
                 {
-                    FeatureOperation feature = snapshot.FeatureOperations[featureIndex];
-                    var syncedFeature = new SyncedFeatureOperation
-                    {
-                        CraterFields = new List<SyncedCraterField>()
-                    };
-
-                    for (int fieldIndex = 0; fieldIndex < feature.CraterFields.Count; fieldIndex++)
-                    {
-                        CraterFieldOperation field = feature.CraterFields[fieldIndex];
-                        syncedFeature.CraterFields.Add(new SyncedCraterField
-                        {
-                            Count = field.Count, SeedOffset = field.SeedOffset,
-                            MinimumRadiusDegrees = field.MinimumRadiusDegrees,
-                            MaximumRadiusDegrees = field.MaximumRadiusDegrees,
-                            MinimumDepth = field.MinimumDepth, MaximumDepth = field.MaximumDepth,
-                            TargetSize = field.TargetSize
-                        });
-                    }
-                    features.Add(syncedFeature);
+                    features.Add(FeatureStepRegistry.ToSynced(
+                        snapshot.FeatureOperations[featureIndex]));
                 }
             }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,6 +6,7 @@ using Adk.Compression.Zip;
 using Adk.Image.Png;
 using Sandbox.ModAPI;
 using VoxelCubemapApi.Common.Noise.fBm;
+using VoxelCubemapApi.Common.PlanetModification.Features;
 using VoxelCubemapApi.Common.PlanetModification.Maps;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
@@ -367,7 +368,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         revision.PlanetSeed,
                         revision.BrushOperations);
 
-                    PlanetMapOperations.ApplyFeaturesToPlanetImages(
+                    PlanetFeatureProcessor.ApplyToPlanetImages(
                         heightImage,
                         materialImage,
                         heightFileName,
@@ -469,7 +470,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     snapshot.PlanetSeed,
                     snapshot.BrushOperations);
 
-                PlanetMapOperations.ApplyFeaturesToPlanetImages(
+                PlanetFeatureProcessor.ApplyToPlanetImages(
                     heightImage,
                     materialImage,
                     heightFileName,

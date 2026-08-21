@@ -112,6 +112,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
     {
         public List<RuntimeProceduralCraterField> CraterFields =
             new List<RuntimeProceduralCraterField>();
+        public List<RuntimeProceduralVolcanoField> VolcanoFields =
+            new List<RuntimeProceduralVolcanoField>();
+        public List<RuntimeProceduralRavineField> RavineFields =
+            new List<RuntimeProceduralRavineField>();
     }
 
 
@@ -121,6 +125,32 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public int SeedOffset;
         public double MinimumRadiusDegrees;
         public double MaximumRadiusDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public float TargetSize;
+    }
+
+
+    public class RuntimeProceduralVolcanoField
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumRadiusDegrees;
+        public double MaximumRadiusDegrees;
+        public int MinimumHeight;
+        public int MaximumHeight;
+        public float TargetSize;
+    }
+
+
+    public class RuntimeProceduralRavineField
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumLengthDegrees;
+        public double MaximumLengthDegrees;
+        public double MinimumWidthDegrees;
+        public double MaximumWidthDegrees;
         public int MinimumDepth;
         public int MaximumDepth;
         public float TargetSize;

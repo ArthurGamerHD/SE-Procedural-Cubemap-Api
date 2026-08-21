@@ -8,6 +8,10 @@ namespace VoxelCubemapApi.Api
     {
         private readonly Action<int, int, double, double, int, int> _addCraterField;
         private readonly Action<int, int, double, double, int, int, float> _addCraterFieldBiased;
+        private readonly Action<int, int, double, double, int, int> _addVolcanoField;
+        private readonly Action<int, int, double, double, int, int, float> _addVolcanoFieldBiased;
+        private readonly Action<int, int, double, double, double, double, int, int> _addRavineField;
+        private readonly Action<int, int, double, double, double, double, int, int, float> _addRavineFieldBiased;
 
 
         public FeatureTemplate(
@@ -25,14 +29,34 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Action<int, int, double, double, int, int, float>>(
                     api,
                     "AddCraterFieldBiased");
+
+            _addVolcanoField =
+                GetRequired<Action<int, int, double, double, int, int>>(
+                    api,
+                    "AddVolcanoField");
+
+            _addVolcanoFieldBiased =
+                GetRequired<Action<int, int, double, double, int, int, float>>(
+                    api,
+                    "AddVolcanoFieldBiased");
+
+            _addRavineField =
+                GetRequired<Action<int, int, double, double, double, double, int, int>>(
+                    api,
+                    "AddRavineField");
+
+            _addRavineFieldBiased =
+                GetRequired<Action<int, int, double, double, double, double, int, int, float>>(
+                    api,
+                    "AddRavineFieldBiased");
         }
 
 
         /// <summary>
-        /// Adds a compact deterministic crater field. Individual crater centers,
+        /// Adds a deterministic crater field. Individual crater centers,
         /// radii and depths are regenerated from planetSeed + seedOffset + index
         /// when the feature pass executes; they are not serialized individually.
-        /// Radius distribution is biased toward small impacts. Overlap is allowed.
+        /// Radius distribution is biased toward medium impacts. Overlap is allowed.
         /// </summary>
         public void AddCraterField(
             int count,
@@ -61,6 +85,77 @@ namespace VoxelCubemapApi.Api
             float targetSize)
         {
             _addCraterFieldBiased(count, seedOffset, minimumRadiusDegrees, maximumRadiusDegrees, minimumDepth, maximumDepth, targetSize);
+        }
+
+
+        /// <summary>
+        /// Adds a compact deterministic volcano field. Volcano centers, radii and
+        /// heights are regenerated from planetSeed + seedOffset + index when the
+        /// feature pass executes. The profile includes a summit caldera.
+        /// </summary>
+        public void AddVolcanoField(
+            int count,
+            int seedOffset,
+            double minimumRadiusDegrees,
+            double maximumRadiusDegrees,
+            int minimumHeight,
+            int maximumHeight)
+        {
+            _addVolcanoField(count, seedOffset, minimumRadiusDegrees, maximumRadiusDegrees, minimumHeight, maximumHeight);
+        }
+
+
+        /// <summary>
+        /// Adds a deterministic volcano field with an explicit normalized target
+        /// size. Values below 0.5 increasingly favor smaller volcanoes.
+        /// </summary>
+        public void AddVolcanoFieldBiased(
+            int count,
+            int seedOffset,
+            double minimumRadiusDegrees,
+            double maximumRadiusDegrees,
+            int minimumHeight,
+            int maximumHeight,
+            float targetSize)
+        {
+            _addVolcanoFieldBiased(count, seedOffset, minimumRadiusDegrees, maximumRadiusDegrees, minimumHeight, maximumHeight, targetSize);
+        }
+
+
+        /// <summary>
+        /// Adds a compact deterministic ravine field. Ravine paths are regenerated
+        /// from planetSeed + seedOffset + index when the feature pass executes.
+        /// </summary>
+        public void AddRavineField(
+            int count,
+            int seedOffset,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth)
+        {
+            _addRavineField(count, seedOffset, minimumLengthDegrees, maximumLengthDegrees, minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth);
+        }
+
+
+        /// <summary>
+        /// Adds a deterministic ravine field with an explicit normalized target
+        /// size. Values below 0.5 increasingly favor shorter/narrower ravines.
+        /// </summary>
+        public void AddRavineFieldBiased(
+            int count,
+            int seedOffset,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth,
+            float targetSize)
+        {
+            _addRavineFieldBiased(count, seedOffset, minimumLengthDegrees, maximumLengthDegrees, minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth, targetSize);
         }
 
 

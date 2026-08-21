@@ -7,6 +7,7 @@ using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets;
+using VoxelCubemapApi.Common.PlanetModification.Features;
 using VoxelCubemapApi.Common.PlanetModification.Maps;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Runtime;
@@ -287,27 +288,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 new List<FeatureOperation>(_featureOperations.Count);
 
             for (int i = 0; i < _featureOperations.Count; i++)
-            {
-                FeatureOperation sourceFeature = _featureOperations[i];
-                var targetFeature = new FeatureOperation();
-
-                for (int fieldIndex = 0; fieldIndex < sourceFeature.CraterFields.Count; fieldIndex++)
-                {
-                    CraterFieldOperation field = sourceFeature.CraterFields[fieldIndex];
-                    targetFeature.CraterFields.Add(new CraterFieldOperation
-                    {
-                        Count = field.Count,
-                        SeedOffset = field.SeedOffset,
-                        MinimumRadiusDegrees = field.MinimumRadiusDegrees,
-                        MaximumRadiusDegrees = field.MaximumRadiusDegrees,
-                        MinimumDepth = field.MinimumDepth,
-                        MaximumDepth = field.MaximumDepth,
-                        TargetSize = field.TargetSize
-                    });
-                }
-
-                featureOperations.Add(targetFeature);
-            }
+                featureOperations.Add(FeatureStepRegistry.Clone(_featureOperations[i]));
 
             var allocatedComplexValues =
                 new List<byte>(

@@ -15,7 +15,7 @@ namespace VoxelCubemapApi.Common.Api
         ClientName = "ApiProvider")]
     internal partial class VoxelCubemapIntermodApiServer
     {
-        private static readonly Version ApiVersion = new Version(0, 0, 10);
+        private static readonly Version ApiVersion = new Version(0, 0, 11);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;

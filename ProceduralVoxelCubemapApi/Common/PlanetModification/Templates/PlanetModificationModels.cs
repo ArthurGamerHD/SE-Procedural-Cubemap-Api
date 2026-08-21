@@ -73,6 +73,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
     {
         public List<CraterFieldOperation> CraterFields =
             new List<CraterFieldOperation>();
+        public List<VolcanoFieldOperation> VolcanoFields =
+            new List<VolcanoFieldOperation>();
+        public List<RavineFieldOperation> RavineFields =
+            new List<RavineFieldOperation>();
     }
 
 
@@ -82,6 +86,32 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public int SeedOffset;
         public double MinimumRadiusDegrees;
         public double MaximumRadiusDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public float TargetSize;
+    }
+
+
+    internal sealed class VolcanoFieldOperation
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumRadiusDegrees;
+        public double MaximumRadiusDegrees;
+        public int MinimumHeight;
+        public int MaximumHeight;
+        public float TargetSize;
+    }
+
+
+    internal sealed class RavineFieldOperation
+    {
+        public int Count;
+        public int SeedOffset;
+        public double MinimumLengthDegrees;
+        public double MaximumLengthDegrees;
+        public double MinimumWidthDegrees;
+        public double MaximumWidthDegrees;
         public int MinimumDepth;
         public int MaximumDepth;
         public float TargetSize;
