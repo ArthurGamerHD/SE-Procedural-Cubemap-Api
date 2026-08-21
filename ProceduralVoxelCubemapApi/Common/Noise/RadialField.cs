@@ -12,14 +12,14 @@ namespace VoxelCubemapApi.Common.Noise
         private readonly Vector3D _center;
         private readonly double _radiusRadians;
         private readonly double _cosRadius;
-        private readonly int _profile;
+        private readonly RadialFieldProfile _profile;
 
         internal RadialField(
             double centerX,
             double centerY,
             double centerZ,
             double radiusDegrees,
-            int profile)
+            RadialFieldProfile profile)
         {
             Vector3D center = new Vector3D(centerX, centerY, centerZ);
             double lengthSquared = center.LengthSquared();
@@ -55,22 +55,22 @@ namespace VoxelCubemapApi.Common.Noise
 
             switch (_profile)
             {
-                case 0: // Linear
+                case RadialFieldProfile.Linear:
                     return inverse;
 
-                case 1: // Smooth
+                case RadialFieldProfile.Smooth:
                 {
                     double smooth = t * t * (3.0 - 2.0 * t);
                     return 1.0 - smooth;
                 }
 
-                case 2: // Bowl
+                case RadialFieldProfile.Bowl:
                 {
                     double bowl = 1.0 - t * t;
                     return bowl * bowl;
                 }
 
-                case 3: // Crater: flat/deep floor, sloped wall, raised rim.
+                case RadialFieldProfile.Crater:
                     return SampleCrater(t);
 
                 default:

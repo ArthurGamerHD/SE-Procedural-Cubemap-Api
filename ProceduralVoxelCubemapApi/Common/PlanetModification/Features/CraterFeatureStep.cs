@@ -183,7 +183,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
 
                 output.Add(new GeneratedCrater
                 {
-                    Field = new RadialField(center.X, center.Y, center.Z, radius, 3),
+                    Field = new RadialField(
+                        center.X,
+                        center.Y,
+                        center.Z,
+                        radius,
+                        RadialFieldProfile.Crater),
                     Center = center,
                     RadiusRadians = radiusRadians,
                     CosRadius = Math.Cos(radiusRadians),

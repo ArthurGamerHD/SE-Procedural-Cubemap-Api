@@ -1371,7 +1371,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             double centerY,
             double centerZ,
             double radiusDegrees,
-            int radialProfile,
+            RadialFieldProfile radialProfile,
             int heightBlendMode,
             int minimumAltitude,
             int maximumAltitude,
@@ -1410,13 +1410,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 throw new ArgumentException("Radial radius must be greater than zero and no more than 180 degrees.", nameof(radiusDegrees));
             }
 
-            if (radialProfile < 0 || radialProfile > 3)
+            if (radialProfile < RadialFieldProfile.Linear ||
+                radialProfile > RadialFieldProfile.Crater)
                 throw new ArgumentException("Unknown radial field profile.", nameof(radialProfile));
 
             if (heightBlendMode < 0 || heightBlendMode > 2)
                 throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.", nameof(heightBlendMode));
 
-            if (radialProfile == 3 && layerIndex != 3)
+            if (radialProfile == RadialFieldProfile.Crater && layerIndex != 3)
                 throw new ArgumentException("The signed Crater radial profile can only be applied to the Heightmap layer.", nameof(radialProfile));
 
             ValidateAltitudeBound(minimumAltitude, "minimumAltitude");
@@ -1455,7 +1456,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 RadialCenterY = centerY,
                 RadialCenterZ = centerZ,
                 RadialRadiusDegrees = radiusDegrees,
-                RadialProfile = radialProfile,
+                RadialProfile = (int)radialProfile,
                 ScaleHeightByRadial = layerIndex == 3
             });
         }

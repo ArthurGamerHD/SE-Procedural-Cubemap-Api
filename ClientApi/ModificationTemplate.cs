@@ -381,7 +381,7 @@ namespace VoxelCubemapApi.Api
             int fillValue,
             int noiseType,
             int heightBlendMode,
-            int samplingQuality,
+            NoiseSamplingQuality samplingQuality,
             double noiseFrequency,
             int noiseOctaves,
             int noiseSeedOffset,
@@ -394,7 +394,7 @@ namespace VoxelCubemapApi.Api
             int biomeFilter,
             int materialFilter)
         {
-            _applyNoiseBrush(layer, fillValue, noiseType, heightBlendMode, samplingQuality, noiseFrequency, noiseOctaves, noiseSeedOffset, blendNoiseMinimum, blendNoiseMaximum, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
+            _applyNoiseBrush(layer, fillValue, noiseType, heightBlendMode, (int)samplingQuality, noiseFrequency, noiseOctaves, noiseSeedOffset, blendNoiseMinimum, blendNoiseMaximum, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
         }
 
 
@@ -409,7 +409,7 @@ namespace VoxelCubemapApi.Api
             double centerY,
             double centerZ,
             double radiusDegrees,
-            int radialProfile,
+            RadialFieldProfile radialProfile,
             int heightBlendMode,
             int minimumAltitude,
             int maximumAltitude,
@@ -418,7 +418,7 @@ namespace VoxelCubemapApi.Api
             int biomeFilter,
             int materialFilter)
         {
-            _applyRadialBrush(layer, fillValue, centerX, centerY, centerZ, radiusDegrees, radialProfile, heightBlendMode, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
+            _applyRadialBrush(layer, fillValue, centerX, centerY, centerZ, radiusDegrees, (int)radialProfile, heightBlendMode, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
         }
 
 

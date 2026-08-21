@@ -280,7 +280,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Maps
                             operation.RadialCenterY,
                             operation.RadialCenterZ,
                             operation.RadialRadiusDegrees,
-                            operation.RadialProfile);
+                            (RadialFieldProfile)operation.RadialProfile);
                 }
 
                 if (!operation.UseNoise)

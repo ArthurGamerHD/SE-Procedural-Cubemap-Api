@@ -6,15 +6,6 @@
     <SharedGUID>53e94834-790b-4b11-ba55-10bb857884e5</SharedGUID>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(MSBuildThisFileDirectory)ApiProvider.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)EnvironmentPresetProvider.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)FeatureTemplate.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)ModificationTemplate.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)NoiseProvider.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)NoiseSamplingQuality.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)RadialFieldProfile.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)PlanetMetadataProvider.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)VoxelCubemapApiClient.cs" />
-    <Compile Include="$(MSBuildThisFileDirectory)WaterUtil.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)*.cs" />
   </ItemGroup>
 </Project>
