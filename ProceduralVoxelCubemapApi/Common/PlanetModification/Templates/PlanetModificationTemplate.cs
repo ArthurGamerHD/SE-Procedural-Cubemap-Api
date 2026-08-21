@@ -21,20 +21,19 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
     /// Server-owned mutable template exposed to another mod only through a
     /// dictionary of BCL delegates.
     /// </summary>
-    [ApiProvider(
-        ClientNamespace = "VoxelCubemapApi.Api",
-        ClientName = "ModificationTemplate")]
+    [ApiProvider(ClientNamespace = "VoxelCubemapApi.Api", ClientName = "ModificationTemplate")]
     internal sealed partial class PlanetModificationTemplate
     {
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly PlanetDataArchiveService _planetDataArchives;
+
         private Dictionary<string, PlanarPngBitmap> _images =
             CreateImageDictionary();
 
         private Dictionary<string,
-            List<Action<int, int, byte[], byte[], byte[], byte[]>>>
-                _imageTransforms =
-                    CreateImageTransformDictionary();
+                List<Action<int, int, byte[], byte[], byte[], byte[]>>>
+            _imageTransforms =
+                CreateImageTransformDictionary();
 
         private Dictionary<string, byte[]> _sourceArchiveFiles;
         private bool[] _usedMaterialMapValues;
@@ -63,6 +62,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         private string _environmentPresetName;
         private bool _requiresAuthoritativeImageSync;
         private readonly bool _proceduralPersistenceEligible;
+
         private readonly RuntimeProceduralPlanetRecipe
             _inheritedProceduralRecipe;
 
@@ -154,9 +154,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 environmentCarrierSubtype;
 
             if (!string.IsNullOrWhiteSpace(
-                _environmentCarrierSubtype))
+                    _environmentCarrierSubtype))
             {
-                EnsureBiomePlanetMapEnabled();
+                EnsureLayerEnabled(1);
             }
 
             TemplateId =
@@ -198,7 +198,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             Dictionary<string,
                 List<Action<int, int, byte[], byte[], byte[], byte[]>>> transforms =
-                    _imageTransforms;
+                _imageTransforms;
             _imageTransforms =
                 CreateImageTransformDictionary();
 
@@ -206,89 +206,58 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             var fractalOperations =
                 new List<FractalNoiseOperation>(
                     _fractalNoiseOperations.Count);
-
-            for (int i = 0;
-                i < _fractalNoiseOperations.Count;
-                i++)
+            fractalOperations.AddRange(_fractalNoiseOperations.Select(operation => new FractalNoiseOperation
             {
-                FractalNoiseOperation operation =
-                    _fractalNoiseOperations[i];
-
-                fractalOperations.Add(
-                    new FractalNoiseOperation
-                    {
-                        PlaneIndex = operation.PlaneIndex,
-                        TargetValue = operation.TargetValue,
-                        CoveragePercent = operation.CoveragePercent
-                    });
-            }
+                PlaneIndex = operation.PlaneIndex,
+                TargetValue = operation.TargetValue,
+                CoveragePercent = operation.CoveragePercent
+            }));
 
             var biomeReplacements =
                 new List<BiomeReplacementOperation>(
                     _biomeReplacementOperations.Count);
-
-            for (int i = 0;
-                i < _biomeReplacementOperations.Count;
-                i++)
+            biomeReplacements.AddRange(_biomeReplacementOperations.Select(operation => new BiomeReplacementOperation
             {
-                BiomeReplacementOperation operation =
-                    _biomeReplacementOperations[i];
-
-                biomeReplacements.Add(
-                    new BiomeReplacementOperation
-                    {
-                        SourceBiome = operation.SourceBiome,
-                        TargetBiome = operation.TargetBiome
-                    });
-            }
+                SourceBiome = operation.SourceBiome,
+                TargetBiome = operation.TargetBiome
+            }));
 
             var brushOperations =
                 new List<BrushOperation>(
                     _brushOperations.Count);
+            brushOperations.AddRange(
+                _brushOperations.Select(operation => new BrushOperation
+                {
+                    LayerIndex = operation.LayerIndex,
+                    FillValue = operation.FillValue,
+                    UseNoise = operation.UseNoise,
+                    NoiseFrequency = operation.NoiseFrequency,
+                    NoiseOctaves = operation.NoiseOctaves,
+                    NoiseSeedOffset = operation.NoiseSeedOffset,
+                    BlendNoiseMinimum = operation.BlendNoiseMinimum,
+                    BlendNoiseMaximum = operation.BlendNoiseMaximum,
+                    MinimumAltitude = operation.MinimumAltitude,
+                    MaximumAltitude = operation.MaximumAltitude,
+                    MinimumLatitude = operation.MinimumLatitude,
+                    MaximumLatitude = operation.MaximumLatitude,
+                    BiomeFilter = operation.BiomeFilter,
+                    MaterialFilter = operation.MaterialFilter,
+                    NoiseType = operation.NoiseType,
+                    HeightBlendMode = operation.HeightBlendMode,
+                    NoiseSamplingQuality = operation.NoiseSamplingQuality,
+                    ScaleHeightByNoise = operation.ScaleHeightByNoise,
+                    UseRadial = operation.UseRadial,
+                    RadialCenterX = operation.RadialCenterX,
+                    RadialCenterY = operation.RadialCenterY,
+                    RadialCenterZ = operation.RadialCenterZ,
+                    RadialRadiusDegrees = operation.RadialRadiusDegrees,
+                    RadialProfile = operation.RadialProfile,
+                    ScaleHeightByRadial = operation.ScaleHeightByRadial
+                }));
 
-            for (int i = 0;
-                i < _brushOperations.Count;
-                i++)
-            {
-                BrushOperation operation =
-                    _brushOperations[i];
+            var featureOperations = new List<FeatureOperation>(_featureOperations.Count);
 
-                brushOperations.Add(
-                    new BrushOperation
-                    {
-                        LayerIndex = operation.LayerIndex,
-                        FillValue = operation.FillValue,
-                        UseNoise = operation.UseNoise,
-                        NoiseFrequency = operation.NoiseFrequency,
-                        NoiseOctaves = operation.NoiseOctaves,
-                        NoiseSeedOffset = operation.NoiseSeedOffset,
-                        BlendNoiseMinimum = operation.BlendNoiseMinimum,
-                        BlendNoiseMaximum = operation.BlendNoiseMaximum,
-                        MinimumAltitude = operation.MinimumAltitude,
-                        MaximumAltitude = operation.MaximumAltitude,
-                        MinimumLatitude = operation.MinimumLatitude,
-                        MaximumLatitude = operation.MaximumLatitude,
-                        BiomeFilter = operation.BiomeFilter,
-                        MaterialFilter = operation.MaterialFilter,
-                        NoiseType = operation.NoiseType,
-                        HeightBlendMode = operation.HeightBlendMode,
-                        NoiseSamplingQuality = operation.NoiseSamplingQuality,
-                        ScaleHeightByNoise = operation.ScaleHeightByNoise,
-                            UseRadial = operation.UseRadial,
-                            RadialCenterX = operation.RadialCenterX,
-                            RadialCenterY = operation.RadialCenterY,
-                            RadialCenterZ = operation.RadialCenterZ,
-                            RadialRadiusDegrees = operation.RadialRadiusDegrees,
-                            RadialProfile = operation.RadialProfile,
-                            ScaleHeightByRadial = operation.ScaleHeightByRadial
-                    });
-            }
-
-            var featureOperations =
-                new List<FeatureOperation>(_featureOperations.Count);
-
-            for (int i = 0; i < _featureOperations.Count; i++)
-                featureOperations.Add(FeatureStepRegistry.Clone(_featureOperations[i]));
+            featureOperations.AddRange(_featureOperations.Select(FeatureStepRegistry.Clone));
 
             var allocatedComplexValues =
                 new List<byte>(
@@ -442,31 +411,20 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 "down_mat.png"
             };
 
-            var used =
-                new bool[256];
-
-            for (int faceIndex = 0;
-                faceIndex < materialFaceFiles.Length;
-                faceIndex++)
+            var used = new bool[256];
+            foreach (var t in materialFaceFiles)
             {
-                byte[] biomes =
+                var biomes =
                     GetOrLoadImage(
-                        materialFaceFiles[faceIndex]).Planes[1];
+                        t).Planes[1];
 
-                for (int pixelIndex = 0;
-                    pixelIndex < biomes.Length;
-                    pixelIndex++)
-                {
-                    used[biomes[pixelIndex]] = true;
-                }
+                foreach (var t1 in biomes) used[t1] = true;
             }
 
             var result =
                 new List<byte>();
 
-            for (int value = 0;
-                value < used.Length;
-                value++)
+            for (var value = used.Length - 1; value >= 0; value--)
             {
                 if (used[value])
                     result.Add((byte)value);
@@ -500,20 +458,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             List<Action<int, int, byte[], byte[], byte[], byte[]>> transforms;
 
-            if (!_imageTransforms.TryGetValue(
-                faceFileName,
-                out transforms))
+            if (!_imageTransforms.TryGetValue(faceFileName, out transforms))
             {
-                transforms =
-                    new List<Action<int, int, byte[], byte[], byte[], byte[]>>();
+                transforms = new List<Action<int, int, byte[], byte[], byte[], byte[]>>();
 
-                _imageTransforms.Add(
-                    faceFileName,
-                    transforms);
+                _imageTransforms.Add(faceFileName, transforms);
             }
 
-            transforms.Add(
-                transform);
+            transforms.Add(transform);
         }
 
 
@@ -589,7 +541,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             float maxDepth)
         {
             if (string.IsNullOrWhiteSpace(
-                materialSubtype))
+                    materialSubtype))
             {
                 throw new ArgumentException(
                     "Material subtype cannot be empty.",
@@ -612,35 +564,15 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             byte mapValue,
             float maxDepth)
         {
-            MyPlanetMaterialDefinition[] existing =
-                Builder.CustomMaterialTable;
-
-            int count =
-                existing == null
-                    ? 0
-                    : existing.Length;
-
-            var output =
-                new MyPlanetMaterialDefinition[count + 1];
-
-            if (count > 0)
-            {
-                Array.Copy(
-                    existing,
-                    output,
-                    count);
-            }
-
-            output[count] =
-                new MyPlanetMaterialDefinition
-                {
-                    Material = materialSubtype,
-                    Value = mapValue,
-                    MaxDepth = maxDepth
-                };
-
             Builder.CustomMaterialTable =
-                output;
+                AppendToArray(
+                    Builder.CustomMaterialTable,
+                    new MyPlanetMaterialDefinition
+                    {
+                        Material = materialSubtype,
+                        Value = mapValue,
+                        MaxDepth = maxDepth
+                    });
         }
 
 
@@ -649,8 +581,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         /// source maps and template definitions.
         /// </summary>
         [ApiMethod]
-        private byte AddComplexMaterial(
-            MyPlanetMaterialGroup materialGroup)
+        private byte AddComplexMaterial(MyPlanetMaterialGroup materialGroup)
         {
             EnsureEditable();
 
@@ -675,13 +606,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             var clone =
                 (MyPlanetMaterialGroup)
-                    materialGroup.Clone();
+                materialGroup.Clone();
 
-            clone.Value =
-                mapValue;
+            clone.Value = mapValue;
 
-            if (string.IsNullOrWhiteSpace(
-                clone.Name))
+            if (string.IsNullOrWhiteSpace(clone.Name))
             {
                 clone.Name =
                     "ApiComplexMaterial_" +
@@ -689,35 +618,27 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
 
-            MyPlanetMaterialGroup[] existing =
-                Builder.ComplexMaterials;
+            Builder.ComplexMaterials = AppendToArray(Builder.ComplexMaterials, clone);
 
-            int count =
-                existing == null
-                    ? 0
-                    : existing.Length;
-
-            var output =
-                new MyPlanetMaterialGroup[count + 1];
-
-            if (count > 0)
-            {
-                Array.Copy(
-                    existing,
-                    output,
-                    count);
-            }
-
-            output[count] =
-                clone;
-
-            Builder.ComplexMaterials =
-                output;
-
-            _allocatedComplexMaterialValues.Add(
-                mapValue);
+            _allocatedComplexMaterialValues.Add(mapValue);
 
             return mapValue;
+        }
+
+        private static T[] AppendToArray<T>(
+            T[] existing,
+            params T[] additions)
+        {
+            int existingCount = existing?.Length ?? 0;
+
+            var output = new T[existingCount + additions.Length];
+
+            if (existingCount > 0 && existing != null)
+                Array.Copy(existing, output, existingCount);
+
+            Array.Copy(additions, 0, output, existingCount, additions.Length);
+
+            return output;
         }
 
 
@@ -726,14 +647,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         /// the number added.
         /// </summary>
         [ApiMethod]
-        private int AddEnvironmentItems(
-            PlanetEnvironmentItemMapping[] mappings)
+        private int AddEnvironmentItems(PlanetEnvironmentItemMapping[] mappings)
         {
             EnsureEditable();
 
-            if (!string.IsNullOrWhiteSpace(
-                _environmentCarrierSubtype) ||
-                !string.IsNullOrWhiteSpace(_environmentPresetName))
+            if (!string.IsNullOrWhiteSpace(_environmentCarrierSubtype) || !string.IsNullOrWhiteSpace(_environmentPresetName))
             {
                 throw new Exception(
                     "This template already uses an explicit or preset " +
@@ -757,30 +675,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
 
-            PlanetEnvironmentItemMapping[] existing =
-                Builder.EnvironmentItems;
-
-            int existingCount =
-                existing == null
-                    ? 0
-                    : existing.Length;
-
-            var output =
-                new PlanetEnvironmentItemMapping[
-                    existingCount + mappings.Length];
-
-            if (existingCount > 0)
-            {
-                Array.Copy(
-                    existing,
-                    output,
-                    existingCount);
-            }
+            var additions =
+                new PlanetEnvironmentItemMapping[mappings.Length];
 
 
             for (int mappingIndex = 0;
-                mappingIndex < mappings.Length;
-                mappingIndex++)
+                 mappingIndex < mappings.Length;
+                 mappingIndex++)
             {
                 PlanetEnvironmentItemMapping mapping =
                     mappings[mappingIndex];
@@ -805,15 +706,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                         nameof(mappings));
                 }
 
-                output[existingCount + mappingIndex] =
+                additions[mappingIndex] =
                     CloneEnvironmentItemMapping(
                         mapping,
                         mappingIndex);
             }
 
 
-            Builder.EnvironmentItems =
-                output;
+            Builder.EnvironmentItems = AppendToArray(Builder.EnvironmentItems, additions);
 
             return mappings.Length;
         }
@@ -834,29 +734,26 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     carrierPlanetGeneratorSubtype);
 
 
-            EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(1);
 
             // Persist the actual caller environment id into the generated
             // planet definition as well. Runtime registrations do not run
             // MyPlanetGeneratorDefinition.Postprocessor, so the carrier
             // subtype is persisted separately for live/reload rebinding.
-            Builder.Environment =
-                new SerializableDefinitionId(
-                    carrier.EnvironmentId.Value.TypeId,
+            if (carrier.EnvironmentId != null)
+                Builder.Environment = new SerializableDefinitionId(
+                    carrier.EnvironmentId.Value.TypeId, 
                     carrier.EnvironmentId.Value.SubtypeName);
 
             // Explicit procedural definitions and legacy EnvironmentItems are
             // different engine paths. Selecting an explicit environment
             // replaces inherited/legacy mappings for this terraform revision.
-            Builder.EnvironmentItems =
-                null;
+            Builder.EnvironmentItems = null;
 
-            _environmentCarrierSubtype =
-                carrier.Id.SubtypeName;
+            _environmentCarrierSubtype = carrier.Id.SubtypeName;
 
             _environmentPresetName =
                 null;
-
         }
 
 
@@ -875,7 +772,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 _environmentPresetCatalog.Resolve(
                     presetName);
 
-            EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(1);
 
             _environmentPresetName =
                 preset.Name;
@@ -922,14 +819,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 new MyPlanetEnvironmentItemDef[source.Items.Length];
 
             for (int itemIndex = 0;
-                itemIndex < source.Items.Length;
-                itemIndex++)
+                 itemIndex < source.Items.Length;
+                 itemIndex++)
             {
                 MyPlanetEnvironmentItemDef item =
                     source.Items[itemIndex];
 
-                if (item == null ||
-                    string.IsNullOrWhiteSpace(item.TypeId))
+                if (item == null || string.IsNullOrWhiteSpace(item.TypeId))
                 {
                     throw new ArgumentException(
                         "Environment mapping " +
@@ -937,7 +833,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                         " item " +
                         itemIndex +
                         " has no TypeId.",
-                        "mappings");
+                        nameof(item.TypeId));
                 }
 
                 if (item.Density < 0f)
@@ -948,7 +844,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                         " item " +
                         itemIndex +
                         " has a negative density.",
-                        "mappings");
+                        nameof(item.Density));
                 }
 
                 items[itemIndex] =
@@ -975,9 +871,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 Materials = materials,
                 Biomes = biomes,
                 Items = items,
-                Rule = source.Rule == null
-                    ? null
-                    : (MyPlanetSurfaceRule)source.Rule.Clone()
+                Rule = (MyPlanetSurfaceRule)source.Rule?.Clone()
             };
         }
 
@@ -1002,8 +896,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
             if (!PlanetMaterialMap.UsesValue(
-                Builder,
-                mapValue))
+                    Builder,
+                    mapValue))
             {
                 throw new ArgumentException(
                     "Material-map value " +
@@ -1013,6 +907,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
 
+            EnsureLayerEnabled(0);
             _fractalNoiseOperations.Add(
                 new FractalNoiseOperation
                 {
@@ -1023,23 +918,41 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         }
 
 
-        private void EnsureBiomePlanetMapEnabled()
+        private void EnsureLayerEnabled(int layerIndex)
         {
-            var planetMaps =
-                Builder.PlanetMaps.GetValueOrDefault();
+            var planetMaps = Builder.PlanetMaps.GetValueOrDefault();
+            switch (layerIndex)
+            {
+                case 0:
+                    if (planetMaps.Material)
+                        return;
+                    planetMaps.Material = true;
+                    break;
+                case 1:
+                    if (planetMaps.Biome)
+                        return;
+                    planetMaps.Biome = true;
+                    break;
+                case 2:
+                    if (planetMaps.Ores)
+                        return;
+                    planetMaps.Ores = true;
+                    break;
+                case 3:
+                    // Brush layer 3 is the separate 16-bit heightmap.
+                    // It is not controlled by PlanetMaps.
+                    return;
+                default:
+                    throw new ArgumentException(nameof(layerIndex));
+            }
 
-            if (planetMaps.Biome)
-                return;
+            Builder.PlanetMaps = planetMaps;
 
-            planetMaps.Biome =
-                true;
-
-            Builder.PlanetMaps =
-                planetMaps;
-
+            string name = new[] { "Material", "Biome", "Ores" }[layerIndex];
             MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Enabled PlanetMaps.Biome for " +
-                "runtime biome editing (source generator had Biome=false).");
+                "[RuntimePlanetGenerator] Enabled Planet Map layer " +
+                $"{name} for runtime map editing " +
+                $"(source generator had {name}=false).");
         }
 
 
@@ -1057,7 +970,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             if (sourceBiome == targetBiome)
                 return;
 
-            EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(1);
 
             _biomeReplacementOperations.Add(
                 new BiomeReplacementOperation
@@ -1087,7 +1000,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     nameof(coveragePercent));
             }
 
-            EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(1);
 
             _fractalNoiseOperations.Add(
                 new FractalNoiseOperation
@@ -1157,8 +1070,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     nameof(fillValue));
             }
 
-            if (layerIndex == 1)
-                EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(
+                layerIndex);
 
             if (useNoise)
             {
@@ -1297,7 +1210,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 throw new ArgumentException("Unknown procedural noise type.", nameof(noiseType));
 
             if (heightBlendMode < 0 || heightBlendMode > 2)
-                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.", nameof(heightBlendMode));
+                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.",
+                    nameof(heightBlendMode));
 
             if (samplingQuality < NoiseSamplingQuality.Low ||
                 samplingQuality > NoiseSamplingQuality.Direct)
@@ -1306,7 +1220,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
             if (double.IsNaN(noiseFrequency) || double.IsInfinity(noiseFrequency) || noiseFrequency <= 0.0)
-                throw new ArgumentException("Noise frequency must be finite and greater than zero.", nameof(noiseFrequency));
+                throw new ArgumentException("Noise frequency must be finite and greater than zero.",
+                    nameof(noiseFrequency));
 
             if (noiseOctaves < 1 || noiseOctaves > 8)
                 throw new ArgumentException("Noise octaves must be from 1 to 8.", nameof(noiseOctaves));
@@ -1314,26 +1229,30 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             ValidateUnitRange(blendNoiseMinimum, "blendNoiseMinimum");
             ValidateUnitRange(blendNoiseMaximum, "blendNoiseMaximum");
             if (blendNoiseMinimum > blendNoiseMaximum)
-                throw new ArgumentException("Blend noise minimum cannot exceed the maximum.", nameof(blendNoiseMinimum));
+                throw new ArgumentException("Blend noise minimum cannot exceed the maximum.",
+                    nameof(blendNoiseMinimum));
 
             ValidateAltitudeBound(minimumAltitude, "minimumAltitude");
             ValidateAltitudeBound(maximumAltitude, "maximumAltitude");
             if (minimumAltitude >= 0 && maximumAltitude >= 0 && minimumAltitude > maximumAltitude)
-                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.", nameof(minimumAltitude));
+                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.",
+                    nameof(minimumAltitude));
 
             ValidateLatitude(minimumLatitude, "minimumLatitude");
             ValidateLatitude(maximumLatitude, "maximumLatitude");
             if (minimumLatitude > maximumLatitude)
-                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.", nameof(minimumLatitude));
+                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.",
+                    nameof(minimumLatitude));
 
             ValidateByteFilter(biomeFilter, "biomeFilter");
             ValidateByteFilter(materialFilter, "materialFilter");
 
             if (layerIndex == 0 && !PlanetMaterialMap.UsesValue(Builder, (byte)fillValue))
-                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.", nameof(fillValue));
+                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.",
+                    nameof(fillValue));
 
-            if (layerIndex == 1)
-                EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(
+                layerIndex);
 
             _brushOperations.Add(new BrushOperation
             {
@@ -1392,12 +1311,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 double.IsNaN(centerY) || double.IsInfinity(centerY) ||
                 double.IsNaN(centerZ) || double.IsInfinity(centerZ))
             {
-                throw new ArgumentException("Radial center must contain finite coordinates.", "center");
+                throw new ArgumentException("Radial center must contain finite coordinates.");
             }
 
             double centerLengthSquared = centerX * centerX + centerY * centerY + centerZ * centerZ;
             if (centerLengthSquared < 1e-12)
-                throw new ArgumentException("Radial center direction cannot be zero.", "center");
+                throw new ArgumentException("Radial center direction cannot be zero.");
 
             double inverseLength = 1.0 / Math.Sqrt(centerLengthSquared);
             centerX *= inverseLength;
@@ -1407,7 +1326,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             if (double.IsNaN(radiusDegrees) || double.IsInfinity(radiusDegrees) ||
                 radiusDegrees <= 0.0 || radiusDegrees > 180.0)
             {
-                throw new ArgumentException("Radial radius must be greater than zero and no more than 180 degrees.", nameof(radiusDegrees));
+                throw new ArgumentException("Radial radius must be greater than zero and no more than 180 degrees.",
+                    nameof(radiusDegrees));
             }
 
             if (radialProfile < RadialFieldProfile.Linear ||
@@ -1415,29 +1335,35 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 throw new ArgumentException("Unknown radial field profile.", nameof(radialProfile));
 
             if (heightBlendMode < 0 || heightBlendMode > 2)
-                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.", nameof(heightBlendMode));
+                throw new ArgumentException("Height blend mode must be Replace, Add, or Subtract.",
+                    nameof(heightBlendMode));
 
             if (radialProfile == RadialFieldProfile.Crater && layerIndex != 3)
-                throw new ArgumentException("The signed Crater radial profile can only be applied to the Heightmap layer.", nameof(radialProfile));
+                throw new ArgumentException(
+                    "The signed Crater radial profile can only be applied to the Heightmap layer.",
+                    nameof(radialProfile));
 
             ValidateAltitudeBound(minimumAltitude, "minimumAltitude");
             ValidateAltitudeBound(maximumAltitude, "maximumAltitude");
             if (minimumAltitude >= 0 && maximumAltitude >= 0 && minimumAltitude > maximumAltitude)
-                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.", nameof(minimumAltitude));
+                throw new ArgumentException("Minimum altitude cannot exceed maximum altitude.",
+                    nameof(minimumAltitude));
 
             ValidateLatitude(minimumLatitude, "minimumLatitude");
             ValidateLatitude(maximumLatitude, "maximumLatitude");
             if (minimumLatitude > maximumLatitude)
-                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.", nameof(minimumLatitude));
+                throw new ArgumentException("Minimum latitude cannot exceed maximum latitude.",
+                    nameof(minimumLatitude));
 
             ValidateByteFilter(biomeFilter, "biomeFilter");
             ValidateByteFilter(materialFilter, "materialFilter");
 
             if (layerIndex == 0 && !PlanetMaterialMap.UsesValue(Builder, (byte)fillValue))
-                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.", nameof(fillValue));
+                throw new ArgumentException("Material-map value " + fillValue + " is not defined in this template.",
+                    nameof(fillValue));
 
-            if (layerIndex == 1)
-                EnsureBiomePlanetMapEnabled();
+            EnsureLayerEnabled(
+                layerIndex);
 
             _brushOperations.Add(new BrushOperation
             {
@@ -1481,25 +1407,25 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             string layer)
         {
             if (string.Equals(
-                layer,
-                "Material",
-                StringComparison.OrdinalIgnoreCase))
+                    layer,
+                    "Material",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return 0;
             }
 
             if (string.Equals(
-                layer,
-                "Biome",
-                StringComparison.OrdinalIgnoreCase))
+                    layer,
+                    "Biome",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return 1;
             }
 
             if (string.Equals(
-                layer,
-                "Ore",
-                StringComparison.OrdinalIgnoreCase))
+                    layer,
+                    "Ore",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return 2;
             }
@@ -1592,9 +1518,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             EnsureEditable();
 
             if ((Builder.DefaultSurfaceMaterial != null &&
-                    Builder.DefaultSurfaceMaterial.Value == mapValue) ||
+                 Builder.DefaultSurfaceMaterial.Value == mapValue) ||
                 (Builder.DefaultSubSurfaceMaterial != null &&
-                    Builder.DefaultSubSurfaceMaterial.Value == mapValue))
+                 Builder.DefaultSubSurfaceMaterial.Value == mapValue))
             {
                 return false;
             }
@@ -1666,12 +1592,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
 
         private static Dictionary<string,
-            List<Action<int, int, byte[], byte[], byte[], byte[]>>>
-                CreateImageTransformDictionary()
+                List<Action<int, int, byte[], byte[], byte[], byte[]>>>
+            CreateImageTransformDictionary()
         {
             return new Dictionary<string,
                 List<Action<int, int, byte[], byte[], byte[], byte[]>>>(
-                    StringComparer.OrdinalIgnoreCase);
+                StringComparer.OrdinalIgnoreCase);
         }
 
 
@@ -1706,8 +1632,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             PlanarPngBitmap image;
 
             if (_images.TryGetValue(
-                faceFileName,
-                out image))
+                    faceFileName,
+                    out image))
             {
                 return image;
             }
@@ -1716,11 +1642,11 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             byte[] png;
 
             if (string.IsNullOrWhiteSpace(
-                SourceArchiveFile))
+                    SourceArchiveFile))
             {
                 png =
-                        _planetDataArchives.ReadSourceFile(
-                            SourceContext,
+                    _planetDataArchives.ReadSourceFile(
+                        SourceContext,
                         SourceSubtype,
                         SourceFolderName,
                         faceFileName);
@@ -1735,8 +1661,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 }
 
                 if (!_sourceArchiveFiles.TryGetValue(
-                    faceFileName,
-                    out png))
+                        faceFileName,
+                        out png))
                 {
                     throw new Exception(
                         "Planet PNG '" +
@@ -1781,20 +1707,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 "down_mat.png"
             };
 
-            for (int faceIndex = 0;
-                faceIndex < materialFaceFiles.Length;
-                faceIndex++)
+            foreach (var t in materialFaceFiles)
             {
                 byte[] materialValues =
                     GetOrLoadImage(
-                        materialFaceFiles[faceIndex]).Planes[0];
+                        t).Planes[0];
 
-                for (int pixelIndex = 0;
-                    pixelIndex < materialValues.Length;
-                    pixelIndex++)
-                {
-                    used[materialValues[pixelIndex]] = true;
-                }
+                foreach (var t1 in materialValues) 
+                    used[t1] = true;
             }
 
             if (Builder.DefaultSurfaceMaterial != null)
@@ -1805,30 +1725,16 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             if (Builder.CustomMaterialTable != null)
             {
-                for (int i = 0;
-                    i < Builder.CustomMaterialTable.Length;
-                    i++)
-                {
-                    MyPlanetMaterialDefinition material =
-                        Builder.CustomMaterialTable[i];
-
+                foreach (var material in Builder.CustomMaterialTable)
                     if (material != null)
                         used[material.Value] = true;
-                }
             }
 
             if (Builder.ComplexMaterials != null)
             {
-                for (int i = 0;
-                    i < Builder.ComplexMaterials.Length;
-                    i++)
-                {
-                    MyPlanetMaterialGroup group =
-                        Builder.ComplexMaterials[i];
-
+                foreach (var group in Builder.ComplexMaterials)
                     if (group != null)
                         used[group.Value] = true;
-                }
             }
 
 
@@ -1861,6 +1767,4 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
         }
     }
-
-
 }
