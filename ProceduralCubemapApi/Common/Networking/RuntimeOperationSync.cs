@@ -1,0 +1,254 @@
+﻿using System.Collections.Generic;
+using Generated;
+using ProtoBuf;
+
+namespace ProceduralCubemapApi.Common.Networking
+{
+    /// <summary>
+    /// One committed procedural modification. The final generator XML carries
+    /// resolved definition changes while the operation lists preserve the exact
+    /// image work and ordering executed by the authoritative server.
+    /// </summary>
+    [NetworkPayload(1)]
+    [ProtoContract]
+    internal partial class RuntimeOperationSync
+    {
+        [ProtoMember(1)]
+        public long PlanetEntityId;
+
+        [ProtoMember(2)]
+        public ulong Revision;
+
+        [ProtoMember(3)]
+        public string RuntimeSubtype;
+
+        [ProtoMember(4)]
+        public string GeneratorDefinitionXml;
+
+        [ProtoMember(5)]
+        public long PlanetSeed;
+
+        [ProtoMember(6)]
+        public List<SyncedFractalNoiseOperation> FractalNoiseOperations;
+
+        [ProtoMember(7)]
+        public List<SyncedBiomeReplacementOperation> BiomeReplacementOperations;
+
+        [ProtoMember(8)]
+        public List<SyncedBrushOperation> BrushOperations;
+
+        [ProtoMember(9)]
+        public List<byte> AllocatedComplexMaterialValues;
+
+        [ProtoMember(10)]
+        public string GeneratorFile;
+
+        [ProtoMember(11)]
+        public string ArchiveFile;
+
+        [ProtoMember(12)]
+        public string SourceSubtype;
+
+        [ProtoMember(13)]
+        public string EnvironmentCarrierSubtype;
+
+        [ProtoMember(14)]
+        public string EnvironmentPresetName;
+
+        [ProtoMember(15)]
+        public string EnvironmentPresetSourceGeneratorSubtype;
+
+        [ProtoMember(16)]
+        public int EnvironmentPresetSchemaVersion;
+
+        [ProtoMember(17)]
+        public bool RequiresCommitDecision;
+
+        [ProtoMember(18)]
+        public List<SyncedFeatureOperation> FeatureOperations;
+
+        [ProtoMember(19)]
+        public bool ChangeMaterials;
+
+        [ProtoMember(20)]
+        public bool ChangeEnvironment;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedFractalNoiseOperation
+    {
+        [ProtoMember(1)]
+        public int PlaneIndex;
+
+        [ProtoMember(2)]
+        public byte TargetValue;
+
+        [ProtoMember(3)]
+        public int CoveragePercent;
+
+        [ProtoMember(4)]
+        public double Threshold;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedBiomeReplacementOperation
+    {
+        [ProtoMember(1)]
+        public byte SourceBiome;
+
+        [ProtoMember(2)]
+        public byte TargetBiome;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedBrushOperation
+    {
+        [ProtoMember(1)]
+        public int LayerIndex;
+
+        [ProtoMember(2)]
+        public int FillValue;
+
+        [ProtoMember(3)]
+        public bool UseNoise;
+
+        [ProtoMember(4)]
+        public double NoiseFrequency;
+
+        [ProtoMember(5)]
+        public int NoiseOctaves;
+
+        [ProtoMember(6)]
+        public int NoiseSeedOffset;
+
+        [ProtoMember(7)]
+        public double BlendNoiseMinimum;
+
+        [ProtoMember(8)]
+        public double BlendNoiseMaximum;
+
+        [ProtoMember(9)]
+        public int MinimumAltitude;
+
+        [ProtoMember(10)]
+        public int MaximumAltitude;
+
+        [ProtoMember(11)]
+        public double MinimumLatitude;
+
+        [ProtoMember(12)]
+        public double MaximumLatitude;
+
+        [ProtoMember(13)]
+        public int BiomeFilter;
+
+        [ProtoMember(14)]
+        public int MaterialFilter;
+
+        [ProtoMember(15)]
+        public int NoiseType;
+
+        [ProtoMember(16)]
+        public int HeightBlendMode;
+
+        [ProtoMember(17)]
+        public bool ScaleHeightByNoise;
+
+        [ProtoMember(18)]
+        public int NoiseSamplingQuality;
+
+        [ProtoMember(19)]
+        public bool UseRadial;
+
+        [ProtoMember(20)]
+        public double RadialCenterX;
+
+        [ProtoMember(21)]
+        public double RadialCenterY;
+
+        [ProtoMember(22)]
+        public double RadialCenterZ;
+
+        [ProtoMember(23)]
+        public double RadialRadiusDegrees;
+
+        [ProtoMember(24)]
+        public int RadialProfile;
+
+        [ProtoMember(25)]
+        public bool ScaleHeightByRadial;
+    }
+
+
+    [ProtoContract]
+    internal sealed class SyncedFeatureOperation
+    {
+        [ProtoMember(1)]
+        public List<SyncedCraterField> CraterFields;
+
+        [ProtoMember(2)]
+        public List<SyncedVolcanoField> VolcanoFields;
+
+        [ProtoMember(3)]
+        public List<SyncedRavineField> RavineFields;
+
+        [ProtoMember(4)]
+        public List<SyncedRiverField> RiverFields;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedCraterField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumRadiusDegrees;
+        [ProtoMember(4)] public double MaximumRadiusDegrees;
+        [ProtoMember(5)] public int MinimumDepth;
+        [ProtoMember(6)] public int MaximumDepth;
+        [ProtoMember(7)] public float TargetSize;
+    }
+
+
+    [ProtoContract]
+    internal sealed class SyncedVolcanoField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumRadiusDegrees;
+        [ProtoMember(4)] public double MaximumRadiusDegrees;
+        [ProtoMember(5)] public int MinimumHeight;
+        [ProtoMember(6)] public int MaximumHeight;
+        [ProtoMember(7)] public float TargetSize;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedRavineField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MinimumLengthDegrees;
+        [ProtoMember(4)] public double MaximumLengthDegrees;
+        [ProtoMember(5)] public double MinimumWidthDegrees;
+        [ProtoMember(6)] public double MaximumWidthDegrees;
+        [ProtoMember(7)] public int MinimumDepth;
+        [ProtoMember(8)] public int MaximumDepth;
+        [ProtoMember(9)] public float TargetSize;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedRiverField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public int ShorelineHeight;
+        [ProtoMember(4)] public int MinimumSourceHeightAboveShoreline;
+        [ProtoMember(5)] public double MinimumLengthDegrees;
+        [ProtoMember(6)] public double MaximumLengthDegrees;
+        [ProtoMember(7)] public double MinimumWidthDegrees;
+        [ProtoMember(8)] public double MaximumWidthDegrees;
+        [ProtoMember(9)] public int MinimumDepth;
+        [ProtoMember(10)] public int MaximumDepth;
+        [ProtoMember(11)] public double ShoulderWidthMultiplier;
+    }
+
+}

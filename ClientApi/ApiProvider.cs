@@ -2,7 +2,7 @@
 using System;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
-namespace VoxelCubemapApi.Api
+namespace ProceduralCubemapApi.Api
 {
     /// <summary>
     /// Defines the root API published by the session-level API manager.
@@ -173,7 +173,7 @@ namespace VoxelCubemapApi.Api
 
             if (result == null)
             {
-                throw new InvalidOperationException("API mirror 'VoxelCubemapApi.Api.ApiProvider' is missing delegate '" + id + "'.");
+                throw new InvalidOperationException("API mirror 'ProceduralCubemapApi.Api.ApiProvider' is missing delegate '" + id + "'.");
             }
 
             return result;

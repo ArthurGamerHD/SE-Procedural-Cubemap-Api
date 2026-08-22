@@ -3,7 +3,7 @@ using System;
 using VRage.Game;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
-namespace VoxelCubemapApi.Api
+namespace ProceduralCubemapApi.Api
 {
     /// <summary>
     /// Server-owned mutable template exposed to another mod only through a
@@ -478,7 +478,7 @@ namespace VoxelCubemapApi.Api
 
             if (result == null)
             {
-                throw new InvalidOperationException("API mirror 'VoxelCubemapApi.Api.ModificationTemplate' is missing delegate '" + id + "'.");
+                throw new InvalidOperationException("API mirror 'ProceduralCubemapApi.Api.ModificationTemplate' is missing delegate '" + id + "'.");
             }
 
             return result;

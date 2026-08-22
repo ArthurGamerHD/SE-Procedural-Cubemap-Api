@@ -2,7 +2,7 @@
 using System;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
-namespace VoxelCubemapApi.Api
+namespace ProceduralCubemapApi.Api
 {
     public sealed class FeatureTemplate
     {
@@ -201,7 +201,7 @@ namespace VoxelCubemapApi.Api
 
             if (result == null)
             {
-                throw new InvalidOperationException("API mirror 'VoxelCubemapApi.Api.FeatureTemplate' is missing delegate '" + id + "'.");
+                throw new InvalidOperationException("API mirror 'ProceduralCubemapApi.Api.FeatureTemplate' is missing delegate '" + id + "'.");
             }
 
             return result;

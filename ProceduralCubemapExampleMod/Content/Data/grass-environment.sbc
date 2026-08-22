@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG/CALLER EXAMPLE. This is a real game definition file, not runtime data.
+  The procedural environment is loaded and postprocessed by Keen during normal
+  definition loading. The tiny PlanetGeneratorDefinition exists only as a
+  whitelist-safe carrier so Voxel Cubemap Api can ask MyPlanet.Init() to create
+  the environment component without referencing the private planet namespace.
+
+  DestroyableItems densities were halved to preserve FromLegacyPlanet() behavior.
+  The single grouped voxel-map legacy item is intentionally omitted; this sample
+  is vegetation-only.
+-->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Definition xsi:type="VR.ProceduralWorldEnvironment">
+    <Id Type="MyObjectBuilder_ProceduralWorldEnvironment" Subtype="CubemapGrassEnvironment"/>
+    <SectorSize>200</SectorSize>
+    <ItemsPerSqMeter>0.0034</ItemsPerSqMeter>
+    <MaxSyncLod>0</MaxSyncLod>
+    <ItemTypes>
+      <Item Name="Tree">
+        <LodFrom>-1</LodFrom>
+        <LodTo>1</LodTo>
+        <Provider Type="MyObjectBuilder_ProceduralEnvironmentModuleDefinition" Subtype="Static"/>
+        <Proxy Type="MyObjectBuilder_EnvironmentModuleProxyDefinition" Subtype="Breakable"/>
+      </Item>
+      <Item Name="Bush">
+        <LodFrom>0</LodFrom>
+        <LodTo>-1</LodTo>
+        <Provider Type="MyObjectBuilder_ProceduralEnvironmentModuleDefinition" Subtype="Static"/>
+        <Proxy Type="MyObjectBuilder_EnvironmentModuleProxyDefinition" Subtype="Breakable"/>
+      </Item>
+      <Item Name="Forageable">
+        <LodFrom>-1</LodFrom>
+        <LodTo>1</LodTo>
+        <Provider Type="MyObjectBuilder_ProceduralEnvironmentModuleDefinition" Subtype="Static"/>
+        <Proxy Type="MyObjectBuilder_EnvironmentModuleProxyDefinition" Subtype="Forageable"/>
+      </Item>
+    </ItemTypes>
+    <EnvironmentMappings>
+      <Mapping>
+        <Material>Snow</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="SnowForestEdge" Density="0.3"/>
+        <Item Type="Bush" Subtype="SnowBushForestEdge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Woods_grass</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="WoodGrassForestEdge" Density="0.3"/>
+        <Item Type="Bush" Subtype="WoodGrassBushForestEdge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Rocks_grass</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="RockGrassForestEdge" Density="0.45"/>
+        <Item Type="Bush" Subtype="RockGrassBushForestEdge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="GrassForestEdge" Density="0.1"/>
+        <Item Type="Bush" Subtype="GrassBushForestEdge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass_old</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="GrassForestEdge" Density="0.03"/>
+        <Item Type="Tree" Subtype="GrassOldForestEdge" Density="0.06"/>
+        <Item Type="Bush" Subtype="GrassOldBushForestEdge" Density="0.25"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="20" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass_old</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="GrassOldForestEdge" Density="0.06"/>
+        <Item Type="Bush" Subtype="GrassOldBushForestEdge" Density="0.25"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="20" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Sand_02</Material>
+        <Biome>113</Biome>
+        <Item Type="Tree" Subtype="SandForestEdge" Density="0.05"/>
+        <Item Type="Bush" Subtype="SandBushForestEdge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Snow</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="SnowForestMedium" Density="0.6"/>
+        <Item Type="Bush" Subtype="SnowBushForestMedium" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Woods_grass</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="WoodGrassForestMedium" Density="0.6"/>
+        <Item Type="Bush" Subtype="WoodGrassBushForestMedium" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Rocks_grass</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="RockGrassForestMedium" Density="0.4"/>
+        <Item Type="Bush" Subtype="RockGrassBushForestMedium" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="GrassForestMedium" Density="0.6"/>
+        <Item Type="Bush" Subtype="GrassBushForestMedium" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass_old</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="GrassOldForestMedium" Density="0.15"/>
+        <Item Type="Bush" Subtype="GrassOldBushForestMedium" Density="0.225"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="20" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Sand_02</Material>
+        <Biome>141</Biome>
+        <Item Type="Tree" Subtype="SandForestMedium" Density="0.15"/>
+        <Item Type="Bush" Subtype="SandBushForestMedium" Density="0.1"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Snow</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="SnowForestLarge" Density="0.6"/>
+        <Item Type="Bush" Subtype="SnowBushForestLarge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Woods_grass</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="WoodGrassForestLarge" Density="0.6"/>
+        <Item Type="Bush" Subtype="WoodGrassBushForestLarge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Rocks_grass</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="RockGrassForestLarge" Density="0.35"/>
+        <Item Type="Bush" Subtype="RockGrassBushForestLarge" Density="0.1"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="GrassForestLarge" Density="0.6"/>
+        <Item Type="Bush" Subtype="GrassBushForestLarge" Density="0.2"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Grass_old</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="GrassOldForestLarge" Density="0.07"/>
+        <Item Type="Bush" Subtype="GrassOldBushForestLarge" Density="0.15"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="20" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Sand_02</Material>
+        <Biome>198</Biome>
+        <Item Type="Tree" Subtype="SandForestLarge" Density="0.01"/>
+        <Item Type="Bush" Subtype="SandBushForestLarge" Density="0.0025"/>
+        <Height Min="0" Max="0.7"/>
+        <Latitude Min="0" Max="75" Mirror="true"/>
+        <Slope Min="0" Max="50"/>
+      </Mapping>
+      <Mapping>
+        <Material>Woods_grass</Material>
+        <Material>Grass</Material>
+        <Material>Grass_old</Material>
+        <Material>Soil</Material>
+        <Biome>85</Biome>
+        <Biome>87</Biome>
+        <Biome>113</Biome>
+        <Biome>141</Biome>
+        <Biome>198</Biome>
+        <Item Type="Forageable" Subtype="EarthForageables" Density="0.004"/>
+        <Height Min="0" Max="1"/>
+        <Latitude Min="0" Max="90" Mirror="true"/>
+        <Slope Min="0" Max="20"/>
+      </Mapping>
+    </EnvironmentMappings>
+  </Definition>
+  <Definition xsi:type="PlanetGeneratorDefinition">
+    <Id Type="MyObjectBuilder_PlanetGeneratorDefinition" Subtype="CubemapGrassEnvironmentCarrier"/>
+    <Environment Type="ProceduralWorldEnvironment" Subtype="CubemapGrassEnvironment"/>
+  </Definition>
+</Definitions>

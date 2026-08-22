@@ -2,7 +2,7 @@
 using System;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
-namespace VoxelCubemapApi.Api
+namespace ProceduralCubemapApi.Api
 {
     /// <summary>
     /// Root-level procedural noise service exposed through the intermod API.
@@ -55,7 +55,7 @@ namespace VoxelCubemapApi.Api
 
             if (result == null)
             {
-                throw new InvalidOperationException("API mirror 'VoxelCubemapApi.Api.NoiseProvider' is missing delegate '" + id + "'.");
+                throw new InvalidOperationException("API mirror 'ProceduralCubemapApi.Api.NoiseProvider' is missing delegate '" + id + "'.");
             }
 
             return result;

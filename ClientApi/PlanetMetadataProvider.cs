@@ -2,7 +2,7 @@
 using System;
 using ApiData = System.Collections.Generic.Dictionary<string, System.Delegate>;
 
-namespace VoxelCubemapApi.Api
+namespace ProceduralCubemapApi.Api
 {
     /// <summary>
     /// Per-caller handle to a shared, immutable cubemap snapshot.
@@ -146,7 +146,7 @@ namespace VoxelCubemapApi.Api
 
             if (result == null)
             {
-                throw new InvalidOperationException("API mirror 'VoxelCubemapApi.Api.PlanetMetadataProvider' is missing delegate '" + id + "'.");
+                throw new InvalidOperationException("API mirror 'ProceduralCubemapApi.Api.PlanetMetadataProvider' is missing delegate '" + id + "'.");
             }
 
             return result;
