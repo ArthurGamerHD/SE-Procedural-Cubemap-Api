@@ -795,6 +795,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
             result.NewEntry =
                 pendingEntry;
 
+            result.ChangeMaterials =
+                snapshot.ChangeMaterials;
+
             result.RuntimeSyncPacket =
                 snapshot.RequiresAuthoritativeImageSync
                     ? (Generated.NetworkPackage)
@@ -1784,6 +1787,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     : new List<byte>(
                         packet.AllocatedComplexMaterialValues);
 
+            snapshot.ChangeMaterials =
+                packet.ChangeMaterials;
+
             Dictionary<string, byte[]> archiveFiles;
 
             byte[] archive =
@@ -1842,6 +1848,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     packet.GeneratorDefinitionXml,
                     packet.EnvironmentCarrierSubtype,
                     packet.EnvironmentPresetName);
+
+            snapshot.ChangeMaterials =
+                packet.ChangeMaterials;
 
             var images =
                 new Dictionary<string, byte[]>(
@@ -2192,6 +2201,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
                 result.NewEntry =
                     entry;
+
+                result.ChangeMaterials =
+                    snapshot.ChangeMaterials;
 
                 return result;
             }

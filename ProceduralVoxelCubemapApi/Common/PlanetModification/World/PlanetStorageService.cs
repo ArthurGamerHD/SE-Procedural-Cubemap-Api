@@ -9,6 +9,7 @@ using VoxelCubemapApi.Common.PlanetModification.Templates;
 using VRage.Game.Components;
 using VRage.ModAPI;
 using VRage.Utils;
+using VRage.Voxels;
 using VRageMath;
 
 namespace VoxelCubemapApi.Common.PlanetModification.World
@@ -402,6 +403,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.World
                 patchedStorageApi.Size +
                 ".");
 
+            if (workResult.ChangeMaterials)
+                patchedStorageApi.Reset(MyStorageDataTypeFlags.Material);
 
             SpawnPlanetThroughVoxelMapStorageBridge(
                 workResult.TargetPlanet,

@@ -20,6 +20,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public string OperationName;
         public NetworkPackage RuntimeSyncPacket;
         public bool StorageCommitted;
+        public bool ChangeMaterials;
     }
 
 
@@ -161,6 +162,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public string EnvironmentCarrierSubtype;
         public string EnvironmentPresetName;
         public bool RequiresAuthoritativeImageSync;
+        public bool ChangeMaterials;
         public bool ProceduralPersistenceEligible;
         public RuntimeProceduralPlanetRecipe InheritedProceduralRecipe;
     }

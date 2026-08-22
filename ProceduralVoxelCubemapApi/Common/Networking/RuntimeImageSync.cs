@@ -50,6 +50,9 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(13)]
         public int EnvironmentPresetSchemaVersion;
+
+        [ProtoMember(14)]
+        public bool ChangeMaterials;
     }
 
     [ProtoContract]

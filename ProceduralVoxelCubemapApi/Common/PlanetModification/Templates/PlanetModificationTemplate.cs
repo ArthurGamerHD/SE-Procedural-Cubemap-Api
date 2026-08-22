@@ -61,6 +61,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         private string _environmentCarrierSubtype;
         private string _environmentPresetName;
         private bool _requiresAuthoritativeImageSync;
+        private bool _changeMaterials;
         private readonly bool _proceduralPersistenceEligible;
 
         private readonly RuntimeProceduralPlanetRecipe
@@ -287,6 +288,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 EnvironmentPresetName = _environmentPresetName,
                 RequiresAuthoritativeImageSync =
                     _requiresAuthoritativeImageSync,
+                ChangeMaterials =
+                    _changeMaterials,
                 ProceduralPersistenceEligible =
                     _proceduralPersistenceEligible &&
                     !_requiresAuthoritativeImageSync,
@@ -337,6 +340,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             PlanarPngBitmap image =
                 GetOrLoadImage(
                     faceFileName);
+
+            if (faceFileName.EndsWith(
+                    "_mat.png",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _changeMaterials =
+                    true;
+            }
 
             // Return a new outer array so consumers cannot replace the
             // template's planes. The four byte planes themselves are
@@ -452,6 +463,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             faceFileName =
                 PlanetMapFileNames.Validate(
                     faceFileName);
+
+            if (faceFileName.EndsWith(
+                    "_mat.png",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _changeMaterials =
+                    true;
+            }
 
             _requiresAuthoritativeImageSync =
                 true;
@@ -908,6 +927,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
 
             EnsureLayerEnabled(0);
+            _changeMaterials =
+                true;
             _fractalNoiseOperations.Add(
                 new FractalNoiseOperation
                 {
@@ -1148,6 +1169,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 materialFilter,
                 "materialFilter");
 
+            if (layerIndex == 0)
+                _changeMaterials = true;
+
             _brushOperations.Add(
                 new BrushOperation
                 {
@@ -1253,6 +1277,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             EnsureLayerEnabled(
                 layerIndex);
+
+            if (layerIndex == 0)
+                _changeMaterials = true;
 
             _brushOperations.Add(new BrushOperation
             {
@@ -1364,6 +1391,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             EnsureLayerEnabled(
                 layerIndex);
+
+            if (layerIndex == 0)
+                _changeMaterials = true;
 
             _brushOperations.Add(new BrushOperation
             {

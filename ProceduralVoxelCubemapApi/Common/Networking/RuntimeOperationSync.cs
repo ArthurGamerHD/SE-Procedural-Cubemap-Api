@@ -66,6 +66,9 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(18)]
         public List<SyncedFeatureOperation> FeatureOperations;
+
+        [ProtoMember(19)]
+        public bool ChangeMaterials;
     }
 
     [ProtoContract]
