@@ -2343,9 +2343,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                 _server.RegisterRuntimeGeneratorDefinition(
                     builder,
                     entry.Subtype,
-                    absoluteFolder,
-                    entry.GrassMaterialValue,
-                    entry.GrassNoiseVersion > 0);
+                    absoluteFolder);
 
 
             PlanetEnvironmentService.BindRuntimeGenerator(

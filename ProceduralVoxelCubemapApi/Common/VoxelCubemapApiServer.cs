@@ -75,16 +75,12 @@ namespace VoxelCubemapApi.Common
         internal MyPlanetGeneratorDefinition RegisterRuntimeGeneratorDefinition(
             MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder,
             string subtype,
-            string absolutePlanetDataFolder,
-            byte grassMaterialMapValue,
-            bool verifyGrassOverlay = true)
+            string absolutePlanetDataFolder)
         {
             return _runtimeGenerators.RegisterDefinition(
                 sourceBuilder,
                 subtype,
-                absolutePlanetDataFolder,
-                grassMaterialMapValue,
-                verifyGrassOverlay);
+                absolutePlanetDataFolder);
         }
 
 

@@ -755,6 +755,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
                 }
             }
 
+            snapshot.EnvironmentCarrierSubtype = pendingEntry.EnvironmentCarrierSubtype;
+
             _runtimePackages.SaveGeneratorBuilder(
                 generatorFile,
                 snapshot.Builder);
@@ -769,9 +771,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                 _runtimeGenerators.RegisterDefinition(
                     snapshot.Builder,
                     runtimeSubtype,
-                    absoluteFolder,
-                    0,
-                    false);
+                    absoluteFolder);
 
 
             PlanetEnvironmentService.BindRuntimeGenerator(
@@ -1432,10 +1432,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         : 1,
                 GeneratorFile = generatorFile,
                 ArchiveFile = archiveFile,
-                GrassMaterialValue = 0,
-                GrassCoveragePercent = 0,
                 PlanetSeed = snapshot.PlanetSeed,
-                GrassNoiseVersion = 0,
                 PersistenceType =
                     procedural
                         ? (int)RuntimePlanetPersistenceType.Procedural
@@ -2282,9 +2279,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     _runtimeGenerators.RegisterDefinition(
                         snapshot.Builder,
                         entry.Subtype,
-                        absoluteFolder,
-                        0,
-                        false);
+                        absoluteFolder);
 
                 PlanetEnvironmentService.BindRuntimeGenerator(
                     runtimeGenerator,
@@ -2350,10 +2345,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     environmentPresetSchemaVersion,
                 GeneratorFile = generatorFile,
                 ArchiveFile = archiveFile,
-                GrassMaterialValue = 0,
-                GrassCoveragePercent = 0,
                 PlanetSeed = planetSeed,
-                GrassNoiseVersion = 0,
                 RuntimeRevision = revision
             };
         }

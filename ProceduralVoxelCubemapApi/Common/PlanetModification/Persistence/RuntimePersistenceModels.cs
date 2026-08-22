@@ -221,10 +221,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public int EnvironmentPresetSchemaVersion;
         public string GeneratorFile;
         public string ArchiveFile;
-        public byte GrassMaterialValue;
-        public int GrassCoveragePercent;
         public long PlanetSeed;
-        public int GrassNoiseVersion;
         public ulong RuntimeRevision;
         public int PersistenceType;
         public int RecipeSchemaVersion;

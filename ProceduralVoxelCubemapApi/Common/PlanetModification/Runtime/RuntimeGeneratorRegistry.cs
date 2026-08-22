@@ -717,89 +717,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
         }
 
 
-        private static void VerifyBuilderGrassOverlayLookup(
-            MyObjectBuilder_PlanetGeneratorDefinition builder,
-            byte overlayValue)
-        {
-            if (builder == null)
-                throw new ArgumentNullException(nameof(builder));
-
-
-            MyPlanetMaterialGroup groupOverlay =
-                builder.ComplexMaterials == null
-                    ? null
-                    : builder.ComplexMaterials
-                        .FirstOrDefault(x =>
-                            x != null &&
-                            x.Value == overlayValue);
-
-
-            if (groupOverlay == null)
-            {
-                throw new Exception(
-                    "Builder terraform surface overlay red=" +
-                    overlayValue +
-                    " is missing from ComplexMaterials.");
-            }
-
-
-            if (groupOverlay.MaterialRules == null ||
-                groupOverlay.MaterialRules.Length == 0)
-            {
-                throw new Exception(
-                    "Builder terraform surface overlay group red=" +
-                    overlayValue +
-                    " has no material rules.");
-            }
-
-
-            int materialRuleCount =
-                0;
-
-
-            for (int i = 0;
-                i < groupOverlay.MaterialRules.Length;
-                i++)
-            {
-                MyPlanetMaterialPlacementRule rule =
-                    groupOverlay.MaterialRules[i];
-
-
-                if (rule != null &&
-                    !string.IsNullOrWhiteSpace(
-                        rule.FirstOrDefault))
-                {
-                    materialRuleCount++;
-                }
-            }
-
-
-            if (materialRuleCount == 0)
-            {
-                throw new Exception(
-                    "Builder terraform surface overlay group red=" +
-                    overlayValue +
-                    " contains no material-bearing rules.");
-            }
-
-
-            MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] Verified builder XML surface overlay: red=" +
-                overlayValue +
-                ", rules=" +
-                groupOverlay.MaterialRules.Length +
-                ", material-bearing rules=" +
-                materialRuleCount +
-                ".");
-        }
-
-
-        internal MyPlanetGeneratorDefinition RegisterDefinition(
-            MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder,
+        internal MyPlanetGeneratorDefinition RegisterDefinition(MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder,
             string subtype,
-            string absolutePlanetDataFolder,
-            byte grassMaterialMapValue,
-            bool verifyGrassOverlay = true)
+            string absolutePlanetDataFolder)
         {
             MyPlanetGeneratorDefinition existing =
                 MyDefinitionManager.Static
@@ -854,14 +774,6 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
                 absolutePlanetDataFolder;
 
 
-            if (verifyGrassOverlay)
-            {
-                VerifyBuilderGrassOverlayLookup(
-                    sourceBuilder,
-                    grassMaterialMapValue);
-            }
-
-
             var runtimeGenerator =
                 new MyPlanetGeneratorDefinition();
 
@@ -886,43 +798,6 @@ namespace VoxelCubemapApi.Common.PlanetModification.Runtime
 
                 sourceBuilder.FolderName =
                     originalFolderName;
-            }
-
-
-            if (verifyGrassOverlay)
-            {
-                MyPlanetMaterialGroup runtimeSurfaceGroup =
-                    runtimeGenerator.MaterialGroups == null
-                        ? null
-                        : runtimeGenerator.MaterialGroups
-                            .FirstOrDefault(x =>
-                                x != null &&
-                                x.Value == grassMaterialMapValue);
-
-
-                if (runtimeSurfaceGroup != null &&
-                    runtimeSurfaceGroup.MaterialRules != null &&
-                    runtimeSurfaceGroup.MaterialRules.Length > 0)
-                {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[RuntimePlanetGenerator] Runtime XML surface overlay survived " +
-                        "Init/Postprocess: red=" +
-                        grassMaterialMapValue +
-                        ", rules=" +
-                        runtimeSurfaceGroup.MaterialRules.Length +
-                        ".");
-                }
-                else
-                {
-                    // The authoritative validation is performed on the exact builder
-                    // immediately before Init(). Keep this diagnostic non-fatal because
-                    // runtime definition postprocessing may normalize rule storage.
-                    MyLog.Default.WriteLineAndConsole(
-                        "[RuntimePlanetGenerator] Runtime XML surface overlay rule list " +
-                        "is not exposed after Init/Postprocess for red=" +
-                        grassMaterialMapValue +
-                        ". Builder overlay was verified; continuing.");
-                }
             }
 
 
