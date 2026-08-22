@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using VoxelCubemapApi.Common.Networking;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
@@ -11,7 +11,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
         {
             CraterFeatureStep.Instance,
             VolcanoFeatureStep.Instance,
-            RavineFeatureStep.Instance
+            RavineFeatureStep.Instance,
+            RiverFeatureStep.Instance
         };
 
         internal static List<GeneratedPlanetFeature> Expand(

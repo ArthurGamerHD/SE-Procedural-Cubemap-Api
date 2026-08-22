@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Generated;
 
@@ -229,6 +229,89 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                 MinimumDepth = minimumDepth,
                 MaximumDepth = maximumDepth,
                 TargetSize = targetSize
+            });
+        }
+
+
+        /// <summary>
+        /// Adds deterministic sea-level river corridors. Each river chooses a seeded
+        /// inland source, connects it to the nearest terrain sample at/below the fixed
+        /// shoreline height, then carves a meandering spherical channel down to that
+        /// water level. Planning uses a coarse six-face shoreline index and bounded
+        /// source attempts; no hydrology/pathfinding simulation is performed.
+        /// </summary>
+        [ApiMethod]
+        private void AddRiverField(
+            int count,
+            int seedOffset,
+            int shorelineHeight,
+            int minimumSourceHeightAboveShoreline,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth,
+            double shoulderWidthMultiplier)
+        {
+            if (count < 1 || count > 256)
+                throw new ArgumentException("River count must be from 1 to 256.", nameof(count));
+
+            if (shorelineHeight < 0 || shorelineHeight > ushort.MaxValue)
+                throw new ArgumentException("Shoreline height must be from 0 to 65535.", nameof(shorelineHeight));
+
+            if (minimumSourceHeightAboveShoreline < 1 ||
+                minimumSourceHeightAboveShoreline > ushort.MaxValue)
+            {
+                throw new ArgumentException(
+                    "Minimum source height above shoreline must be from 1 to 65535.",
+                    nameof(minimumSourceHeightAboveShoreline));
+            }
+
+            if (double.IsNaN(minimumLengthDegrees) || double.IsInfinity(minimumLengthDegrees) ||
+                double.IsNaN(maximumLengthDegrees) || double.IsInfinity(maximumLengthDegrees) ||
+                minimumLengthDegrees <= 0.0 || maximumLengthDegrees > 120.0 ||
+                minimumLengthDegrees > maximumLengthDegrees)
+            {
+                throw new ArgumentException(
+                    "River length range must be finite, greater than zero, no more than 120 degrees, and ordered.",
+                    "length");
+            }
+
+            if (double.IsNaN(minimumWidthDegrees) || double.IsInfinity(minimumWidthDegrees) ||
+                double.IsNaN(maximumWidthDegrees) || double.IsInfinity(maximumWidthDegrees) ||
+                minimumWidthDegrees <= 0.0 || maximumWidthDegrees > 10.0 ||
+                minimumWidthDegrees > maximumWidthDegrees)
+            {
+                throw new ArgumentException(
+                    "River width range must be finite, greater than zero, no more than 10 degrees, and ordered.",
+                    "width");
+            }
+
+            if (minimumDepth < 1 || maximumDepth > ushort.MaxValue || minimumDepth > maximumDepth)
+                throw new ArgumentException("River depth range must be from 1 to 65535 and ordered.", "depth");
+
+            if (double.IsNaN(shoulderWidthMultiplier) || double.IsInfinity(shoulderWidthMultiplier) ||
+                shoulderWidthMultiplier < 1.0 || shoulderWidthMultiplier > 16.0)
+            {
+                throw new ArgumentException(
+                    "River shoulder width multiplier must be finite and from 1 to 16.",
+                    nameof(shoulderWidthMultiplier));
+            }
+
+            _operation.RiverFields.Add(new RiverFieldOperation
+            {
+                Count = count,
+                SeedOffset = seedOffset,
+                ShorelineHeight = shorelineHeight,
+                MinimumSourceHeightAboveShoreline = minimumSourceHeightAboveShoreline,
+                MinimumLengthDegrees = minimumLengthDegrees,
+                MaximumLengthDegrees = maximumLengthDegrees,
+                MinimumWidthDegrees = minimumWidthDegrees,
+                MaximumWidthDegrees = maximumWidthDegrees,
+                MinimumDepth = minimumDepth,
+                MaximumDepth = maximumDepth,
+                ShoulderWidthMultiplier = shoulderWidthMultiplier
             });
         }
 

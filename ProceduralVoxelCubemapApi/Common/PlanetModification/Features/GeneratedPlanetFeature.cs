@@ -1,4 +1,4 @@
-using VRageMath;
+﻿using VRageMath;
 
 namespace VoxelCubemapApi.Common.PlanetModification.Features
 {
@@ -9,8 +9,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
         internal double CosRadius;
         internal double SinRadius;
 
+        internal virtual bool IsAbsoluteHeightFeature => false;
+        
+
         internal abstract void Accumulate(
             Vector3D direction,
+            int currentHeight,
             ref FeaturePixelAccumulator accumulator);
     }
 
@@ -19,6 +23,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
         internal double AdditiveDelta;
         internal double StrongestPositiveDelta;
         internal double StrongestNegativeDelta;
+        internal bool HasHeightCeiling;
+        internal double HeightCeiling;
 
         internal double TotalDelta
         {

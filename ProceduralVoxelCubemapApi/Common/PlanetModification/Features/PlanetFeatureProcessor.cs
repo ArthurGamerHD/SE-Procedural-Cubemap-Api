@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Adk.Image.Png;
 using Sandbox.ModAPI;
@@ -10,6 +10,27 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
 {
     internal static class PlanetFeatureProcessor
     {
+        internal static List<GeneratedPlanetFeature> ResolveTerrainBlindFeatures(
+            long planetSeed,
+            List<FeatureOperation> operations)
+        {
+            return FeatureStepRegistry.Expand(operations, planetSeed);
+        }
+
+        internal static List<GeneratedPlanetFeature> ResolveRiverFeatures(
+            IDictionary<string, PlanarPngBitmap> heightImages,
+            long planetSeed,
+            List<FeatureOperation> operations)
+        {
+            var features = new List<GeneratedPlanetFeature>();
+            RiverFeatureStep.Instance.ExpandTerrainAware(
+                operations,
+                planetSeed,
+                heightImages,
+                features);
+            return features;
+        }
+
         internal static void ApplyToPlanetImages(
             PlanarPngBitmap heightImage,
             PlanarPngBitmap materialImage,
@@ -17,20 +38,34 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
             long planetSeed,
             List<FeatureOperation> operations)
         {
+            if (operations == null || operations.Count == 0)
+                return;
+
+            // Backward-compatible terrain-blind path. River fields deliberately do not
+            // expand here because they require the six-face planning surface.
+            List<GeneratedPlanetFeature> features =
+                FeatureStepRegistry.Expand(operations, planetSeed);
+
+            ApplyResolvedToPlanetImages(
+                heightImage,
+                materialImage,
+                faceFileName,
+                features);
+        }
+
+        internal static void ApplyResolvedToPlanetImages(
+            PlanarPngBitmap heightImage,
+            PlanarPngBitmap materialImage,
+            string faceFileName,
+            List<GeneratedPlanetFeature> features)
+        {
             if (heightImage == null)
                 throw new ArgumentNullException(nameof(heightImage));
-            if (materialImage == null)
-                throw new ArgumentNullException(nameof(materialImage));
-            if (operations == null || operations.Count == 0)
+            if (features == null || features.Count == 0)
                 return;
 
             ValidateImages(heightImage, materialImage, faceFileName);
             int faceIndex = FractalBrownianMotion.GetCubemapFaceIndex(faceFileName);
-            List<GeneratedPlanetFeature> features =
-                FeatureStepRegistry.Expand(operations, planetSeed);
-
-            if (features.Count == 0)
-                return;
 
             const int tileSize = 32;
             FeatureTile[] tiles = BuildTiles(
@@ -54,20 +89,45 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
                     {
                         Vector3D direction = FractalBrownianMotion.GetCubemapSphereDirection(
                             faceIndex, x, y, heightImage.Width, heightImage.Height);
-                        var accumulator = new FeaturePixelAccumulator();
+                        int altitude = ReadHeightSample(heightImage, offset);
 
+                        var accumulator = new FeaturePixelAccumulator();
                         for (int featureIndex = 0; featureIndex < candidates.Count; featureIndex++)
-                            candidates[featureIndex].Accumulate(direction, ref accumulator);
+                        {
+                            GeneratedPlanetFeature feature = candidates[featureIndex];
+                            if (!feature.IsAbsoluteHeightFeature)
+                                feature.Accumulate(direction, altitude, ref accumulator);
+                        }
 
                         double totalDelta = accumulator.TotalDelta;
-                        if (totalDelta == 0.0)
-                            continue;
-
-                        int altitude = ReadHeightSample(heightImage, offset);
                         int delta = totalDelta >= 0.0
                             ? (int)(totalDelta + 0.5)
                             : (int)(totalDelta - 0.5);
-                        int value = altitude + delta;
+                        int intermediateHeight = altitude + delta;
+                        if (intermediateHeight < 0) intermediateHeight = 0;
+                        else if (intermediateHeight > ushort.MaxValue) intermediateHeight = ushort.MaxValue;
+
+                        var absoluteAccumulator = new FeaturePixelAccumulator();
+                        for (int featureIndex = 0; featureIndex < candidates.Count; featureIndex++)
+                        {
+                            GeneratedPlanetFeature feature = candidates[featureIndex];
+                            if (feature.IsAbsoluteHeightFeature)
+                                feature.Accumulate(direction, intermediateHeight, ref absoluteAccumulator);
+                        }
+
+                        int value = intermediateHeight;
+                        if (absoluteAccumulator.HasHeightCeiling)
+                        {
+                            int ceiling = absoluteAccumulator.HeightCeiling >= 0.0
+                                ? (int)(absoluteAccumulator.HeightCeiling + 0.5)
+                                : 0;
+                            if (ceiling < value)
+                                value = ceiling;
+                        }
+
+                        if (value == altitude)
+                            continue;
+
                         if (value < 0) value = 0;
                         else if (value > ushort.MaxValue) value = ushort.MaxValue;
                         WriteHeightSample(heightImage, offset, value);
@@ -188,9 +248,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
                     faceFileName + ".");
             }
 
-            if (materialImage.BitDepth != 8 ||
-                materialImage.Planes == null ||
-                materialImage.Planes.Length < 3)
+            if (materialImage != null &&
+                (materialImage.BitDepth != 8 ||
+                 materialImage.Planes == null ||
+                 materialImage.Planes.Length < 3))
             {
                 throw new Exception(
                     "Feature pass requires an 8-bit material map for " +

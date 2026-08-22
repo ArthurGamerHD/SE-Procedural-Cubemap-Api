@@ -77,6 +77,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             new List<VolcanoFieldOperation>();
         public List<RavineFieldOperation> RavineFields =
             new List<RavineFieldOperation>();
+        public List<RiverFieldOperation> RiverFields =
+            new List<RiverFieldOperation>();
     }
 
 
@@ -115,6 +117,22 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         public int MinimumDepth;
         public int MaximumDepth;
         public float TargetSize;
+    }
+
+
+    internal sealed class RiverFieldOperation
+    {
+        public int Count;
+        public int SeedOffset;
+        public int ShorelineHeight;
+        public int MinimumSourceHeightAboveShoreline;
+        public double MinimumLengthDegrees;
+        public double MaximumLengthDegrees;
+        public double MinimumWidthDegrees;
+        public double MaximumWidthDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public double ShoulderWidthMultiplier;
     }
 
 

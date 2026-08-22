@@ -185,6 +185,9 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(3)]
         public List<SyncedRavineField> RavineFields;
+
+        [ProtoMember(4)]
+        public List<SyncedRiverField> RiverFields;
     }
 
     [ProtoContract]
@@ -224,6 +227,22 @@ namespace VoxelCubemapApi.Common.Networking
         [ProtoMember(7)] public int MinimumDepth;
         [ProtoMember(8)] public int MaximumDepth;
         [ProtoMember(9)] public float TargetSize;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedRiverField
+    {
+        [ProtoMember(1)] public int Count;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public int ShorelineHeight;
+        [ProtoMember(4)] public int MinimumSourceHeightAboveShoreline;
+        [ProtoMember(5)] public double MinimumLengthDegrees;
+        [ProtoMember(6)] public double MaximumLengthDegrees;
+        [ProtoMember(7)] public double MinimumWidthDegrees;
+        [ProtoMember(8)] public double MaximumWidthDegrees;
+        [ProtoMember(9)] public int MinimumDepth;
+        [ProtoMember(10)] public int MaximumDepth;
+        [ProtoMember(11)] public double ShoulderWidthMultiplier;
     }
 
 }

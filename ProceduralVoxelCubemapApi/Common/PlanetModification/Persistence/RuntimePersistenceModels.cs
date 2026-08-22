@@ -116,6 +116,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             new List<RuntimeProceduralVolcanoField>();
         public List<RuntimeProceduralRavineField> RavineFields =
             new List<RuntimeProceduralRavineField>();
+        public List<RuntimeProceduralRiverField> RiverFields =
+            new List<RuntimeProceduralRiverField>();
     }
 
 
@@ -156,6 +158,21 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         public float TargetSize;
     }
 
+
+    public class RuntimeProceduralRiverField
+    {
+        public int Count;
+        public int SeedOffset;
+        public int ShorelineHeight;
+        public int MinimumSourceHeightAboveShoreline;
+        public double MinimumLengthDegrees;
+        public double MaximumLengthDegrees;
+        public double MinimumWidthDegrees;
+        public double MaximumWidthDegrees;
+        public int MinimumDepth;
+        public int MaximumDepth;
+        public double ShoulderWidthMultiplier;
+    }
 
     public class RuntimePlanetGeneratorSettings
     {

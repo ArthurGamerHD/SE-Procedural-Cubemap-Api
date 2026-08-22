@@ -293,22 +293,14 @@ namespace VoxelCubemapApi.Common.PlanetModification
             List<PlanetModificationSnapshot> revisions,
             Dictionary<string, byte[]> sourceFiles)
         {
-            if (revisions == null ||
-                revisions.Count == 0)
+            if (revisions == null || revisions.Count == 0)
             {
                 throw new ArgumentException(
                     "At least one procedural revision is required.",
                     nameof(revisions));
             }
 
-            PlanetModificationSnapshot root =
-                revisions[0];
-
-            var output =
-                new Dictionary<string, byte[]>(
-                    PlanetMapFileNames.All.Length,
-                    StringComparer.OrdinalIgnoreCase);
-
+            PlanetModificationSnapshot root = revisions[0];
             string[] faces =
             {
                 "front",
@@ -319,38 +311,48 @@ namespace VoxelCubemapApi.Common.PlanetModification
                 "down"
             };
 
-            for (int faceIndex = 0;
-                faceIndex < faces.Length;
-                faceIndex++)
+            // Keep the six height faces resident so terrain-aware features can plan in
+            // planet space. Material maps remain encoded between revisions and are
+            // decoded one face at a time, avoiding six additional full material maps.
+            var heightImages = new Dictionary<string, PlanarPngBitmap>(
+                6,
+                StringComparer.OrdinalIgnoreCase);
+            var materialBytes = new Dictionary<string, byte[]>(
+                6,
+                StringComparer.OrdinalIgnoreCase);
+
+            for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
             {
-                string heightFileName =
-                    faces[faceIndex] + ".png";
+                string heightFileName = faces[faceIndex] + ".png";
+                string materialFileName = faces[faceIndex] + "_mat.png";
 
-                string materialFileName =
-                    faces[faceIndex] + "_mat.png";
-
-                PlanarPngBitmap heightImage =
+                heightImages.Add(
+                    heightFileName,
                     PlanetMapOperations.DecodePlanetPng(
                         heightFileName,
-                        ReadSnapshotPlanetDataFile(
-                            root,
-                            sourceFiles,
-                            heightFileName));
+                        ReadSnapshotPlanetDataFile(root, sourceFiles, heightFileName)));
 
-                PlanarPngBitmap materialImage =
-                    PlanetMapOperations.DecodePlanetPng(
-                        materialFileName,
-                        ReadSnapshotPlanetDataFile(
-                            root,
-                            sourceFiles,
-                            materialFileName));
+                materialBytes.Add(
+                    materialFileName,
+                    ReadSnapshotPlanetDataFile(root, sourceFiles, materialFileName));
+            }
 
-                for (int revisionIndex = 0;
-                    revisionIndex < revisions.Count;
-                    revisionIndex++)
+            for (int revisionIndex = 0; revisionIndex < revisions.Count; revisionIndex++)
+            {
+                PlanetModificationSnapshot revision = revisions[revisionIndex];
+
+                // Brushes must happen before river planning because a height brush may
+                // change both source eligibility and the shoreline. Material-only work
+                // commutes with the feature pass, so it is completed here while each
+                // material face is already decoded.
+                for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
                 {
-                    PlanetModificationSnapshot revision =
-                        revisions[revisionIndex];
+                    string heightFileName = faces[faceIndex] + ".png";
+                    string materialFileName = faces[faceIndex] + "_mat.png";
+                    PlanarPngBitmap heightImage = heightImages[heightFileName];
+                    PlanarPngBitmap materialImage = PlanetMapOperations.DecodePlanetPng(
+                        materialFileName,
+                        materialBytes[materialFileName]);
 
                     if (revision.AllocatedComplexMaterialValues != null &&
                         revision.AllocatedComplexMaterialValues.Count > 0)
@@ -368,13 +370,6 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         revision.PlanetSeed,
                         revision.BrushOperations);
 
-                    PlanetFeatureProcessor.ApplyToPlanetImages(
-                        heightImage,
-                        materialImage,
-                        heightFileName,
-                        revision.PlanetSeed,
-                        revision.FeatureOperations);
-
                     for (int operationIndex = 0;
                         operationIndex < revision.BiomeReplacementOperations.Count;
                         operationIndex++)
@@ -389,15 +384,61 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         materialFileName,
                         revision.PlanetSeed,
                         revision.FractalNoiseOperations);
+
+                    materialBytes[materialFileName] = materialImage.Encode();
                 }
 
-                output.Add(
-                    heightFileName,
-                    heightImage.Encode());
+                List<GeneratedPlanetFeature> terrainFeatures =
+                    PlanetFeatureProcessor.ResolveTerrainBlindFeatures(
+                        revision.PlanetSeed,
+                        revision.FeatureOperations);
 
-                output.Add(
-                    materialFileName,
-                    materialImage.Encode());
+                if (terrainFeatures.Count > 0)
+                {
+                    for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+                    {
+                        string heightFileName = faces[faceIndex] + ".png";
+                        PlanetFeatureProcessor.ApplyResolvedToPlanetImages(
+                            heightImages[heightFileName],
+                            null,
+                            heightFileName,
+                            terrainFeatures);
+                    }
+                }
+
+                // Rivers are planned only after the other height features have changed
+                // the six-face terrain. Their carve pass is then absolute and therefore
+                // always wins over positive terrain deltas along the channel.
+                List<GeneratedPlanetFeature> riverFeatures =
+                    PlanetFeatureProcessor.ResolveRiverFeatures(
+                        heightImages,
+                        revision.PlanetSeed,
+                        revision.FeatureOperations);
+
+                if (riverFeatures.Count > 0)
+                {
+                    for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+                    {
+                        string heightFileName = faces[faceIndex] + ".png";
+                        PlanetFeatureProcessor.ApplyResolvedToPlanetImages(
+                            heightImages[heightFileName],
+                            null,
+                            heightFileName,
+                            riverFeatures);
+                    }
+                }
+            }
+
+            var output = new Dictionary<string, byte[]>(
+                PlanetMapFileNames.All.Length,
+                StringComparer.OrdinalIgnoreCase);
+
+            for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+            {
+                string heightFileName = faces[faceIndex] + ".png";
+                string materialFileName = faces[faceIndex] + "_mat.png";
+                output.Add(heightFileName, heightImages[heightFileName].Encode());
+                output.Add(materialFileName, materialBytes[materialFileName]);
             }
 
             return output;
@@ -425,34 +466,36 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
             if (snapshot.Images == null)
             {
-                snapshot.Images =
-                    new Dictionary<string, PlanarPngBitmap>(
-                        StringComparer.OrdinalIgnoreCase);
+                snapshot.Images = new Dictionary<string, PlanarPngBitmap>(
+                    StringComparer.OrdinalIgnoreCase);
             }
 
-            for (int faceIndex = 0;
-                faceIndex < faces.Length;
-                faceIndex++)
+            // Load every height face first. River planning needs a coherent six-face
+            // surface after the queued brushes have been applied.
+            var heightImages = new Dictionary<string, PlanarPngBitmap>(
+                6,
+                StringComparer.OrdinalIgnoreCase);
+
+            for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
             {
-                string heightFileName =
-                    faces[faceIndex] +
-                    ".png";
-
-                string materialFileName =
-                    faces[faceIndex] +
-                    "_mat.png";
-
-                PlanarPngBitmap heightImage =
+                string heightFileName = faces[faceIndex] + ".png";
+                heightImages.Add(
+                    heightFileName,
                     GetOrLoadSnapshotImage(
                         snapshot,
                         runtimeSourceFiles,
-                        heightFileName);
+                        heightFileName));
+            }
 
-                PlanarPngBitmap materialImage =
-                    GetOrLoadSnapshotImage(
-                        snapshot,
-                        runtimeSourceFiles,
-                        materialFileName);
+            for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+            {
+                string heightFileName = faces[faceIndex] + ".png";
+                string materialFileName = faces[faceIndex] + "_mat.png";
+                PlanarPngBitmap heightImage = heightImages[heightFileName];
+                PlanarPngBitmap materialImage = GetOrLoadSnapshotImage(
+                    snapshot,
+                    runtimeSourceFiles,
+                    materialFileName);
 
                 if (snapshot.AllocatedComplexMaterialValues != null &&
                     snapshot.AllocatedComplexMaterialValues.Count > 0)
@@ -469,13 +512,43 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     heightFileName,
                     snapshot.PlanetSeed,
                     snapshot.BrushOperations);
+            }
 
-                PlanetFeatureProcessor.ApplyToPlanetImages(
-                    heightImage,
-                    materialImage,
-                    heightFileName,
+            List<GeneratedPlanetFeature> terrainFeatures =
+                PlanetFeatureProcessor.ResolveTerrainBlindFeatures(
                     snapshot.PlanetSeed,
                     snapshot.FeatureOperations);
+
+            if (terrainFeatures.Count > 0)
+            {
+                for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+                {
+                    string heightFileName = faces[faceIndex] + ".png";
+                    PlanetFeatureProcessor.ApplyResolvedToPlanetImages(
+                        heightImages[heightFileName],
+                        null,
+                        heightFileName,
+                        terrainFeatures);
+                }
+            }
+
+            List<GeneratedPlanetFeature> riverFeatures =
+                PlanetFeatureProcessor.ResolveRiverFeatures(
+                    heightImages,
+                    snapshot.PlanetSeed,
+                    snapshot.FeatureOperations);
+
+            if (riverFeatures.Count == 0)
+                return;
+
+            for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
+            {
+                string heightFileName = faces[faceIndex] + ".png";
+                PlanetFeatureProcessor.ApplyResolvedToPlanetImages(
+                    heightImages[heightFileName],
+                    null,
+                    heightFileName,
+                    riverFeatures);
             }
         }
 

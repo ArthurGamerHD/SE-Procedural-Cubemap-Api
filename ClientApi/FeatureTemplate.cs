@@ -12,6 +12,7 @@ namespace VoxelCubemapApi.Api
         private readonly Action<int, int, double, double, int, int, float> _addVolcanoFieldBiased;
         private readonly Action<int, int, double, double, double, double, int, int> _addRavineField;
         private readonly Action<int, int, double, double, double, double, int, int, float> _addRavineFieldBiased;
+        private readonly Action<int, int, int, int, double, double, double, double, int, int, double> _addRiverField;
 
 
         public FeatureTemplate(
@@ -49,6 +50,11 @@ namespace VoxelCubemapApi.Api
                 GetRequired<Action<int, int, double, double, double, double, int, int, float>>(
                     api,
                     "AddRavineFieldBiased");
+
+            _addRiverField =
+                GetRequired<Action<int, int, int, int, double, double, double, double, int, int, double>>(
+                    api,
+                    "AddRiverField");
         }
 
 
@@ -156,6 +162,30 @@ namespace VoxelCubemapApi.Api
             float targetSize)
         {
             _addRavineFieldBiased(count, seedOffset, minimumLengthDegrees, maximumLengthDegrees, minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth, targetSize);
+        }
+
+
+        /// <summary>
+        /// Adds deterministic sea-level river corridors. Each river chooses a seeded
+        /// inland source, connects it to the nearest terrain sample at/below the fixed
+        /// shoreline height, then carves a meandering spherical channel down to that
+        /// water level. Planning uses a coarse six-face shoreline index and bounded
+        /// source attempts;
+        /// </summary>
+        public void AddRiverField(
+            int count,
+            int seedOffset,
+            int shorelineHeight,
+            int minimumSourceHeightAboveShoreline,
+            double minimumLengthDegrees,
+            double maximumLengthDegrees,
+            double minimumWidthDegrees,
+            double maximumWidthDegrees,
+            int minimumDepth,
+            int maximumDepth,
+            double shoulderWidthMultiplier)
+        {
+            _addRiverField(count, seedOffset, shorelineHeight, minimumSourceHeightAboveShoreline, minimumLengthDegrees, maximumLengthDegrees, minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth, shoulderWidthMultiplier);
         }
 
 

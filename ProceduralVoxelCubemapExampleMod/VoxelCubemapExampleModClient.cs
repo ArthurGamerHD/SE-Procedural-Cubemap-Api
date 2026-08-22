@@ -22,7 +22,7 @@ namespace VoxelCubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 11);
+            new Version(0, 0, 12);
 
         private static VoxelCubemapExampleModClient _instance;
 
@@ -1367,6 +1367,118 @@ namespace VoxelCubemapExampleMod
                     template.Close();
 
                 LogWarning("Ravine generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
+
+        /// <summary>
+        /// Generates deterministic sea-level rivers on the nearest planet. River
+        /// sources and meanders come only from planetSeed + seedOffset; each source
+        /// connects to the nearest terrain sample at/below shorelineHeight and grows
+        /// a small distributary delta as it reaches the coast.
+        /// </summary>
+        [ChatCommand("testriver", "vcma")]
+        public static void TestRiver(
+            int riverCount = 6,
+            int shorelineHeight = 32768,
+            int seedOffset = 0,
+            double minimumWidthDegrees = 0.28,
+            double maximumWidthDegrees = 0.68)
+        {
+            const int minimumSourceHeightAboveShoreline = 1800;
+            const double minimumLengthDegrees = 4.0;
+            const double maximumLengthDegrees = 32.0;
+            // Defaults are broad enough to remain visible on 4K cubemap faces. The
+            // production generator widens the trunk downstream and derives delta
+            // distributaries from this width, so these values describe the trunk rather
+            // than the full delta fan. They remain command arguments for quick tuning.
+            const int minimumDepth = 900;
+            const int maximumDepth = 2200;
+            const double shoulderWidthMultiplier = 5.0;
+
+            VoxelCubemapExampleModClient client = _instance;
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+            try
+            {
+                if (riverCount < 1 || riverCount > 64)
+                    throw new ArgumentException("River count must be from 1 to 64.", nameof(riverCount));
+                if (shorelineHeight < 0 || shorelineHeight > ushort.MaxValue)
+                    throw new ArgumentException("Shoreline height must be from 0 to 65535.", nameof(shorelineHeight));
+                if (double.IsNaN(minimumWidthDegrees) || double.IsInfinity(minimumWidthDegrees) ||
+                    double.IsNaN(maximumWidthDegrees) || double.IsInfinity(maximumWidthDegrees) ||
+                    minimumWidthDegrees <= 0.0 || maximumWidthDegrees < minimumWidthDegrees ||
+                    maximumWidthDegrees > 10.0)
+                {
+                    throw new ArgumentException(
+                        "River width range must be finite, greater than zero, ordered, and at most 10 degrees.");
+                }
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                FeatureTemplate feature = template.AddFeature();
+                feature.AddRiverField(
+                    riverCount,
+                    seedOffset,
+                    shorelineHeight,
+                    minimumSourceHeightAboveShoreline,
+                    minimumLengthDegrees,
+                    maximumLengthDegrees,
+                    minimumWidthDegrees,
+                    maximumWidthDegrees,
+                    minimumDepth,
+                    maximumDepth,
+                    shoulderWidthMultiplier);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testriver: riverField count=" +
+                    riverCount +
+                    ", shorelineHeight=" + shorelineHeight +
+                    ", seedOffset=" + seedOffset +
+                    ", sourceClearance=" + minimumSourceHeightAboveShoreline +
+                    ", lengthDegrees=" + minimumLengthDegrees + ".." + maximumLengthDegrees +
+                    ", widthDegrees=" + minimumWidthDegrees + ".." + maximumWidthDegrees +
+                    ", depth=" + minimumDepth + ".." + maximumDepth +
+                    ", shoulder=" + shoulderWidthMultiplier +
+                    ", planetSeed=" + template.GetPlanetSeed() + ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "River field committed."
+                                    : "River field failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+
+                LogWarning("River generation failed", e);
                 ShowMessage("Failed: " + e.Message);
             }
         }

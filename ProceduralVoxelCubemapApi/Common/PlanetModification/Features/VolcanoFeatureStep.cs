@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using VoxelCubemapApi.Common.Networking;
 using VoxelCubemapApi.Common.Noise;
@@ -198,6 +198,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Features
 
             internal override void Accumulate(
                 Vector3D direction,
+                int currentHeight,
                 ref FeaturePixelAccumulator accumulator)
             {
                 double score = Sample(direction);
