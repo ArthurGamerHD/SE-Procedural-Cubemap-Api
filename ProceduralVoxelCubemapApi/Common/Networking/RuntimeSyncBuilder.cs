@@ -162,7 +162,8 @@ namespace VoxelCubemapApi.Common.Networking
                 EnvironmentPresetSchemaVersion =
                     committedEntry.EnvironmentPresetSchemaVersion,
                 RequiresCommitDecision = true,
-                ChangeMaterials = snapshot.ChangeMaterials
+                ChangeMaterials = snapshot.ChangeMaterials,
+                ChangeEnvironment = snapshot.ChangeEnvironment
             };
         }
 
@@ -240,7 +241,8 @@ namespace VoxelCubemapApi.Common.Networking
                     committedEntry.EnvironmentPresetSourceGeneratorSubtype,
                 EnvironmentPresetSchemaVersion =
                     committedEntry.EnvironmentPresetSchemaVersion,
-                ChangeMaterials = snapshot.ChangeMaterials
+                ChangeMaterials = snapshot.ChangeMaterials,
+                ChangeEnvironment = snapshot.ChangeEnvironment
             };
         }
 

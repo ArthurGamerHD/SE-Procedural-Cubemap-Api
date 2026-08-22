@@ -4,6 +4,7 @@ using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VoxelCubemapApi.Common.Api;
+using VoxelCubemapApi.Common.Configuration;
 using VoxelCubemapApi.Common.Networking;
 using VoxelCubemapApi.Common.PlanetModification;
 using VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets;
@@ -23,6 +24,7 @@ namespace VoxelCubemapApi.Common
         private volatile bool _unloading;
         private VoxelCubemapIntermodApiServer _intermodApi;
 
+        private VoxelCubemapApiConfig _config;
         private RuntimePackageStore _runtimePackages;
         private PlanetDataArchiveService _planetDataArchives;
         private PersistedEnvironmentRestorer _environmentRestorer;
@@ -94,9 +96,13 @@ namespace VoxelCubemapApi.Common
             _unloading =
                 false;
 
+            _config =
+                VoxelCubemapApiConfigStorage.LoadOrCreate();
+
             _runtimePackages =
                 new RuntimePackageStore(
-                    this);
+                    this,
+                    _config);
 
             _planetDataArchives =
                 new PlanetDataArchiveService(
@@ -136,6 +142,9 @@ namespace VoxelCubemapApi.Common
 
             _runtimePackages.ProceduralArchiveBuilder =
                 _modifications.RebuildProceduralArchive;
+
+            _runtimePackages.ProceduralGeneratorSignatureBuilder =
+                _modifications.BuildProceduralGeneratorSignature;
 
             _runtimePackages.LoadPersistedRuntimeGenerators();
 
@@ -194,6 +203,9 @@ namespace VoxelCubemapApi.Common
             _runtimePackages?.ClearWorldStorageCache();
 
             _runtimePackages =
+                null;
+
+            _config =
                 null;
 
             if (ReferenceEquals(Instance, this))

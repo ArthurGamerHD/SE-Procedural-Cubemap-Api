@@ -9,6 +9,14 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
     }
 
 
+    public class RuntimeProceduralCacheManifest
+    {
+        public string CacheGuid;
+        public string GeneratorSignature;
+        public string RecipeSignature;
+    }
+
+
     public class RuntimeProceduralPlanetRecipe
     {
         public int SchemaVersion;

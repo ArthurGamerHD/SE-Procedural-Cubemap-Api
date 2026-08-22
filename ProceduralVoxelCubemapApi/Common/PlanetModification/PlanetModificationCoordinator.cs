@@ -9,6 +9,7 @@ using VoxelCubemapApi.Common.Api;
 using VoxelCubemapApi.Common.Networking;
 using VoxelCubemapApi.Common.PlanetModification.EnvironmentPresets;
 using VoxelCubemapApi.Common.PlanetModification.Features;
+using VoxelCubemapApi.Common.PlanetModification.Maps;
 using VoxelCubemapApi.Common.PlanetModification.Persistence;
 using VoxelCubemapApi.Common.PlanetModification.Runtime;
 using VoxelCubemapApi.Common.PlanetModification.Templates;
@@ -798,6 +799,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
             result.ChangeMaterials =
                 snapshot.ChangeMaterials;
 
+            result.ChangeEnvironment =
+                snapshot.ChangeEnvironment;
+
             result.RuntimeSyncPacket =
                 snapshot.RequiresAuthoritativeImageSync
                     ? (Generated.NetworkPackage)
@@ -809,6 +813,31 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     : null;
 
             return result;
+        }
+
+
+        internal string BuildProceduralGeneratorSignature(
+            RuntimePlanetBuilderEntry entry,
+            RuntimeProceduralPlanetRecipe recipe)
+        {
+            if (entry == null)
+                throw new ArgumentNullException(nameof(entry));
+
+            if (recipe == null)
+                throw new ArgumentNullException(nameof(recipe));
+
+            MyObjectBuilder_PlanetGeneratorDefinition builder =
+                _runtimePackages.LoadGeneratorBuilderFromWorldStorage(
+                    entry.GeneratorFile);
+
+            MyPlanetGeneratorDefinition sourceGenerator =
+                ResolveProceduralSourceGenerator(
+                    recipe.Source);
+
+            return BuildProceduralGeneratorSignature(
+                recipe,
+                builder,
+                sourceGenerator);
         }
 
 
@@ -1068,8 +1097,78 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         sourceFiles);
             }
 
+            string generatorSignature =
+                BuildProceduralGeneratorSignature(
+                    recipe,
+                    builder,
+                    sourceGenerator);
+
+            RuntimeProceduralCacheManifest cacheManifest =
+                RuntimeProceduralCache.CreateManifest(
+                    generatorSignature,
+                    recipe);
+
             return _planetDataArchives.PackProceduralArchive(
-                sourceFiles);
+                sourceFiles,
+                cacheManifest);
+        }
+
+
+        private string BuildProceduralGeneratorSignature(
+            RuntimeProceduralPlanetRecipe recipe,
+            MyObjectBuilder_PlanetGeneratorDefinition runtimeBuilder,
+            MyPlanetGeneratorDefinition sourceGenerator)
+        {
+            if (recipe == null)
+                throw new ArgumentNullException(nameof(recipe));
+
+            if (runtimeBuilder == null)
+                throw new ArgumentNullException(nameof(runtimeBuilder));
+
+            if (sourceGenerator == null)
+                throw new ArgumentNullException(nameof(sourceGenerator));
+
+            MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder =
+                _runtimeGenerators.CaptureSourceBuilder(
+                    sourceGenerator);
+
+            string sourceBuilderXml =
+                MyAPIGateway.Utilities
+                    .SerializeToXML(
+                        sourceBuilder);
+
+            string runtimeBuilderXml =
+                MyAPIGateway.Utilities
+                    .SerializeToXML(
+                        runtimeBuilder);
+
+            using (RuntimeProceduralCache.RuntimeProceduralCacheSignatureBuilder
+                signature = RuntimeProceduralCache.CreateSignatureBuilder())
+            {
+                signature.AppendText(
+                    "source-generator-definition",
+                    sourceBuilderXml);
+
+                signature.AppendText(
+                    "runtime-generator-definition",
+                    runtimeBuilderXml);
+
+                foreach (var fileName in PlanetMapFileNames.All)
+                {
+                    byte[] sourceData =
+                        _planetDataArchives.ReadSourceFile(
+                            sourceGenerator.Context,
+                            recipe.Source.SourceSubtype,
+                            recipe.Source.SourceFolderName,
+                            fileName);
+
+                    signature.AppendBytes(
+                        fileName,
+                        sourceData);
+                }
+
+                return signature.Finish();
+            }
         }
 
 
@@ -1614,7 +1713,6 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
                 if (!storageCommitted &&
                     commitAttempted &&
-                    workResult != null &&
                     workResult.NewEntry != null)
                 {
                     providerStateResolved =
@@ -1790,6 +1888,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
             snapshot.ChangeMaterials =
                 packet.ChangeMaterials;
 
+            snapshot.ChangeEnvironment =
+                packet.ChangeEnvironment;
+
             Dictionary<string, byte[]> archiveFiles;
 
             byte[] archive =
@@ -1852,6 +1953,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
             snapshot.ChangeMaterials =
                 packet.ChangeMaterials;
 
+            snapshot.ChangeEnvironment =
+                packet.ChangeEnvironment;
+
             var images =
                 new Dictionary<string, byte[]>(
                     StringComparer.OrdinalIgnoreCase);
@@ -1880,9 +1984,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         nameof(packet));
                 }
 
-                string imageName =
-                    Maps.PlanetMapFileNames.Validate(
-                        image.ImageName);
+                string imageName = PlanetMapFileNames.Validate(image.ImageName);
 
                 if (images.ContainsKey(
                     imageName))
@@ -2121,8 +2223,7 @@ namespace VoxelCubemapApi.Common.PlanetModification
             string generatorXml,
             byte[] archive)
         {
-            bool staged =
-                false;
+            bool staged = false;
 
             try
             {
@@ -2204,6 +2305,9 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
                 result.ChangeMaterials =
                     snapshot.ChangeMaterials;
+
+                result.ChangeEnvironment =
+                    snapshot.ChangeEnvironment;
 
                 return result;
             }
@@ -2883,13 +2987,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
             }
 
 
-            for (int index = 0;
-                index < cachedProviders.Length;
-                index++)
+            foreach (var cachedProvider in cachedProviders)
             {
-                CachedPlanetMetadataProvider cachedProvider =
-                    cachedProviders[index];
-
                 long planetEntityId =
                     cachedProvider.Snapshot.PlanetEntityId;
 
@@ -2909,8 +3008,6 @@ namespace VoxelCubemapApi.Common.PlanetModification
                         planetEntityId,
                         null,
                         cachedProvider.Snapshot);
-
-                    continue;
                 }
             }
         }

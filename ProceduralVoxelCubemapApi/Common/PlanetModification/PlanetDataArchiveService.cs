@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Adk.Compression.Zip;
 using Adk.Image.Png;
 using Sandbox.ModAPI;
@@ -799,7 +800,11 @@ namespace VoxelCubemapApi.Common.PlanetModification
                 MinimalZip.Entry entry =
                     entries[i];
 
-                if (entry != null)
+                if (entry != null &&
+                    !string.Equals(
+                        entry.Name,
+                        RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     output[entry.Name] =
                         entry.Data;
@@ -904,7 +909,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
 
 
         internal byte[] PackProceduralArchive(
-            IDictionary<string, byte[]> files)
+            IDictionary<string, byte[]> files,
+            RuntimeProceduralCacheManifest cacheManifest)
         {
             if (files == null ||
                 files.Count != PlanetMapFileNames.All.Length)
@@ -914,9 +920,24 @@ namespace VoxelCubemapApi.Common.PlanetModification
                     nameof(files));
             }
 
+            if (cacheManifest == null)
+                throw new ArgumentNullException(nameof(cacheManifest));
+
+            string manifestXml =
+                MyAPIGateway.Utilities
+                    .SerializeToXML<RuntimeProceduralCacheManifest>(
+                        cacheManifest);
+
             var entries =
                 new List<MinimalZip.Entry>(
-                    PlanetMapFileNames.All.Length);
+                    PlanetMapFileNames.All.Length + 1)
+                {
+                    new MinimalZip.Entry(
+                        RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
+                        Encoding.UTF8.GetBytes(
+                            manifestXml),
+                        MinimalZip.CompressionMode.Stored)
+                };
 
             for (int index = 0;
                 index < PlanetMapFileNames.All.Length;
@@ -948,7 +969,8 @@ namespace VoxelCubemapApi.Common.PlanetModification
             }
 
             return MinimalZip.WriteBytes(
-                entries);
+                entries,
+                RuntimeProceduralCache.ZipComment);
         }
 
 

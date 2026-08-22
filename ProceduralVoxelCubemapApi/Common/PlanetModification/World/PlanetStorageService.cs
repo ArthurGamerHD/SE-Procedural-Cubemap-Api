@@ -410,7 +410,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.World
                 workResult.TargetPlanet,
                 patchedStorageApi,
                 workResult.ReplacementGenerator,
-                workResult.EnvironmentCarrierSubtype);
+                workResult.EnvironmentCarrierSubtype,
+                workResult.ChangeEnvironment);
         }
 
 
@@ -562,7 +563,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.World
             MyPlanet sourcePlanet,
             VRage.ModAPI.IMyStorage patchedStorageApi,
             MyPlanetGeneratorDefinition replacementGenerator,
-            string environmentCarrierSubtype)
+            string environmentCarrierSubtype,
+            bool changeEnvironment)
         {
             if (sourcePlanet == null)
                 throw new ArgumentNullException(nameof(sourcePlanet));
@@ -649,6 +651,19 @@ namespace VoxelCubemapApi.Common.PlanetModification.World
 
                 storageTransferred =
                     true;
+
+                if (changeEnvironment &&
+                    !string.IsNullOrWhiteSpace(
+                        environmentCarrierSubtype))
+                {
+                    // Procedural environment providers cache logical sectors
+                    // independently from voxel storage. Reinitialize after the
+                    // replacement storage is attached so newly scanned sectors
+                    // sample the current material/biome/height provider.
+                    PlanetEnvironmentService.ReinitializeInPlace(
+                        sourcePlanet,
+                        replacementGenerator);
+                }
 
                 if (!string.IsNullOrWhiteSpace(
                     environmentCarrierSubtype))

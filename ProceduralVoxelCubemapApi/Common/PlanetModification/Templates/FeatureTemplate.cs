@@ -238,7 +238,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         /// inland source, connects it to the nearest terrain sample at/below the fixed
         /// shoreline height, then carves a meandering spherical channel down to that
         /// water level. Planning uses a coarse six-face shoreline index and bounded
-        /// source attempts; no hydrology/pathfinding simulation is performed.
+        /// source attempts;
         /// </summary>
         [ApiMethod]
         private void AddRiverField(

@@ -53,6 +53,9 @@ namespace VoxelCubemapApi.Common.Networking
 
         [ProtoMember(14)]
         public bool ChangeMaterials;
+
+        [ProtoMember(15)]
+        public bool ChangeEnvironment;
     }
 
     [ProtoContract]

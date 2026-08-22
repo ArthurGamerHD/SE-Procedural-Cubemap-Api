@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using Adk.Compression.Zip;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
+using VoxelCubemapApi.Common.Configuration;
 using VoxelCubemapApi.Common.Noise;
 using VoxelCubemapApi.Common.PlanetModification.Runtime;
 using VoxelCubemapApi.Common.PlanetModification.World;
@@ -44,6 +47,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             512 * 1024 * 1024;
 
         private readonly VoxelCubemapApiServer _server;
+        private readonly VoxelCubemapApiConfig _config;
         private readonly object _persistenceSync =
             new object();
 
@@ -56,13 +60,20 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
 
 
         internal RuntimePackageStore(
-            VoxelCubemapApiServer server)
+            VoxelCubemapApiServer server,
+            VoxelCubemapApiConfig config)
         {
             if (server == null)
                 throw new ArgumentNullException(nameof(server));
 
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+
             _server =
                 server;
+
+            _config =
+                config;
         }
 
 
@@ -78,6 +89,10 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
         internal Func<RuntimePlanetBuilderEntry,
             RuntimeProceduralPlanetRecipe,
             byte[]> ProceduralArchiveBuilder { get; set; }
+
+        internal Func<RuntimePlanetBuilderEntry,
+            RuntimeProceduralPlanetRecipe,
+            string> ProceduralGeneratorSignatureBuilder { get; set; }
 
 
         internal void LoadPersistedRuntimeGenerators()
@@ -303,21 +318,15 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             {
                 ThrowIfPersistenceUnavailable();
 
-
                 WriteWorldStorageTextCache(
                     RUNTIME_SETTINGS_FILE,
                     MyAPIGateway.Utilities
-                        .SerializeToXML<RuntimePlanetGeneratorSettings>(
+                        .SerializeToXML(
                             Settings));
 
 
-                for (int i = 0;
-                    i < Settings.PlanetBuilders.Count;
-                    i++)
+                foreach (var entry in Settings.PlanetBuilders)
                 {
-                    RuntimePlanetBuilderEntry entry =
-                        Settings.PlanetBuilders[i];
-
                     RestoreGeneratorCache(
                         entry.GeneratorFile,
                         allowLegacyMigration);
@@ -331,18 +340,18 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                                 "Procedural archive reconstruction is not configured.");
                         }
 
-                        RuntimeProceduralPlanetRecipe recipe =
-                            LoadRuntimeRecipe(
-                                entry);
+                        RuntimeProceduralPlanetRecipe recipe = LoadRuntimeRecipe(entry);
 
-                        byte[] archive =
-                            ProceduralArchiveBuilder(
-                                entry,
-                                recipe);
+                        if (!_config.PersistentCache)
+                        {
+                            MyLog.Default.Log(MyLogSeverity.Info, "[RuntimePlanetGenerator] Persistent cache is disabled, rebuilding: " + entry.ArchiveFile + " (" + entry.Subtype + ").");
+                        }
+                        else if (TryUsePersistentProceduralCache(entry, recipe))
+                            continue;
 
-                        WriteWorldStorageBinaryCache(
-                            entry.ArchiveFile,
-                            archive);
+                        byte[] archive = ProceduralArchiveBuilder(entry, recipe);
+
+                        WriteWorldStorageBinaryCache(entry.ArchiveFile, archive);
                     }
                     else
                     {
@@ -352,6 +361,165 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                     }
                 }
             }
+        }
+
+
+        private bool TryUsePersistentProceduralCache(
+            RuntimePlanetBuilderEntry entry,
+            RuntimeProceduralPlanetRecipe recipe)
+        {
+            if (entry == null ||
+                recipe == null ||
+                string.IsNullOrWhiteSpace(entry.ArchiveFile))
+            {
+                return false;
+            }
+
+            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                entry.ArchiveFile,
+                typeof(VoxelCubemapApiServer)))
+            {
+                LogPersistentCacheMiss(
+                    entry,
+                    "archive is missing");
+
+                return false;
+            }
+
+            if (ProceduralGeneratorSignatureBuilder == null)
+            {
+                throw new Exception(
+                    "Procedural generator signature reconstruction is not configured.");
+            }
+
+            try
+            {
+                using (BinaryReader reader =
+                    MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                        entry.ArchiveFile,
+                        typeof(VoxelCubemapApiServer)))
+                {
+                    Stream stream =
+                        reader.BaseStream;
+
+                    string comment;
+
+                    if (!MinimalZip.TryReadComment(
+                        stream,
+                        out comment) ||
+                        !string.Equals(
+                            comment,
+                            RuntimeProceduralCache.ZipComment,
+                            StringComparison.Ordinal))
+                    {
+                        LogPersistentCacheMiss(
+                            entry,
+                            "cache GUID comment mismatch");
+
+                        return false;
+                    }
+
+                    byte[] manifestBytes;
+
+                    if (!MinimalZip.TryReadEntry(
+                        stream,
+                        RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
+                        out manifestBytes,
+                        false))
+                    {
+                        LogPersistentCacheMiss(
+                            entry,
+                            "cache manifest is missing");
+
+                        return false;
+                    }
+
+                    string manifestXml =
+                        Encoding.UTF8.GetString(
+                            manifestBytes);
+
+                    RuntimeProceduralCacheManifest manifest =
+                        MyAPIGateway.Utilities
+                            .SerializeFromXML<RuntimeProceduralCacheManifest>(
+                                manifestXml);
+
+                    if (manifest == null ||
+                        !string.Equals(
+                            manifest.CacheGuid,
+                            RuntimeProceduralCache.CACHE_GUID,
+                            StringComparison.Ordinal))
+                    {
+                        LogPersistentCacheMiss(
+                            entry,
+                            "cache manifest GUID mismatch");
+
+                        return false;
+                    }
+
+                    string recipeSignature =
+                        RuntimeProceduralCache.ComputeRecipeSignature(
+                            recipe);
+
+                    if (!string.Equals(
+                        manifest.RecipeSignature,
+                        recipeSignature,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        LogPersistentCacheMiss(
+                            entry,
+                            "procedural recipe changed");
+
+                        return false;
+                    }
+
+                    string generatorSignature =
+                        ProceduralGeneratorSignatureBuilder(
+                            entry,
+                            recipe);
+
+                    if (!string.Equals(
+                        manifest.GeneratorSignature,
+                        generatorSignature,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        LogPersistentCacheMiss(
+                            entry,
+                            "source/runtime generator changed");
+
+                        return false;
+                    }
+                }
+
+                _worldStorageCacheFiles.Add(
+                    entry.ArchiveFile);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Persistent cache hit: " +
+                    entry.ArchiveFile +
+                    " (" +
+                    entry.Subtype +
+                    ").");
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Persistent cache miss for '" +
+                    entry.ArchiveFile +
+                    "': cache validation failed: " +
+                    e.Message);
+
+                return false;
+            }
+        }
+
+
+        private static void LogPersistentCacheMiss(
+            RuntimePlanetBuilderEntry entry,
+            string reason)
+        {
+            MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Persistent cache miss for '" + entry.ArchiveFile + "': " + reason + ".");
         }
 
 
@@ -1992,6 +2160,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                 foreach (string fileName in
                     _worldStorageCacheFiles)
                 {
+                    if (ShouldPreservePersistentCacheFile(
+                        fileName))
+                    {
+                        continue;
+                    }
+
                     TryDeleteWorldStorageCacheFile(
                         fileName);
                 }
@@ -2024,10 +2198,36 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
                     TryDeleteWorldStorageCacheFile(
                         entry.GeneratorFile);
 
-                    TryDeleteWorldStorageCacheFile(
-                        entry.ArchiveFile);
+                    if (!ShouldPreservePersistentCacheFile(
+                        entry.ArchiveFile))
+                    {
+                        TryDeleteWorldStorageCacheFile(
+                            entry.ArchiveFile);
+                    }
                 }
             }
+        }
+
+
+        private bool ShouldPreservePersistentCacheFile(
+            string fileName)
+        {
+            if (!_config.PersistentCache ||
+                string.IsNullOrWhiteSpace(fileName) ||
+                Settings == null ||
+                Settings.PlanetBuilders == null)
+            {
+                return false;
+            }
+
+            return Settings.PlanetBuilders.Any(entry =>
+                entry != null &&
+                GetPersistenceType(entry) ==
+                    RuntimePlanetPersistenceType.Procedural &&
+                string.Equals(
+                    entry.ArchiveFile,
+                    fileName,
+                    StringComparison.OrdinalIgnoreCase));
         }
 
 
@@ -2036,8 +2236,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Persistence
             if (_server.IsUnloading)
             {
                 throw new Exception(
-                    "Runtime planet persistence is unavailable while the " +
-                    "session is unloading.");
+                    "Runtime planet persistence is unavailable while the session is unloading.");
             }
         }
 

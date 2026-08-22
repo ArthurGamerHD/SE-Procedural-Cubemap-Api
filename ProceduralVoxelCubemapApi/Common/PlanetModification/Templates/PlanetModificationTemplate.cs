@@ -62,6 +62,7 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
         private string _environmentPresetName;
         private bool _requiresAuthoritativeImageSync;
         private bool _changeMaterials;
+        private bool _changeEnvironment;
         private readonly bool _proceduralPersistenceEligible;
 
         private readonly RuntimeProceduralPlanetRecipe
@@ -290,6 +291,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     _requiresAuthoritativeImageSync,
                 ChangeMaterials =
                     _changeMaterials,
+                ChangeEnvironment =
+                    _changeEnvironment,
                 ProceduralPersistenceEligible =
                     _proceduralPersistenceEligible &&
                     !_requiresAuthoritativeImageSync,
@@ -340,6 +343,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             PlanarPngBitmap image =
                 GetOrLoadImage(
                     faceFileName);
+
+            _changeEnvironment =
+                true;
 
             if (faceFileName.EndsWith(
                     "_mat.png",
@@ -463,6 +469,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             faceFileName =
                 PlanetMapFileNames.Validate(
                     faceFileName);
+
+            _changeEnvironment =
+                true;
 
             if (faceFileName.EndsWith(
                     "_mat.png",
@@ -734,6 +743,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             Builder.EnvironmentItems = AppendToArray(Builder.EnvironmentItems, additions);
 
+            _changeEnvironment =
+                true;
+
             return mappings.Length;
         }
 
@@ -771,6 +783,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             _environmentCarrierSubtype = carrier.Id.SubtypeName;
 
+            _changeEnvironment =
+                true;
+
             _environmentPresetName =
                 null;
         }
@@ -795,6 +810,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             _environmentPresetName =
                 preset.Name;
+
+            _changeEnvironment =
+                true;
 
             _environmentCarrierSubtype =
                 null;
@@ -929,6 +947,8 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             EnsureLayerEnabled(0);
             _changeMaterials =
                 true;
+            _changeEnvironment =
+                true;
             _fractalNoiseOperations.Add(
                 new FractalNoiseOperation
                 {
@@ -993,6 +1013,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             EnsureLayerEnabled(1);
 
+            _changeEnvironment =
+                true;
+
             _biomeReplacementOperations.Add(
                 new BiomeReplacementOperation
                 {
@@ -1022,6 +1045,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             }
 
             EnsureLayerEnabled(1);
+
+            _changeEnvironment =
+                true;
 
             _fractalNoiseOperations.Add(
                 new FractalNoiseOperation
@@ -1093,6 +1119,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             EnsureLayerEnabled(
                 layerIndex);
+
+            if (layerIndex == 0 ||
+                layerIndex == 1 ||
+                layerIndex == 3)
+            {
+                _changeEnvironment = true;
+            }
 
             if (useNoise)
             {
@@ -1281,6 +1314,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             if (layerIndex == 0)
                 _changeMaterials = true;
 
+            if (layerIndex == 0 ||
+                layerIndex == 1 ||
+                layerIndex == 3)
+            {
+                _changeEnvironment = true;
+            }
+
             _brushOperations.Add(new BrushOperation
             {
                 LayerIndex = layerIndex,
@@ -1395,6 +1435,13 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
             if (layerIndex == 0)
                 _changeMaterials = true;
 
+            if (layerIndex == 0 ||
+                layerIndex == 1 ||
+                layerIndex == 3)
+            {
+                _changeEnvironment = true;
+            }
+
             _brushOperations.Add(new BrushOperation
             {
                 LayerIndex = layerIndex,
@@ -1429,6 +1476,9 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
 
             var operation = new FeatureOperation();
             _featureOperations.Add(operation);
+
+            _changeEnvironment =
+                true;
             return new FeatureTemplate(operation).GetApi();
         }
 
@@ -1594,6 +1644,12 @@ namespace VoxelCubemapApi.Common.PlanetModification.Templates
                     filtered;
             }
 
+
+            if (removed)
+            {
+                _changeEnvironment =
+                    true;
+            }
 
             return removed;
         }
