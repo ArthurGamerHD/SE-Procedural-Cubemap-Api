@@ -17,6 +17,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
     }
 
 
+    public class RuntimePersistentCacheStorageManifest
+    {
+        public List<string> Files =
+            new List<string>();
+    }
+
+
     public class RuntimeProceduralPlanetRecipe
     {
         public int SchemaVersion;

@@ -18,8 +18,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 {
     internal sealed class RuntimePackageStore
     {
+        private sealed class PersistentCacheValidationException : Exception
+        {
+            internal PersistentCacheValidationException(
+                string message)
+                : base(message)
+            {
+            }
+        }
+
+
         private const string RUNTIME_SETTINGS_FILE =
             "settings.xml";
+
+        private const string PERSISTENT_CACHE_MANIFEST_FILE =
+            "persistent-cache-manifest.xml";
 
         private const string PERSISTENCE_VARIABLE_PREFIX =
             "CubemapApi.RuntimePersistence.v1.";
@@ -57,6 +70,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         private RuntimePersistenceManifest _manifest =
             new RuntimePersistenceManifest();
+
+        private RuntimePersistentCacheStorageManifest
+            _persistentCacheManifest =
+                new RuntimePersistentCacheStorageManifest();
 
 
         internal RuntimePackageStore(
@@ -149,6 +166,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             CleanupAbandonedPersistencePackages();
             SeedPersistenceManifestFromSettings();
+
+            InitializePersistentCacheManifest();
 
 
             if (Settings.PlanetBuilders.Count == 0)
@@ -352,6 +371,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         byte[] archive = ProceduralArchiveBuilder(entry, recipe);
 
                         WriteWorldStorageBinaryCache(entry.ArchiveFile, archive);
+                        TrackPersistentCacheFile(entry.ArchiveFile);
                     }
                     else
                     {
@@ -379,7 +399,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 entry.ArchiveFile,
                 typeof(CubemapApiServer)))
             {
-                LogPersistentCacheMiss(
+                RejectPersistentProceduralCache(
                     entry,
                     "archive is missing");
 
@@ -412,11 +432,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             RuntimeProceduralCache.ZipComment,
                             StringComparison.Ordinal))
                     {
-                        LogPersistentCacheMiss(
-                            entry,
+                        throw new PersistentCacheValidationException(
                             "cache GUID comment mismatch");
-
-                        return false;
                     }
 
                     byte[] manifestBytes;
@@ -427,11 +444,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         out manifestBytes,
                         false))
                     {
-                        LogPersistentCacheMiss(
-                            entry,
+                        throw new PersistentCacheValidationException(
                             "cache manifest is missing");
-
-                        return false;
                     }
 
                     string manifestXml =
@@ -449,11 +463,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             RuntimeProceduralCache.CACHE_GUID,
                             StringComparison.Ordinal))
                     {
-                        LogPersistentCacheMiss(
-                            entry,
+                        throw new PersistentCacheValidationException(
                             "cache manifest GUID mismatch");
-
-                        return false;
                     }
 
                     string recipeSignature =
@@ -465,11 +476,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         recipeSignature,
                         StringComparison.OrdinalIgnoreCase))
                     {
-                        LogPersistentCacheMiss(
-                            entry,
+                        throw new PersistentCacheValidationException(
                             "procedural recipe changed");
-
-                        return false;
                     }
 
                     string generatorSignature =
@@ -482,15 +490,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         generatorSignature,
                         StringComparison.OrdinalIgnoreCase))
                     {
-                        LogPersistentCacheMiss(
-                            entry,
+                        throw new PersistentCacheValidationException(
                             "source/runtime generator changed");
-
-                        return false;
                     }
                 }
 
                 _worldStorageCacheFiles.Add(
+                    entry.ArchiveFile);
+
+                TrackPersistentCacheFile(
                     entry.ArchiveFile);
 
                 MyLog.Default.WriteLineAndConsole(
@@ -502,16 +510,36 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 return true;
             }
-            catch (Exception e)
+            catch (PersistentCacheValidationException e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[RuntimePlanetGenerator] Persistent cache miss for '" +
-                    entry.ArchiveFile +
-                    "': cache validation failed: " +
+                RejectPersistentProceduralCache(
+                    entry,
                     e.Message);
 
                 return false;
             }
+            catch (Exception e)
+            {
+                RejectPersistentProceduralCache(
+                    entry,
+                    "cache validation failed: " +
+                    e.Message);
+
+                return false;
+            }
+        }
+
+
+        private void RejectPersistentProceduralCache(
+            RuntimePlanetBuilderEntry entry,
+            string reason)
+        {
+            LogPersistentCacheMiss(
+                entry,
+                reason);
+
+            TryDeleteWorldStorageCacheFile(
+                entry.ArchiveFile);
         }
 
 
@@ -659,6 +687,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 WriteWorldStorageBinaryCache(
                     fileName,
                     archive);
+
+                TrackPersistentCacheFile(
+                    fileName);
             }
         }
 
@@ -2153,6 +2184,219 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         }
 
 
+        private void InitializePersistentCacheManifest()
+        {
+            _persistentCacheManifest =
+                LoadPersistentCacheManifest();
+
+            RemoveInvalidPersistentCacheManifestEntries();
+
+
+            if (!_config.PersistentCache)
+            {
+                string[] disabledCacheFiles =
+                    _persistentCacheManifest.Files.ToArray();
+
+                for (int index = 0;
+                    index < disabledCacheFiles.Length;
+                    index++)
+                {
+                    TryDeleteWorldStorageCacheFile(
+                        disabledCacheFiles[index]);
+                }
+
+                TryDeleteWorldStorageCacheFile(
+                    PERSISTENT_CACHE_MANIFEST_FILE);
+
+                return;
+            }
+
+
+            var referencedCacheFiles =
+                new HashSet<string>(
+                    Settings.PlanetBuilders
+                        .Where(entry =>
+                            entry != null &&
+                            GetPersistenceType(entry) ==
+                                RuntimePlanetPersistenceType.Procedural &&
+                            !string.IsNullOrWhiteSpace(
+                                entry.ArchiveFile))
+                        .Select(entry =>
+                            entry.ArchiveFile),
+                    StringComparer.OrdinalIgnoreCase);
+
+            string[] trackedCacheFiles =
+                _persistentCacheManifest.Files.ToArray();
+
+            for (int index = 0;
+                index < trackedCacheFiles.Length;
+                index++)
+            {
+                string fileName =
+                    trackedCacheFiles[index];
+
+                if (referencedCacheFiles.Contains(
+                    fileName))
+                {
+                    continue;
+                }
+
+                TryDeleteWorldStorageCacheFile(
+                    fileName);
+            }
+
+
+            SavePersistentCacheManifest();
+        }
+
+
+        private RuntimePersistentCacheStorageManifest
+            LoadPersistentCacheManifest()
+        {
+            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                PERSISTENT_CACHE_MANIFEST_FILE,
+                typeof(CubemapApiServer)))
+            {
+                return new RuntimePersistentCacheStorageManifest();
+            }
+
+
+            try
+            {
+                string xml;
+
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                        PERSISTENT_CACHE_MANIFEST_FILE,
+                        typeof(CubemapApiServer)))
+                {
+                    xml =
+                        reader.ReadToEnd();
+                }
+
+                RuntimePersistentCacheStorageManifest manifest =
+                    MyAPIGateway.Utilities.SerializeFromXML<
+                        RuntimePersistentCacheStorageManifest>(
+                            xml);
+
+                if (manifest == null)
+                {
+                    throw new Exception(
+                        "Persistent cache manifest deserialized to null.");
+                }
+
+                if (manifest.Files == null)
+                {
+                    manifest.Files =
+                        new List<string>();
+                }
+
+                return manifest;
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Could not load persistent " +
+                    "cache manifest; replacing it: " +
+                    e.Message);
+
+                return new RuntimePersistentCacheStorageManifest();
+            }
+        }
+
+
+        private void RemoveInvalidPersistentCacheManifestEntries()
+        {
+            var uniqueFiles =
+                new HashSet<string>(
+                    StringComparer.OrdinalIgnoreCase);
+
+            _persistentCacheManifest.Files.RemoveAll(fileName =>
+                !IsPersistentCacheFileName(fileName) ||
+                !uniqueFiles.Add(fileName));
+        }
+
+
+        private static bool IsPersistentCacheFileName(
+            string fileName)
+        {
+            return
+                !string.IsNullOrWhiteSpace(fileName) &&
+                fileName.EndsWith(
+                    ".zip",
+                    StringComparison.OrdinalIgnoreCase) &&
+                fileName.IndexOf('/') < 0 &&
+                fileName.IndexOf('\\') < 0 &&
+                fileName.IndexOf(':') < 0;
+        }
+
+
+        private void TrackPersistentCacheFile(
+            string fileName)
+        {
+            if (!_config.PersistentCache ||
+                !IsPersistentCacheFileName(fileName) ||
+                _persistentCacheManifest.Files.Any(existingFile =>
+                    string.Equals(
+                        existingFile,
+                        fileName,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            _persistentCacheManifest.Files.Add(
+                fileName);
+
+            SavePersistentCacheManifest();
+        }
+
+
+        private void UntrackPersistentCacheFile(
+            string fileName)
+        {
+            int removed =
+                _persistentCacheManifest.Files.RemoveAll(existingFile =>
+                    string.Equals(
+                        existingFile,
+                        fileName,
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (removed > 0)
+                SavePersistentCacheManifest();
+        }
+
+
+        private void SavePersistentCacheManifest()
+        {
+            if (!_config.PersistentCache)
+                return;
+
+            try
+            {
+                string xml =
+                    MyAPIGateway.Utilities.SerializeToXML(
+                        _persistentCacheManifest);
+
+                using (TextWriter writer =
+                    MyAPIGateway.Utilities.WriteFileInWorldStorage(
+                        PERSISTENT_CACHE_MANIFEST_FILE,
+                        typeof(CubemapApiServer)))
+                {
+                    writer.Write(
+                        xml);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(
+                    "[RuntimePlanetGenerator] Could not save persistent " +
+                    "cache manifest: " +
+                    e.Message);
+            }
+        }
+
+
         internal void ClearWorldStorageCache()
         {
             lock (_persistenceSync)
@@ -2241,7 +2485,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         }
 
 
-        internal static void TryDeleteWorldStorageCacheFile(
+        internal void TryDeleteWorldStorageCacheFile(
             string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName))
@@ -2258,6 +2502,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         fileName,
                         typeof(CubemapApiServer));
                 }
+
+                UntrackPersistentCacheFile(
+                    fileName);
             }
             catch (Exception e)
             {
