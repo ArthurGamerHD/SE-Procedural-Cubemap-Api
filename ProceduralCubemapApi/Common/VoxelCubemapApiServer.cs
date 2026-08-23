@@ -22,6 +22,11 @@ namespace ProceduralCubemapApi.Common
     internal sealed partial class CubemapApiServer : MySessionComponentBase
     {
         private volatile bool _unloading;
+        private volatile bool _worldStoragePathReady;
+        private bool _workshopStoragePathNormalized;
+        private bool _workshopStorageWarningLogged;
+        private bool _workshopStorageFailureLogged;
+        private int _workshopStorageRetryFrames;
         private CubemapIntermodApiServer _intermodApi;
 
         private CubemapApiConfig _config;
@@ -92,6 +97,21 @@ namespace ProceduralCubemapApi.Common
             _unloading =
                 false;
 
+            _worldStoragePathReady =
+                false;
+
+            _workshopStoragePathNormalized =
+                false;
+
+            _workshopStorageWarningLogged =
+                false;
+
+            _workshopStorageFailureLogged =
+                false;
+
+            _workshopStorageRetryFrames =
+                0;
+
             _config =
                 CubemapApiConfigStorage.LoadOrCreate();
 
@@ -134,7 +154,8 @@ namespace ProceduralCubemapApi.Common
                     _planetStorage,
                     _environmentPresets,
                     _network,
-                    () => _unloading);
+                    () => _unloading,
+                    () => _worldStoragePathReady);
 
             _runtimePackages.ProceduralArchiveBuilder =
                 _modifications.RebuildProceduralArchive;
@@ -166,10 +187,185 @@ namespace ProceduralCubemapApi.Common
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[RuntimePlanetGenerator] Startup persistence cleanup failed: " +
-                    e);
+                MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Startup persistence cleanup failed: " + e);
             }
+        }
+
+        private bool EnsureWorldStoragePathReady()
+        {
+            if (_worldStoragePathReady)
+                return true;
+
+            if (MyAPIGateway.Session == null)
+                return false;
+
+            if (!MyAPIGateway.Session.IsServer || !HasWorkshopSavePathTransition())
+            {
+                _worldStoragePathReady =
+                    true;
+
+                return true;
+            }
+
+            if (!_workshopStorageWarningLogged)
+            {
+                _workshopStorageWarningLogged =
+                    true;
+
+                string message =
+                    "Workshop worlds can cause world-storage path issues during their first load. " +
+                    "Normalizing the active save file before runtime archive requests begin.";
+
+                MyLog.Default.Log(MyLogSeverity.Warning, "[RuntimePlanetGenerator] " + message);
+                MyAPIGateway.Utilities.ShowMessage(nameof(ProceduralCubemapApi), message);
+                var notification = MyAPIGateway.Utilities.CreateNotification("TFM Updating Voxel... Done!");
+                notification.Show();
+                
+                
+                notification.Hide();
+                notification.ResetAliveTime();
+                notification.Text += " Done!";
+                notification.Show();
+            }
+
+            if (_workshopStorageRetryFrames > 0)
+            {
+                _workshopStorageRetryFrames--;
+
+                return false;
+            }
+
+            string currentPath =
+                RuntimeGeneratorRegistry.NormalizePath(
+                    MyAPIGateway.Session.CurrentPath);
+
+            int separatorIndex =
+                currentPath == null
+                    ? -1
+                    : currentPath.LastIndexOf('/');
+
+            string currentSaveName =
+                separatorIndex < 0
+                    ? currentPath
+                    : currentPath.Substring(
+                        separatorIndex + 1);
+
+            if (!_workshopStoragePathNormalized)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(currentPath) ||
+                        !MyAPIGateway.Session.Save(currentPath))
+                    {
+                        LogWorkshopStorageFailure(
+                            "the initial save was rejected");
+
+                        return false;
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogWorkshopStorageFailure(
+                        "the initial save failed: " +
+                        e.Message);
+
+                    return false;
+                }
+
+                MyAPIGateway.Session.Name = currentSaveName;
+
+                _workshopStoragePathNormalized =
+                    true;
+            }
+
+            try
+            {
+                _runtimeGenerators.RebindToSavePath(
+                    currentPath);
+            }
+            catch (Exception e)
+            {
+                LogWorkshopStorageFailure(
+                    "runtime generator rebinding failed: " +
+                    e);
+
+                return false;
+            }
+
+            _worldStoragePathReady =
+                true;
+
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Workshop world-storage path " +
+                "normalized to CurrentPath: " +
+                currentPath);
+
+            return true;
+        }
+
+
+        private void LogWorkshopStorageFailure(
+            string reason)
+        {
+            _workshopStorageRetryFrames =
+                60;
+
+            if (_workshopStorageFailureLogged)
+                return;
+
+            _workshopStorageFailureLogged =
+                true;
+
+            MyLog.Default.Log(
+                MyLogSeverity.Warning,
+                "[RuntimePlanetGenerator] Could not normalize the " +
+                "workshop world-storage path because " +
+                reason +
+                ". Runtime archive processing remains paused and will retry.");
+        }
+
+
+        private static bool HasWorkshopSavePathTransition()
+        {
+            const string workshopPrefix =
+                "(Workshop) ";
+
+            string sessionName =
+                MyAPIGateway.Session.Name;
+
+            string currentPath =
+                RuntimeGeneratorRegistry.NormalizePath(
+                    MyAPIGateway.Session.CurrentPath);
+
+            if (string.IsNullOrWhiteSpace(sessionName) ||
+                string.IsNullOrWhiteSpace(currentPath) ||
+                !sessionName.StartsWith(
+                    workshopPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            int separatorIndex =
+                currentPath.LastIndexOf('/');
+
+            string currentSaveName =
+                separatorIndex < 0
+                    ? currentPath
+                    : currentPath.Substring(
+                        separatorIndex + 1);
+
+            string promotedSaveName =
+                sessionName.Substring(
+                    workshopPrefix.Length)
+                    .Replace(
+                        ':',
+                        '-');
+
+            return string.Equals(
+                currentSaveName,
+                promotedSaveName,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         protected override void UnloadData()
@@ -212,6 +408,9 @@ namespace ProceduralCubemapApi.Common
         public override void UpdateBeforeSimulation()
         {
             if (MyAPIGateway.Session == null)
+                return;
+
+            if (!EnsureWorldStoragePathReady())
                 return;
 
             _modifications.UpdatePlanetMetadataProviders();

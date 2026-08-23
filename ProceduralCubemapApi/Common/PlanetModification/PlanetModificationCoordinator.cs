@@ -52,6 +52,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private readonly VoxelNetworkSession _network;
         private readonly Func<bool> _isUnloading;
+        private readonly Func<bool> _isWorldStoragePathReady;
 
         private readonly Dictionary<long, List<Action<long, string>>>
             _runtimePlanetChangedCallbacks =
@@ -71,7 +72,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             PlanetStorageService planetStorage,
             EnvironmentPresetCatalog environmentPresetCatalog,
             VoxelNetworkSession network,
-            Func<bool> isUnloading)
+            Func<bool> isUnloading,
+            Func<bool> isWorldStoragePathReady)
         {
             if (runtimePackages == null)
                 throw new ArgumentNullException(nameof(runtimePackages));
@@ -94,6 +96,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             if (isUnloading == null)
                 throw new ArgumentNullException(nameof(isUnloading));
 
+            if (isWorldStoragePathReady == null)
+                throw new ArgumentNullException(nameof(isWorldStoragePathReady));
+
             _runtimePackages =
                 runtimePackages;
 
@@ -114,6 +119,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             _isUnloading =
                 isUnloading;
+
+            _isWorldStoragePathReady =
+                isWorldStoragePathReady;
         }
 
 
@@ -365,6 +373,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     "Voxel Cubemap API server is unloading.");
             }
 
+            if (!_isWorldStoragePathReady())
+            {
+                throw new Exception(
+                    "Voxel Cubemap API world storage is not ready. " +
+                    "Workshop save-path normalization is still in progress; " +
+                    "retry this operation shortly.");
+            }
+
 
             MyPlanet targetPlanet =
                 planetEntityId == 0
@@ -502,6 +518,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         {
             if (template == null)
                 throw new ArgumentNullException(nameof(template));
+
+            if (!_isWorldStoragePathReady())
+            {
+                DispatchPushResponse(
+                    callback,
+                    false,
+                    "Voxel Cubemap API world storage is not ready. " +
+                    "Workshop save-path normalization is still in progress; " +
+                    "retry this operation shortly.");
+
+                return;
+            }
 
             if (_requestInProgress)
             {

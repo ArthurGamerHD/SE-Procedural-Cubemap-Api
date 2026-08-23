@@ -535,46 +535,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 NormalizePath(
                     fallbackSavePath);
 
-            // A joining client stores the downloaded world under its own
-            // CurrentPath. That local directory is not necessarily derived
-            // from the server's checkpoint Session.Name (notably, ':' may be
-            // removed instead of replaced with '-'). Runtime replay files are
-            // written through the client's world-storage API, so their rooted
-            // generator path must use that same local directory.
-            if (MyAPIGateway.Session != null &&
-                !MyAPIGateway.Session.IsServer &&
-                !string.IsNullOrWhiteSpace(
-                    normalizedFallback))
-            {
-                return normalizedFallback;
-            }
-
-            string savesRoot =
-                NormalizePath(
-                    MyAPIGateway.Utilities.GamePaths.SavesPath);
-
-            string sessionName =
-                MyAPIGateway.Session == null
-                    ? null
-                    : MyAPIGateway.Session.Name;
-
-
-            if (string.IsNullOrWhiteSpace(savesRoot) ||
-                string.IsNullOrWhiteSpace(sessionName))
-            {
-                return normalizedFallback;
-            }
-
-
-            // World-storage APIs use MySession.WorldSavePath, which diverges
-            // from CurrentPath for workshop worlds. Match the engine's path:
-            // SavesPath + checkpoint SessionName with ':' replaced by '-'.
-            return
-                savesRoot.TrimEnd('/') +
-                "/" +
-                sessionName.Replace(
-                    ':',
-                    '-');
+            // Runtime generator paths must match the save path supplied to the
+            // world-storage API. Workshop startup can temporarily make the
+            // engine's private WorldSavePath diverge from CurrentPath; the
+            // server normalizes that transition before archive processing.
+            return normalizedFallback;
         }
 
 
@@ -638,21 +603,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 return;
 
 
-            _runtimePackages.RecreateWorldStorageCache(
-                false);
-
-
-            for (int i = 0;
-                i < _runtimePackages.Settings.PlanetBuilders.Count;
-                i++)
+            // With no persisted runtime generators there is no cache to move.
+            // Avoid touching world storage during the workshop save transition;
+            // the first committed runtime package will create its cache files.
+            if (_runtimePackages.Settings.PlanetBuilders.Count > 0)
             {
-                RuntimePlanetBuilderEntry entry =
-                    _runtimePackages.Settings.PlanetBuilders[i];
-
-                if (entry == null)
-                    continue;
+                _runtimePackages.RecreateWorldStorageCache(
+                    false);
+            }
 
 
+            foreach (var entry in _runtimePackages.Settings.PlanetBuilders.Where(entry => entry != null))
+            {
                 RebindGeneratorFolder(
                     entry.Subtype,
                     BuildWorldStoragePath(
