@@ -12,6 +12,7 @@ namespace ProceduralCubemapApi.Api
         private readonly Action<int, int, double, double, int, int, float> _addVolcanoFieldBiased;
         private readonly Action<int, int, double, double, double, double, int, int> _addRavineField;
         private readonly Action<int, int, double, double, double, double, int, int, float> _addRavineFieldBiased;
+        private readonly Action<int, int, double, int, double, int, float, float, double, int, float, float, double, int> _addMountainField;
         private readonly Action<int, int, int, int, double, double, double, double, int, int, double> _addRiverField;
 
 
@@ -50,6 +51,11 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Action<int, int, double, double, double, double, int, int, float>>(
                     api,
                     "AddRavineFieldBiased");
+
+            _addMountainField =
+                GetRequired<Action<int, int, double, int, double, int, float, float, double, int, float, float, double, int>>(
+                    api,
+                    "AddMountainField");
 
             _addRiverField =
                 GetRequired<Action<int, int, int, int, double, double, double, double, int, int, double>>(
@@ -162,6 +168,33 @@ namespace ProceduralCubemapApi.Api
             float targetSize)
         {
             _addRavineFieldBiased(count, seedOffset, minimumLengthDegrees, maximumLengthDegrees, minimumWidthDegrees, maximumWidthDegrees, minimumDepth, maximumDepth, targetSize);
+        }
+
+
+        /// <summary>
+        /// Adds a deterministic tectonic mountain field. The planet is split into
+        /// noise-warped spherical plates, each plate receives a seeded motion axis,
+        /// and uplift is generated along convergent plate boundaries. The relative
+        /// plate-motion angle controls potential range height while convergence
+        /// suppresses divergent and transform boundaries.
+        /// </summary>
+        public void AddMountainField(
+            int plateCount,
+            int seedOffset,
+            double mountainWidthDegrees,
+            int maximumHeight,
+            double majorFrequency,
+            int majorOctaves,
+            float majorPercent,
+            float majorCeiling,
+            double minorFrequency,
+            int minorOctaves,
+            float minorPercent,
+            float minorCeiling,
+            double detailFrequency,
+            int detailOctaves)
+        {
+            _addMountainField(plateCount, seedOffset, mountainWidthDegrees, maximumHeight, majorFrequency, majorOctaves, majorPercent, majorCeiling, minorFrequency, minorOctaves, minorPercent, minorCeiling, detailFrequency, detailOctaves);
         }
 
 

@@ -12,6 +12,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Features
             CraterFeatureStep.Instance,
             VolcanoFeatureStep.Instance,
             RavineFeatureStep.Instance,
+            MountainFeatureStep.Instance,
             RiverFeatureStep.Instance
         };
 

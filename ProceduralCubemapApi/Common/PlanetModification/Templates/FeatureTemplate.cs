@@ -234,6 +234,103 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
 
         /// <summary>
+        /// Adds a deterministic tectonic mountain field. The planet is split into
+        /// noise-warped spherical plates, each plate receives a seeded motion axis,
+        /// and uplift is generated along convergent plate boundaries. The relative
+        /// plate-motion angle controls potential range height while convergence
+        /// suppresses divergent and transform boundaries.
+        /// </summary>
+        [ApiMethod]
+        private void AddMountainField(
+            int plateCount,
+            int seedOffset,
+            double mountainWidthDegrees,
+            int maximumHeight,
+            double majorFrequency,
+            int majorOctaves,
+            float majorPercent,
+            float majorCeiling,
+            double minorFrequency,
+            int minorOctaves,
+            float minorPercent,
+            float minorCeiling,
+            double detailFrequency,
+            int detailOctaves)
+        {
+            if (plateCount < 4 || plateCount > 64)
+                throw new ArgumentException("Mountain plate count must be from 4 to 64.", nameof(plateCount));
+
+            if (double.IsNaN(mountainWidthDegrees) || double.IsInfinity(mountainWidthDegrees) ||
+                mountainWidthDegrees <= 0.0 || mountainWidthDegrees > 45.0)
+            {
+                throw new ArgumentException(
+                    "Mountain width must be finite, greater than zero, and no more than 45 degrees.",
+                    nameof(mountainWidthDegrees));
+            }
+
+            if (maximumHeight < 1 || maximumHeight > ushort.MaxValue)
+                throw new ArgumentException("Mountain maximum height must be from 1 to 65535.", nameof(maximumHeight));
+
+            ValidateMountainNoise(majorFrequency, majorOctaves, majorPercent, majorCeiling, "major");
+            ValidateMountainNoise(minorFrequency, minorOctaves, minorPercent, minorCeiling, "minor");
+
+            if (double.IsNaN(detailFrequency) || double.IsInfinity(detailFrequency) ||
+                detailFrequency <= 0.0 || detailFrequency > 4096.0)
+            {
+                throw new ArgumentException(
+                    "Mountain detail frequency must be finite, greater than zero, and no more than 4096.",
+                    nameof(detailFrequency));
+            }
+
+            if (detailOctaves < 1 || detailOctaves > 8)
+                throw new ArgumentException("Mountain detail octaves must be from 1 to 8.", nameof(detailOctaves));
+
+            _operation.MountainFields.Add(new MountainFieldOperation
+            {
+                PlateCount = plateCount,
+                SeedOffset = seedOffset,
+                MountainWidthDegrees = mountainWidthDegrees,
+                MaximumHeight = maximumHeight,
+                MajorFrequency = majorFrequency,
+                MajorOctaves = majorOctaves,
+                MajorPercent = majorPercent,
+                MajorCeiling = majorCeiling,
+                MinorFrequency = minorFrequency,
+                MinorOctaves = minorOctaves,
+                MinorPercent = minorPercent,
+                MinorCeiling = minorCeiling,
+                DetailFrequency = detailFrequency,
+                DetailOctaves = detailOctaves
+            });
+        }
+
+        private static void ValidateMountainNoise(
+            double frequency,
+            int octaves,
+            float percent,
+            float ceiling,
+            string name)
+        {
+            if (double.IsNaN(frequency) || double.IsInfinity(frequency) ||
+                frequency <= 0.0 || frequency > 4096.0)
+            {
+                throw new ArgumentException(
+                    "Mountain " + name + " frequency must be finite, greater than zero, and no more than 4096.",
+                    name + "Frequency");
+            }
+
+            if (octaves < 1 || octaves > 8)
+                throw new ArgumentException("Mountain " + name + " octaves must be from 1 to 8.", name + "Octaves");
+
+            if (float.IsNaN(percent) || float.IsInfinity(percent) || percent < 0.0f || percent > 50.0f)
+                throw new ArgumentException("Mountain " + name + " percent must be finite and from 0 to 50.", name + "Percent");
+
+            if (float.IsNaN(ceiling) || float.IsInfinity(ceiling) || ceiling < 0.0f || ceiling > 1.0f)
+                throw new ArgumentException("Mountain " + name + " ceiling must be finite and from 0 to 1.", name + "Ceiling");
+        }
+
+
+        /// <summary>
         /// Adds deterministic sea-level river corridors. Each river chooses a seeded
         /// inland source, connects it to the nearest terrain sample at/below the fixed
         /// shoreline height, then carves a meandering spherical channel down to that

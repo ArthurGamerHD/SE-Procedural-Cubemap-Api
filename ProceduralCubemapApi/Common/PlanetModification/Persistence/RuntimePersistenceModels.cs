@@ -124,6 +124,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             new List<RuntimeProceduralVolcanoField>();
         public List<RuntimeProceduralRavineField> RavineFields =
             new List<RuntimeProceduralRavineField>();
+        public List<RuntimeProceduralMountainField> MountainFields =
+            new List<RuntimeProceduralMountainField>();
         public List<RuntimeProceduralRiverField> RiverFields =
             new List<RuntimeProceduralRiverField>();
     }
@@ -164,6 +166,25 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         public int MinimumDepth;
         public int MaximumDepth;
         public float TargetSize;
+    }
+
+
+    public class RuntimeProceduralMountainField
+    {
+        public int PlateCount;
+        public int SeedOffset;
+        public double MountainWidthDegrees;
+        public int MaximumHeight;
+        public double MajorFrequency;
+        public int MajorOctaves;
+        public float MajorPercent;
+        public float MajorCeiling;
+        public double MinorFrequency;
+        public int MinorOctaves;
+        public float MinorPercent;
+        public float MinorCeiling;
+        public double DetailFrequency;
+        public int DetailOctaves;
     }
 
 

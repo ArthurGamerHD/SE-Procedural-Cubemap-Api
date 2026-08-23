@@ -79,6 +79,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             new List<VolcanoFieldOperation>();
         public List<RavineFieldOperation> RavineFields =
             new List<RavineFieldOperation>();
+        public List<MountainFieldOperation> MountainFields =
+            new List<MountainFieldOperation>();
         public List<RiverFieldOperation> RiverFields =
             new List<RiverFieldOperation>();
     }
@@ -119,6 +121,25 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public int MinimumDepth;
         public int MaximumDepth;
         public float TargetSize;
+    }
+
+
+    internal sealed class MountainFieldOperation
+    {
+        public int PlateCount;
+        public int SeedOffset;
+        public double MountainWidthDegrees;
+        public int MaximumHeight;
+        public double MajorFrequency;
+        public int MajorOctaves;
+        public float MajorPercent;
+        public float MajorCeiling;
+        public double MinorFrequency;
+        public int MinorOctaves;
+        public float MinorPercent;
+        public float MinorCeiling;
+        public double DetailFrequency;
+        public int DetailOctaves;
     }
 
 

@@ -194,6 +194,9 @@ namespace ProceduralCubemapApi.Common.Networking
 
         [ProtoMember(4)]
         public List<SyncedRiverField> RiverFields;
+
+        [ProtoMember(5)]
+        public List<SyncedMountainField> MountainFields;
     }
 
     [ProtoContract]
@@ -233,6 +236,25 @@ namespace ProceduralCubemapApi.Common.Networking
         [ProtoMember(7)] public int MinimumDepth;
         [ProtoMember(8)] public int MaximumDepth;
         [ProtoMember(9)] public float TargetSize;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedMountainField
+    {
+        [ProtoMember(1)] public int PlateCount;
+        [ProtoMember(2)] public int SeedOffset;
+        [ProtoMember(3)] public double MountainWidthDegrees;
+        [ProtoMember(4)] public int MaximumHeight;
+        [ProtoMember(5)] public double MajorFrequency;
+        [ProtoMember(6)] public int MajorOctaves;
+        [ProtoMember(7)] public float MajorPercent;
+        [ProtoMember(8)] public float MajorCeiling;
+        [ProtoMember(9)] public double MinorFrequency;
+        [ProtoMember(10)] public int MinorOctaves;
+        [ProtoMember(11)] public float MinorPercent;
+        [ProtoMember(12)] public float MinorCeiling;
+        [ProtoMember(13)] public double DetailFrequency;
+        [ProtoMember(14)] public int DetailOctaves;
     }
 
     [ProtoContract]

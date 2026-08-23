@@ -1280,6 +1280,119 @@ namespace CubemapExampleMod
         }
 
 
+        /// Adds a deterministic tectonic mountain system to the nearest planet.
+        /// Plate boundaries are warped with the same major/minor noise family used
+        /// by the mountain feature and only convergent boundaries receive uplift.
+        /// </summary>
+        [ChatCommand("testmountain", "vcma")]
+        public static void TestMountain(
+            int plateCount = 14,
+            int maximumHeight = 9000,
+            int seedOffset = 0,
+            double mountainWidthDegrees = 6.0)
+        {
+            const double majorFrequency = 3.4;
+            const int majorOctaves = 2;
+            const float majorPercent = 5f;
+            const float majorCeiling = 0.70f;
+
+            const double minorFrequency = 11.0;
+            const int minorOctaves = 3;
+            const float minorPercent = 3f;
+            const float minorCeiling = 0.45f;
+
+            const double detailFrequency = 34.0;
+            const int detailOctaves = 4;
+
+            CubemapExampleModClient client = _instance;
+            if (client == null)
+            {
+                ShowMessage("VCM API client is not initialized.");
+                return;
+            }
+
+            if (client._api == null)
+            {
+                client.RequestApi();
+                if (client._api == null)
+                {
+                    ShowMessage("Voxel Cubemap API is not ready.");
+                    return;
+                }
+            }
+
+            ModificationTemplate template = null;
+            try
+            {
+                if (plateCount < 4 || plateCount > 64)
+                    throw new ArgumentException("Plate count must be from 4 to 64.", nameof(plateCount));
+
+                if (maximumHeight < 1 || maximumHeight > ushort.MaxValue)
+                    throw new ArgumentException("Maximum mountain height must be from 1 to 65535.", nameof(maximumHeight));
+
+                if (double.IsNaN(mountainWidthDegrees) ||
+                    double.IsInfinity(mountainWidthDegrees) ||
+                    mountainWidthDegrees <= 0.0 ||
+                    mountainWidthDegrees > 45.0)
+                {
+                    throw new ArgumentException(
+                        "Mountain width must be finite, greater than zero, and no more than 45 degrees.",
+                        nameof(mountainWidthDegrees));
+                }
+
+                template = client._api.GetModificationTemplate(0);
+                if (template == null)
+                    throw new Exception("Could not create a template for the nearest planet.");
+
+                FeatureTemplate feature = template.AddFeature();
+                feature.AddMountainField(
+                    plateCount,
+                    seedOffset,
+                    mountainWidthDegrees,
+                    maximumHeight,
+                    majorFrequency,
+                    majorOctaves,
+                    majorPercent,
+                    majorCeiling,
+                    minorFrequency,
+                    minorOctaves,
+                    minorPercent,
+                    minorCeiling,
+                    detailFrequency,
+                    detailOctaves);
+
+                MyLog.Default.WriteLineAndConsole(
+                    "[VCM API Test Client] testmountain: plates=" + plateCount +
+                    ", maximumHeight=" + maximumHeight +
+                    ", seedOffset=" + seedOffset +
+                    ", widthDegrees=" + mountainWidthDegrees +
+                    ", major=" + majorFrequency + "/" + majorOctaves + "/" + majorPercent + "%/" + majorCeiling +
+                    ", minor=" + minorFrequency + "/" + minorOctaves + "/" + minorPercent + "%/" + minorCeiling +
+                    ", detail=" + detailFrequency + "/" + detailOctaves +
+                    ", planetSeed=" + template.GetPlanetSeed() + ".");
+
+                ModificationTemplate pushedTemplate = template;
+                template.Push(
+                    delegate(bool success, string message)
+                    {
+                        pushedTemplate.Close();
+                        ShowMessage(
+                            string.IsNullOrWhiteSpace(message)
+                                ? success
+                                    ? "Tectonic mountain field committed."
+                                    : "Tectonic mountain field failed."
+                                : message);
+                    });
+            }
+            catch (Exception e)
+            {
+                if (template != null)
+                    template.Close();
+                LogWarning("Mountain generation failed", e);
+                ShowMessage("Failed: " + e.Message);
+            }
+        }
+
         /// <summary>
         /// Carves several long deterministic ravines into the nearest planet.
         /// This exercises spherical path generation, segment tiling and the
