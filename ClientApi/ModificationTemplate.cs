@@ -13,6 +13,8 @@ namespace ProceduralCubemapApi.Api
     {
         private readonly Func<long> _getPlanetEntityId;
         private readonly Func<long> _getPlanetSeed;
+        private readonly Action<string> _setGeneratorName;
+        private readonly Action<string> _setPlanetName;
         private readonly Func<string, byte[][]> _loadPlanetPng;
         private readonly Func<string, int[]> _getPlanetPngSize;
         private readonly Func<string, int[]> _getPlanetPngInfo;
@@ -33,6 +35,8 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<ApiData> _addFeature;
         private readonly Func<byte, bool> _removeMaterial;
         private readonly Action<Action<bool, string>> _push;
+        private readonly Func<Action> _pushNoCommit;
+        private readonly Action<Action<bool, string>> _commitPendingPush;
         private readonly Action _close;
 
 
@@ -51,6 +55,16 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<long>>(
                     api,
                     "GetPlanetSeed");
+
+            _setGeneratorName =
+                GetRequired<Action<string>>(
+                    api,
+                    "SetGeneratorName");
+
+            _setPlanetName =
+                GetRequired<Action<string>>(
+                    api,
+                    "SetPlanetName");
 
             _loadPlanetPng =
                 GetRequired<Func<string, byte[][]>>(
@@ -152,6 +166,16 @@ namespace ProceduralCubemapApi.Api
                     api,
                     "Push");
 
+            _pushNoCommit =
+                GetRequired<Func<Action>>(
+                    api,
+                    "PushNoCommit");
+
+            _commitPendingPush =
+                GetRequired<Action<Action<bool, string>>>(
+                    api,
+                    "CommitPendingPush");
+
             _close =
                 GetRequired<Action>(
                     api,
@@ -174,6 +198,28 @@ namespace ProceduralCubemapApi.Api
         public long GetPlanetSeed()
         {
             return _getPlanetSeed();
+        }
+
+
+        /// <summary>
+        /// Selects the subtype name used for the runtime planet generator created
+        /// by Push. The name must not already belong to a loaded definition.
+        /// </summary>
+        public void SetGeneratorName(
+            string generatorName)
+        {
+            _setGeneratorName(generatorName);
+        }
+
+
+        /// <summary>
+        /// Selects the visible and persistent storage name for the planet.
+        /// The name is applied atomically when Push commits the template.
+        /// </summary>
+        public void SetPlanetName(
+            string planetName)
+        {
+            _setPlanetName(planetName);
         }
 
 
@@ -454,6 +500,29 @@ namespace ProceduralCubemapApi.Api
             Action<bool, string> callback)
         {
             _push(callback);
+        }
+
+
+        /// <summary>
+        /// Freezes this template and returns the expensive, worker-safe portion
+        /// of Push as an action suitable for IMyParallelTask.Do. Call
+        /// CommitPendingPush on the simulation thread after the action
+        /// has finished.
+        /// </summary>
+        public Action PushNoCommit()
+        {
+            return _pushNoCommit();
+        }
+
+
+        /// <summary>
+        /// Commits a completed deferred Push on the simulation thread and
+        /// invokes the callback before returning.
+        /// </summary>
+        public void CommitPendingPush(
+            Action<bool, string> callback)
+        {
+            _commitPendingPush(callback);
         }
 
 

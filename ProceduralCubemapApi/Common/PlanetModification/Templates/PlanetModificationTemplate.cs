@@ -60,6 +60,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private string _environmentCarrierSubtype;
         private string _environmentPresetName;
+        private string _requestedGeneratorName;
+        private string _requestedPlanetName;
         private bool _requiresAuthoritativeImageSync;
         private bool _changeMaterials;
         private bool _changeEnvironment;
@@ -70,6 +72,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
         private bool _closed;
         private bool _pushStarted;
+        private DeferredPlanetModificationPush _deferredPush;
 
 
         public readonly MyPlanet TargetPlanet;
@@ -277,6 +280,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                 BaseRuntimeRevision = BaseRuntimeRevision,
                 PlanetSeed = PlanetSeed,
                 TemplateId = TemplateId,
+                RequestedGeneratorName = _requestedGeneratorName,
+                RequestedPlanetName = _requestedPlanetName,
                 Builder = Builder,
                 Images = images,
                 ImageTransforms = transforms,
@@ -323,6 +328,89 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             EnsureOpen();
 
             return PlanetSeed;
+        }
+
+
+        /// <summary>
+        /// Selects the subtype name used for the runtime planet generator created
+        /// by Push. The name must not already belong to a loaded definition.
+        /// </summary>
+        [ApiMethod]
+        private void SetGeneratorName(
+            string generatorName)
+        {
+            EnsureEditable();
+
+            if (string.IsNullOrWhiteSpace(generatorName))
+            {
+                throw new ArgumentException(
+                    "Generator name cannot be empty.",
+                    nameof(generatorName));
+            }
+
+            generatorName = generatorName.Trim();
+
+            if (generatorName.Length > 128)
+            {
+                throw new ArgumentException(
+                    "Generator name cannot exceed 128 characters.",
+                    nameof(generatorName));
+            }
+
+            MyPlanetGeneratorDefinition existingGenerator =
+                MyDefinitionManager.Static
+                    .GetPlanetsGeneratorsDefinitions()
+                    .FirstOrDefault(definition =>
+                        definition != null &&
+                        definition.Id.SubtypeName.Equals(
+                            generatorName,
+                            StringComparison.OrdinalIgnoreCase));
+
+            if (existingGenerator != null)
+            {
+                throw new ArgumentException(
+                    "Planet generator name is already registered: " +
+                    generatorName +
+                    ".",
+                    nameof(generatorName));
+            }
+
+            _requestedGeneratorName =
+                generatorName;
+        }
+
+
+        /// <summary>
+        /// Selects the visible and persistent storage name for the planet.
+        /// The name is applied atomically when Push commits the template.
+        /// </summary>
+        [ApiMethod]
+        private void SetPlanetName(
+            string planetName)
+        {
+            EnsureEditable();
+
+            if (string.IsNullOrWhiteSpace(planetName))
+            {
+                throw new ArgumentException(
+                    "Planet name cannot be empty.",
+                    nameof(planetName));
+            }
+
+            planetName = planetName.Trim();
+
+            if (planetName.Length > 128)
+            {
+                throw new ArgumentException(
+                    "Planet name cannot exceed 128 characters.",
+                    nameof(planetName));
+            }
+
+            _requestedPlanetName =
+                planetName;
+
+            Builder.DisplayName =
+                planetName;
         }
 
 
@@ -1667,6 +1755,60 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             _coordinator.BeginPushModification(
                 this,
                 callback);
+        }
+
+
+        /// <summary>
+        /// Freezes this template and returns the expensive, worker-safe portion
+        /// of Push as an action suitable for IMyParallelTask.Do. Call
+        /// CommitPendingPush on the simulation thread after the action
+        /// has finished.
+        /// </summary>
+        [ApiMethod]
+        private Action PushNoCommit()
+        {
+            EnsureEditable();
+
+            _deferredPush =
+                _coordinator.CreateDeferredPush(
+                    this);
+
+            DeferredPlanetModificationPush deferredPush =
+                _deferredPush;
+
+            return delegate
+            {
+                _coordinator.PrepareDeferredPush(
+                    deferredPush);
+            };
+        }
+
+
+        /// <summary>
+        /// Commits a completed deferred Push on the simulation thread and
+        /// invokes the callback before returning.
+        /// </summary>
+        [ApiMethod]
+        private void CommitPendingPush(
+            Action<bool, string> callback)
+        {
+            EnsureOpen();
+
+            DeferredPlanetModificationPush deferredPush =
+                _deferredPush;
+
+            if (deferredPush == null)
+            {
+                throw new InvalidOperationException(
+                    "GetPushAction must be called before CompletePush.");
+            }
+
+            _coordinator.CompleteDeferredPush(
+                deferredPush,
+                callback);
+
+            _deferredPush =
+                null;
         }
 
 

@@ -22,7 +22,7 @@ namespace CubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 12);
+            new Version(0, 0, 14);
 
         private static CubemapExampleModClient _instance;
 

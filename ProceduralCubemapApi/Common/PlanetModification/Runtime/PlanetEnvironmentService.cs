@@ -233,7 +233,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
         internal static void ReinitializeInPlace(
             MyPlanet sourcePlanet,
-            MyPlanetGeneratorDefinition replacementGenerator)
+            MyPlanetGeneratorDefinition replacementGenerator,
+            string storageName = null)
         {
             if (sourcePlanet == null)
                 throw new ArgumentNullException(nameof(sourcePlanet));
@@ -347,7 +348,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     sourcePlanet.Storage;
 
                 initArguments.StorageName =
-                    sourcePlanet.StorageName;
+                    string.IsNullOrWhiteSpace(storageName)
+                        ? sourcePlanet.StorageName
+                        : storageName;
 
                 initArguments.Generator =
                     replacementGenerator;
@@ -457,16 +460,37 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 MyComponentBase newEnvironmentBase;
                 MyEntityComponentBase newEnvironment;
 
-                if (!TryGetComponentByInstanceTypeName(
-                    sourcePlanet,
-                    environmentComponentName,
-                    out newEnvironmentType,
-                    out newEnvironmentBase,
-                    out newEnvironment) ||
-                    newEnvironment == null)
+                bool hasNewEnvironment =
+                    TryGetComponentByInstanceTypeName(
+                        sourcePlanet,
+                        environmentComponentName,
+                        out newEnvironmentType,
+                        out newEnvironmentBase,
+                        out newEnvironment) &&
+                    newEnvironment != null;
+
+                if (!hasNewEnvironment)
                 {
-                    throw new Exception(
-                        "Runtime generator did not initialize a planet environment component.");
+                    // A generator without an EnvironmentDefinition is a valid
+                    // barren planet. MyPlanet.Init intentionally omits its
+                    // environment component in that case, so a rename/runtime
+                    // generator swap must not turn that absence into a failed
+                    // commit.
+                    if (replacementGenerator.EnvironmentDefinition != null)
+                    {
+                        throw new Exception(
+                            "Runtime generator did not initialize its configured planet environment component.");
+                    }
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Reinitialized live planet without an environment component. " +
+                        "EntityId=" +
+                        sourcePlanet.EntityId +
+                        ", Generator='" +
+                        replacementGenerator.Id.SubtypeName +
+                        "'.");
+
+                    return;
                 }
 
                 if (!object.ReferenceEquals(

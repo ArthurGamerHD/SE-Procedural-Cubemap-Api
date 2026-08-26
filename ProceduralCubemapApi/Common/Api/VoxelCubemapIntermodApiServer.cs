@@ -4,6 +4,7 @@ using Generated;
 using ProceduralCubemapApi.Common.PlanetModification;
 using ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets;
 using ProceduralCubemapApi.Common.PlanetModification.Templates;
+using VRageMath;
 
 namespace ProceduralCubemapApi.Common.Api
 {
@@ -15,7 +16,7 @@ namespace ProceduralCubemapApi.Common.Api
         ClientName = "ApiProvider")]
     internal partial class CubemapIntermodApiServer
     {
-        private static readonly Version ApiVersion = new Version(0, 0, 12);
+        private static readonly Version ApiVersion = new Version(0, 0, 13);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
@@ -50,6 +51,30 @@ namespace ProceduralCubemapApi.Common.Api
         public Dictionary<string, Delegate> GetModificationTemplate(long entityId)
         {
             return _coordinator.CreateModificationTemplateApi(entityId);
+        }
+
+
+        /// <summary>
+        /// Creates a new planet entity from a loaded source generator and returns
+        /// a mutable template for that planet. Position is the planet's minimum
+        /// corner, matching IMyVoxelMaps.SpawnPlanet. Texture size controls both
+        /// generated height and material cubemap faces and must be a positive
+        /// multiple of four. Vanilla planets use 2048 by default.
+        /// </summary>
+        [ApiMethod(typeof(PlanetModificationTemplate))]
+        public Dictionary<string, Delegate> CreatePlanet(
+            string sourceGeneratorName,
+            float diameter,
+            int seed,
+            Vector3D position,
+            int textureSize = 2048)
+        {
+            return _coordinator.CreatePlanetTemplateApi(
+                sourceGeneratorName,
+                diameter,
+                seed,
+                position,
+                textureSize);
         }
 
         /// <summary>

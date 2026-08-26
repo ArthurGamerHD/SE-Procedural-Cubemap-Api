@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using Adk.Image.Png;
 using Generated;
 using Sandbox.Definitions;
@@ -15,6 +16,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public object OriginalStorage;
         public byte[] PatchedStorage;
         public MyPlanetGeneratorDefinition ReplacementGenerator;
+        public MyObjectBuilder_PlanetGeneratorDefinition ReplacementGeneratorBuilder;
+        public string ReplacementGeneratorSubtype;
+        public string ReplacementGeneratorFolder;
         public RuntimePlanetBuilderEntry NewEntry;
         public string EnvironmentCarrierSubtype;
         public string OperationName;
@@ -22,6 +26,58 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public bool StorageCommitted;
         public bool ChangeMaterials;
         public bool ChangeEnvironment;
+        public string RequestedPlanetName;
+    }
+
+
+    internal sealed class DeferredPlanetModificationPush
+    {
+        private int _preparationState;
+        private int _completionStarted;
+        private int _released;
+
+        public PlanetModificationSnapshot Snapshot;
+        public RuntimePlanetBuilderEntry PendingEntry;
+        public PlanetModificationWorkResult WorkResult;
+        public NetworkPackage RuntimeSyncPacket;
+        public Exception WorkError;
+
+        public bool TryBeginPreparation()
+        {
+            return Interlocked.CompareExchange(
+                ref _preparationState,
+                1,
+                0) == 0;
+        }
+
+        public void FinishPreparation()
+        {
+            Interlocked.Exchange(
+                ref _preparationState,
+                2);
+        }
+
+        public bool PreparationFinished =>
+            Interlocked.CompareExchange(
+                ref _preparationState,
+                0,
+                0) == 2;
+
+        public bool TryBeginCompletion()
+        {
+            return Interlocked.CompareExchange(
+                ref _completionStarted,
+                1,
+                0) == 0;
+        }
+
+        public bool TryRelease()
+        {
+            return Interlocked.CompareExchange(
+                ref _released,
+                1,
+                0) == 0;
+        }
     }
 
 
@@ -171,6 +227,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public ulong BaseRuntimeRevision;
         public long PlanetSeed;
         public string TemplateId;
+        public string RequestedGeneratorName;
+        public string RequestedPlanetName;
         public MyObjectBuilder_PlanetGeneratorDefinition Builder;
         public Dictionary<string, PlanarPngBitmap> Images;
         public Dictionary<string,

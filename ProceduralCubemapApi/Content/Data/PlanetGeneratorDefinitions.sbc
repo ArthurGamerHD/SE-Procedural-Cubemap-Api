@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!--
+    Internal bootstrap generator used by CreatePlanet callers that need a
+    valid, featureless planet to modify. Keep this definition self-contained:
+    the API captures its object builder and map files when Push is called.
+  -->
+  <Definition xsi:type="PlanetGeneratorDefinition">
+    <Id>
+      <TypeId>PlanetGeneratorDefinition</TypeId>
+      <SubtypeId>ProceduralCubemapApiEmpty</SubtypeId>
+    </Id>
+    <DisplayName>Procedural Cubemap API Empty</DisplayName>
+    <Difficulty>DifficultyNormal</Difficulty>
+    <Public>false</Public>
+
+    <AllowSurfaceEconomyStations>false</AllowSurfaceEconomyStations>
+    <AllowOrbitalEconomyStations>false</AllowOrbitalEconomyStations>
+    <AllowContractSpawns>false</AllowContractSpawns>
+
+    <PlanetMaps Material="true" Ores="true" Biome="true" Occlusion="false"/>
+
+    <MesherPostprocessing xsi:type="MyObjectBuilder_VoxelMesherComponentDefinition">
+      <PostprocessingSteps>
+        <Step xsi:type="MyObjectBuilder_VoxelPostprocessingDecimate" ForPhysics="true">
+          <LodSettings>
+            <Settings FromLod="0">
+              <FeatureAngle>15</FeatureAngle>
+              <EdgeThreshold>.04</EdgeThreshold>
+              <PlaneThreshold>.02</PlaneThreshold>
+            </Settings>
+            <Settings FromLod="1">
+              <FeatureAngle>15</FeatureAngle>
+              <EdgeThreshold>.04</EdgeThreshold>
+              <PlaneThreshold>.04</PlaneThreshold>
+            </Settings>
+            <Settings FromLod="2">
+              <FeatureAngle>15</FeatureAngle>
+              <EdgeThreshold>.06</EdgeThreshold>
+              <PlaneThreshold>.06</PlaneThreshold>
+            </Settings>
+          </LodSettings>
+        </Step>
+      </PostprocessingSteps>
+    </MesherPostprocessing>
+
+    <DefaultSurfaceMaterial Material="Stone" MaxDepth="5"/>
+    <DefaultSubSurfaceMaterial Material="Stone"/>
+
+    <AllowMeteors>false</AllowMeteors>
+    <HasAtmosphere>false</HasAtmosphere>
+    <SurfaceGravity>1</SurfaceGravity>
+    <HillParams Min="-0.001" Max="0.001"/>
+    <MinimumSurfaceLayerDepth>5</MinimumSurfaceLayerDepth>
+  </Definition>
+</Definitions>

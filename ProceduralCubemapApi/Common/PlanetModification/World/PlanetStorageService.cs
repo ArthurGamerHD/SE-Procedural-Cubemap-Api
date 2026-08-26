@@ -259,6 +259,41 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
             if (replacementGenerator == null)
                 throw new ArgumentNullException(nameof(replacementGenerator));
 
+            PlanetModificationWorkResult result =
+                PrepareSwap(
+                    targetPlanet,
+                    replacementGenerator.Id.SubtypeName,
+                    currentProviderSubtype,
+                    operationName);
+
+            result.ReplacementGenerator =
+                replacementGenerator;
+
+            return result;
+        }
+
+
+        internal PlanetModificationWorkResult PrepareSwap(
+            MyPlanet targetPlanet,
+            string replacementProviderSubtype,
+            string currentProviderSubtype,
+            string operationName = "planet modification")
+        {
+            if (targetPlanet == null)
+                throw new ArgumentNullException(nameof(targetPlanet));
+
+            if (targetPlanet.Storage == null)
+                throw new Exception(
+                    "Target planet has null Storage.");
+
+            if (string.IsNullOrWhiteSpace(
+                    replacementProviderSubtype))
+            {
+                throw new ArgumentException(
+                    "Replacement provider subtype cannot be empty.",
+                    nameof(replacementProviderSubtype));
+            }
+
 
             // Capture the exact storage instance whose bytes are copied. The
             // simulation-thread commit later compares against this reference,
@@ -293,14 +328,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
             // serialized storage only needs to point at the new provider subtype.
             if (!string.Equals(
                 currentProviderSubtype,
-                replacementGenerator.Id.SubtypeName,
+                replacementProviderSubtype,
                 StringComparison.OrdinalIgnoreCase))
             {
                 patchedRaw =
                     ReplaceSerializedShortStringExact(
                         patchedRaw,
                         currentProviderSubtype,
-                        replacementGenerator.Id.SubtypeName);
+                        replacementProviderSubtype);
             }
 
             byte[] patchedCompressed =
@@ -326,9 +361,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
 
                 PatchedStorage =
                     patchedCompressed,
-
-                ReplacementGenerator =
-                    replacementGenerator,
 
                 OperationName =
                     operationName
@@ -411,7 +443,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 patchedStorageApi,
                 workResult.ReplacementGenerator,
                 workResult.EnvironmentCarrierSubtype,
-                workResult.ChangeEnvironment);
+                workResult.ChangeEnvironment,
+                workResult.RequestedPlanetName);
         }
 
 
@@ -564,7 +597,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
             VRage.ModAPI.IMyStorage patchedStorageApi,
             MyPlanetGeneratorDefinition replacementGenerator,
             string environmentCarrierSubtype,
-            bool changeEnvironment)
+            bool changeEnvironment,
+            string requestedPlanetName)
         {
             if (sourcePlanet == null)
                 throw new ArgumentNullException(nameof(sourcePlanet));
@@ -584,6 +618,43 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
 
             try
             {
+                bool reinitializedForPlanetName =
+                    false;
+
+                string storageName =
+                    ResolvePlanetStorageName(
+                        sourcePlanet,
+                        requestedPlanetName);
+
+                if (!string.IsNullOrWhiteSpace(storageName))
+                {
+                    if (replacementGenerator == null)
+                    {
+                        throw new Exception(
+                            "Planet rename requires a runtime generator.");
+                    }
+
+                    PlanetEnvironmentService.ReinitializeInPlace(
+                        sourcePlanet,
+                        replacementGenerator,
+                        storageName);
+
+                    sourcePlanet.Name =
+                        storageName;
+
+                    sourcePlanet.DisplayName =
+                        requestedPlanetName;
+
+                    sourcePlanet.DisplayNameText =
+                        requestedPlanetName;
+
+                    sourcePlanet.AsteroidName =
+                        requestedPlanetName;
+
+                    reinitializedForPlanetName =
+                        true;
+                }
+
                 if (!string.IsNullOrWhiteSpace(
                     environmentCarrierSubtype))
                 {
@@ -628,9 +699,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                         environmentDefinitionChanged ||
                         generatorIdentityChanged)
                     {
-                        PlanetEnvironmentService.ReinitializeInPlace(
-                            sourcePlanet,
-                            replacementGenerator);
+                        if (!reinitializedForPlanetName)
+                        {
+                            PlanetEnvironmentService.ReinitializeInPlace(
+                                sourcePlanet,
+                                replacementGenerator);
+                        }
                     }
                     else
                     {
@@ -662,7 +736,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     // sample the current material/biome/height provider.
                     PlanetEnvironmentService.ReinitializeInPlace(
                         sourcePlanet,
-                        replacementGenerator);
+                        replacementGenerator,
+                        storageName);
                 }
 
                 if (!string.IsNullOrWhiteSpace(
@@ -693,6 +768,46 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     bridge,
                     !storageTransferred);
             }
+        }
+
+
+        private static string ResolvePlanetStorageName(
+            MyPlanet sourcePlanet,
+            string requestedPlanetName)
+        {
+            if (string.IsNullOrWhiteSpace(requestedPlanetName))
+                return null;
+
+            string baseName =
+                requestedPlanetName.Trim();
+
+            string candidate =
+                baseName;
+
+            foreach (IMyEntity entity in MyEntities.GetEntities())
+            {
+                MyVoxelBase voxel =
+                    entity as MyVoxelBase;
+
+                if (voxel == null ||
+                    object.ReferenceEquals(voxel, sourcePlanet) ||
+                    !string.Equals(
+                        voxel.StorageName,
+                        candidate,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                candidate =
+                    baseName +
+                    "-" +
+                    sourcePlanet.EntityId;
+
+                break;
+            }
+
+            return candidate;
         }
 
 

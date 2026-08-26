@@ -165,6 +165,8 @@ namespace ProceduralCubemapApi.Common
 
             _runtimePackages.LoadPersistedRuntimeGenerators();
 
+            _modifications.EnsureEmptyPlanetRuntimeAssets();
+
             _network.Init();
 
             _environmentRestorer.Reset();
@@ -176,6 +178,14 @@ namespace ProceduralCubemapApi.Common
                     _environmentPresets);
 
             RegisterApiManager();
+
+            if (MyAPIGateway.Session != null &&
+                (!MyAPIGateway.Session.IsServer ||
+                 !HasWorkshopSavePathTransition()))
+            {
+                _worldStoragePathReady =
+                    true;
+            }
         }
 
 
@@ -282,6 +292,9 @@ namespace ProceduralCubemapApi.Common
             {
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
+
+                _modifications.EnsureEmptyPlanetRuntimeAssets(
+                    savePath: currentPath);
             }
             catch (Exception e)
             {
@@ -444,6 +457,9 @@ namespace ProceduralCubemapApi.Common
             {
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
+
+                _modifications.EnsureEmptyPlanetRuntimeAssets(
+                    savePath: currentPath);
             }
             catch (Exception e)
             {

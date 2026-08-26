@@ -18,7 +18,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 {
     internal sealed class PlanetDataArchiveService
     {
+        private const ushort FLAT_HEIGHT_SAMPLE = 32768;
+
         private readonly RuntimePackageStore _runtimePackages;
+        private readonly Dictionary<int, byte[]> _emptyPlanetArchives =
+            new Dictionary<int, byte[]>();
 
 
         internal PlanetDataArchiveService(
@@ -44,6 +48,92 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             _runtimePackages.SaveRuntimeArchive(
                 archiveFileName,
                 archive);
+        }
+
+
+        internal byte[] GetEmptyPlanetArchive(
+            int textureSize)
+        {
+            byte[] archive;
+
+            if (_emptyPlanetArchives.TryGetValue(
+                    textureSize,
+                    out archive))
+            {
+                return archive;
+            }
+
+            int pixelCount =
+                checked(textureSize * textureSize);
+
+            byte[][] heightPlanes = CreateEmptyPlanes(pixelCount);
+            byte heightHigh = (byte)(FLAT_HEIGHT_SAMPLE >> 8);
+            byte heightLow = (byte)(FLAT_HEIGHT_SAMPLE & 0xFF);
+
+            for (int pixel = 0; pixel < pixelCount; pixel++)
+            {
+                heightPlanes[0][pixel] = heightHigh;
+                heightPlanes[1][pixel] = heightLow;
+            }
+
+            byte[] heightPng =
+                new PlanarPngBitmap(
+                    textureSize,
+                    textureSize,
+                    16,
+                    0,
+                    heightPlanes)
+                    .Encode();
+
+            byte[][] materialPlanes = CreateEmptyPlanes(pixelCount);
+
+            byte[] materialPng =
+                new PlanarPngBitmap(
+                    textureSize,
+                    textureSize,
+                    8,
+                    2,
+                    materialPlanes)
+                    .Encode();
+
+            var entries =
+                new List<MinimalZip.Entry>(
+                    PlanetMapFileNames.All.Length);
+
+            foreach (string fileName in PlanetMapFileNames.All)
+            {
+                entries.Add(
+                    new MinimalZip.Entry(
+                        fileName,
+                        fileName.EndsWith(
+                            "_mat.png",
+                            StringComparison.OrdinalIgnoreCase)
+                            ? materialPng
+                            : heightPng,
+                        MinimalZip.CompressionMode.Deflate));
+            }
+
+            archive =
+                MinimalZip.WriteBytes(entries);
+
+            _emptyPlanetArchives.Add(
+                textureSize,
+                archive);
+
+            return archive;
+        }
+
+
+        private static byte[][] CreateEmptyPlanes(
+            int pixelCount)
+        {
+            return new[]
+            {
+                new byte[pixelCount],
+                new byte[pixelCount],
+                new byte[pixelCount],
+                new byte[pixelCount]
+            };
         }
 
 
