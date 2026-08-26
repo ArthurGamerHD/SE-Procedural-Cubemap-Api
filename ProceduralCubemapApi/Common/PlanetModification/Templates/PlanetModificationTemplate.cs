@@ -5,6 +5,7 @@ using Adk.Image.Png;
 using Generated;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
+using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.Noise;
 using ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets;
 using ProceduralCubemapApi.Common.PlanetModification.Features;
@@ -14,6 +15,7 @@ using ProceduralCubemapApi.Common.PlanetModification.Runtime;
 using VRage.Game;
 using VRage.ObjectBuilders;
 using VRage.Utils;
+using VRageMath;
 
 namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 {
@@ -75,7 +77,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         private DeferredPlanetModificationPush _deferredPush;
 
 
-        public readonly MyPlanet TargetPlanet;
+        public MyPlanet TargetPlanet;
         public readonly MyModContext SourceContext;
         public readonly string SourceSubtype;
         public readonly string SourceFolderName;
@@ -84,7 +86,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public readonly ulong BaseRuntimeRevision;
         public readonly long PlanetSeed;
         public readonly string TemplateId;
-        public readonly MyObjectBuilder_PlanetGeneratorDefinition Builder;
+        public MyObjectBuilder_PlanetGeneratorDefinition Builder;
+        public readonly bool IsCreation;
+        public readonly float CreationDiameter;
+        public readonly Vector3D CreationCenter;
 
 
         public PlanetModificationTemplate(
@@ -102,7 +107,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             long planetSeed,
             MyObjectBuilder_PlanetGeneratorDefinition builder,
             string environmentCarrierSubtype,
-            EnvironmentPresetCatalog environmentPresetCatalog)
+            EnvironmentPresetCatalog environmentPresetCatalog,
+            bool isCreation = false,
+            float creationDiameter = 0f,
+            Vector3D creationCenter = default(Vector3D))
         {
             if (coordinator == null)
                 throw new ArgumentNullException(nameof(coordinator));
@@ -155,6 +163,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             Builder =
                 builder;
 
+            IsCreation =
+                isCreation;
+
+            CreationDiameter =
+                creationDiameter;
+
+            CreationCenter =
+                creationCenter;
+
             _environmentCarrierSubtype =
                 environmentCarrierSubtype;
 
@@ -164,9 +181,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                 EnsureLayerEnabled(1);
             }
 
+            string templatePlanetIdentity =
+                targetPlanet == null
+                    ? "create|" + sourceSubtype
+                    : targetPlanet.EntityId.ToString();
+
             TemplateId =
                 StableIdentifier.Create(
-                    targetPlanet.EntityId +
+                    templatePlanetIdentity +
                     "|" +
                     planetSeed +
                     "|" +
@@ -302,8 +324,81 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                     _proceduralPersistenceEligible &&
                     !_requiresAuthoritativeImageSync,
                 InheritedProceduralRecipe =
-                    _inheritedProceduralRecipe
+                    _inheritedProceduralRecipe,
+                IsCreation =
+                    IsCreation,
+                CreationDiameter =
+                    CreationDiameter,
+                CreationCenter =
+                    CreationCenter
             };
+        }
+
+
+        /// <summary>
+        /// Returns a detached copy of the mutable planet generator object builder.
+        /// Changes to the returned builder do not affect this template until
+        /// SetPlanetGenerator is called.
+        /// </summary>
+        [ApiMethod]
+        private MyObjectBuilder_PlanetGeneratorDefinition GetPlanetGenerator()
+        {
+            EnsureEditable();
+
+            return ClonePlanetGeneratorBuilder(
+                Builder);
+        }
+
+
+        /// <summary>
+        /// Replaces the mutable planet generator object builder with a detached
+        /// copy of the caller-provided builder.
+        /// </summary>
+        [ApiMethod]
+        private void SetPlanetGenerator(
+            MyObjectBuilder_PlanetGeneratorDefinition generator)
+        {
+            EnsureEditable();
+
+            if (generator == null)
+                throw new ArgumentNullException(nameof(generator));
+
+            Builder = ClonePlanetGeneratorBuilder(
+                generator);
+
+            // A raw generator edit can change material tables/defaults as well
+            // as environment-related fields. Rebuild material allocation state
+            // and make Push treat both areas as potentially changed.
+            _usedMaterialMapValues = null;
+            _changeMaterials = true;
+            _changeEnvironment = true;
+        }
+
+
+        private static MyObjectBuilder_PlanetGeneratorDefinition
+            ClonePlanetGeneratorBuilder(
+                MyObjectBuilder_PlanetGeneratorDefinition source)
+        {
+            if (source == null)
+                throw new ArgumentNullException(nameof(source));
+
+            string xml =
+                MyAPIGateway.Utilities
+                    .SerializeToXML<MyObjectBuilder_PlanetGeneratorDefinition>(
+                        source);
+
+            MyObjectBuilder_PlanetGeneratorDefinition clone =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<MyObjectBuilder_PlanetGeneratorDefinition>(
+                        xml);
+
+            if (clone == null)
+            {
+                throw new InvalidOperationException(
+                    "Could not clone the planet generator definition.");
+            }
+
+            return clone;
         }
 
 
@@ -315,7 +410,26 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         {
             EnsureOpen();
 
-            return TargetPlanet.EntityId;
+            return TargetPlanet == null
+                ? 0
+                : TargetPlanet.EntityId;
+        }
+
+
+        internal void BindCreatedPlanet(
+            MyPlanet planet)
+        {
+            if (!IsCreation)
+            {
+                throw new InvalidOperationException(
+                    "Only deferred creation templates can bind a created planet.");
+            }
+
+            if (planet == null)
+                throw new ArgumentNullException(nameof(planet));
+
+            TargetPlanet =
+                planet;
         }
 
 

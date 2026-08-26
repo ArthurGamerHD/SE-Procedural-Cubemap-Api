@@ -1818,6 +1818,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         internal void ReconcileRuntimePackagesWithLivePlanets()
         {
+            if (MyAPIGateway.Session == null ||
+                !MyAPIGateway.Session.IsServer)
+            {
+                return;
+            }
+
+
             List<RuntimePlanetBuilderEntry> entries;
 
             lock (_persistenceSync)
@@ -1833,6 +1840,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             var staleEntries =
                 new List<RuntimePlanetBuilderEntry>();
 
+            var staleProviderSubtypes =
+                new Dictionary<RuntimePlanetBuilderEntry, string>();
+
             foreach (IGrouping<long, RuntimePlanetBuilderEntry> group in
                 entries.GroupBy(x =>
                     x.SourceEntityId))
@@ -1846,8 +1856,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     planet.Closed ||
                     planet.MarkedForClose)
                 {
-                    staleEntries.AddRange(
-                        group);
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Retaining runtime packages for planet " +
+                        group.Key +
+                        " because the live planet is unavailable during startup reconciliation.");
 
                     continue;
                 }
@@ -1875,12 +1887,19 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 }
 
 
-                staleEntries.AddRange(
+                foreach (RuntimePlanetBuilderEntry entry in
                     group.Where(x =>
                         !string.Equals(
                             x.Subtype,
                             providerSubtype,
-                            StringComparison.OrdinalIgnoreCase)));
+                            StringComparison.OrdinalIgnoreCase)))
+                {
+                    staleEntries.Add(
+                        entry);
+
+                    staleProviderSubtypes[entry] =
+                        providerSubtype;
+                }
             }
 
 
@@ -1906,6 +1925,25 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     {
                         continue;
                     }
+
+
+                    string liveProviderSubtype;
+
+                    staleProviderSubtypes.TryGetValue(
+                        staleEntry,
+                        out liveProviderSubtype);
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Removing stale runtime package. " +
+                        "Subtype='" +
+                        staleEntry.Subtype +
+                        "', SourceEntityId=" +
+                        staleEntry.SourceEntityId +
+                        ", LiveProvider='" +
+                        (liveProviderSubtype ?? "") +
+                        "', Archive='" +
+                        staleEntry.ArchiveFile +
+                        "'.");
 
 
                     RuntimePersistencePackageEntry package =
@@ -2018,13 +2056,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             string fileName,
             byte[] contents)
         {
+            byte[] providerArchive =
+                RuntimeArchiveLayout.PrepareProviderArchive(
+                    fileName,
+                    contents);
+
             using (BinaryWriter writer =
                 MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
                     fileName,
                     typeof(CubemapApiServer)))
             {
                 writer.Write(
-                    contents);
+                    providerArchive);
             }
 
 

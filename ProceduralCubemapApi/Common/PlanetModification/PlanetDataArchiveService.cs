@@ -10,6 +10,7 @@ using ProceduralCubemapApi.Common.Noise.fBm;
 using ProceduralCubemapApi.Common.PlanetModification.Features;
 using ProceduralCubemapApi.Common.PlanetModification.Maps;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
+using ProceduralCubemapApi.Common.PlanetModification.Runtime;
 using ProceduralCubemapApi.Common.PlanetModification.Templates;
 using VRage.Game;
 using VRage.Utils;
@@ -892,11 +893,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 if (entry != null &&
                     !string.Equals(
-                        entry.Name,
+                        RuntimeArchiveLayout.GetLogicalEntryName(
+                            entry.Name),
                         RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    output[entry.Name] =
+                    output[
+                        RuntimeArchiveLayout.GetLogicalEntryName(
+                            entry.Name)] =
                         entry.Data;
                 }
             }

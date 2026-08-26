@@ -6,12 +6,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 {
     internal static class RuntimeProceduralCache
     {
-        internal const string CACHE_GUID = "21d3c440-3644-4c32-869e-755541b10120";
-
+        internal const string CACHE_GUID = "73C203AA-A3E2-4D6F-BE81-7E3FEC31A297";
         internal const string ARCHIVE_MANIFEST_FILE = "__CubemapApiCache.xml";
-
-        private const string ZIP_COMMENT_PREFIX = "PVCAPI:";
-
+        private const string ZIP_COMMENT_PREFIX = "APC_API:";
 
         internal static string ZipComment => ZIP_COMMENT_PREFIX + CACHE_GUID;
 

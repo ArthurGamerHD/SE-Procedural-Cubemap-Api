@@ -11,6 +11,8 @@ namespace ProceduralCubemapApi.Api
     /// </summary>
     public sealed class ModificationTemplate
     {
+        private readonly Func<MyObjectBuilder_PlanetGeneratorDefinition> _getPlanetGenerator;
+        private readonly Action<MyObjectBuilder_PlanetGeneratorDefinition> _setPlanetGenerator;
         private readonly Func<long> _getPlanetEntityId;
         private readonly Func<long> _getPlanetSeed;
         private readonly Action<string> _setGeneratorName;
@@ -45,6 +47,16 @@ namespace ProceduralCubemapApi.Api
         {
             if (api == null)
                 throw new ArgumentNullException("api");
+
+            _getPlanetGenerator =
+                GetRequired<Func<MyObjectBuilder_PlanetGeneratorDefinition>>(
+                    api,
+                    "GetPlanetGenerator");
+
+            _setPlanetGenerator =
+                GetRequired<Action<MyObjectBuilder_PlanetGeneratorDefinition>>(
+                    api,
+                    "SetPlanetGenerator");
 
             _getPlanetEntityId =
                 GetRequired<Func<long>>(
@@ -180,6 +192,28 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Action>(
                     api,
                     "Close");
+        }
+
+
+        /// <summary>
+        /// Returns a detached copy of the mutable planet generator object builder.
+        /// Changes to the returned builder do not affect this template until
+        /// SetPlanetGenerator is called.
+        /// </summary>
+        public MyObjectBuilder_PlanetGeneratorDefinition GetPlanetGenerator()
+        {
+            return _getPlanetGenerator();
+        }
+
+
+        /// <summary>
+        /// Replaces the mutable planet generator object builder with a detached
+        /// copy of the caller-provided builder.
+        /// </summary>
+        public void SetPlanetGenerator(
+            MyObjectBuilder_PlanetGeneratorDefinition generator)
+        {
+            _setPlanetGenerator(generator);
         }
 
 

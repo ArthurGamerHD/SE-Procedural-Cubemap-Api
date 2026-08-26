@@ -191,6 +191,13 @@ namespace ProceduralCubemapApi.Common
 
         public override void BeforeStart()
         {
+            if (MyAPIGateway.Session == null ||
+                !MyAPIGateway.Session.IsServer)
+            {
+                return;
+            }
+
+
             try
             {
                 _runtimePackages.ReconcileRuntimePackagesWithLivePlanets();

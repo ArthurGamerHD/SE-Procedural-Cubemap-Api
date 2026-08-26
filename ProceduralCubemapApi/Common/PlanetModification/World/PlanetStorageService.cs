@@ -448,6 +448,44 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
         }
 
 
+        internal void ApplyPlanetName(
+            MyPlanet planet,
+            MyPlanetGeneratorDefinition generator,
+            string requestedPlanetName)
+        {
+            string storageName =
+                ResolvePlanetStorageName(
+                    planet,
+                    requestedPlanetName);
+
+            if (string.IsNullOrWhiteSpace(storageName))
+                return;
+
+            if (generator == null)
+            {
+                throw new Exception(
+                    "Planet rename requires a runtime generator.");
+            }
+
+            PlanetEnvironmentService.ReinitializeInPlace(
+                planet,
+                generator,
+                storageName);
+
+            planet.Name =
+                storageName;
+
+            planet.DisplayName =
+                requestedPlanetName;
+
+            planet.DisplayNameText =
+                requestedPlanetName;
+
+            planet.AsteroidName =
+                requestedPlanetName;
+        }
+
+
         internal MyVoxelMap CreateStorageBridge(
             MyPlanet sourcePlanet,
             VRage.ModAPI.IMyStorage storageApi,

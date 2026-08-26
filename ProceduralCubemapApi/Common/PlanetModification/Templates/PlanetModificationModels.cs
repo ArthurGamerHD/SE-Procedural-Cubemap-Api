@@ -7,6 +7,7 @@ using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
 using VRage.Game;
+using VRageMath;
 
 namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 {
@@ -27,6 +28,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public bool ChangeMaterials;
         public bool ChangeEnvironment;
         public string RequestedPlanetName;
+        public bool IsCreation;
+        public float CreationDiameter;
+        public int CreationSeed;
+        public Vector3D CreationCenter;
     }
 
 
@@ -37,6 +42,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         private int _released;
 
         public PlanetModificationSnapshot Snapshot;
+        public PlanetModificationTemplate Template;
         public RuntimePlanetBuilderEntry PendingEntry;
         public PlanetModificationWorkResult WorkResult;
         public NetworkPackage RuntimeSyncPacket;
@@ -246,6 +252,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public bool ChangeEnvironment;
         public bool ProceduralPersistenceEligible;
         public RuntimeProceduralPlanetRecipe InheritedProceduralRecipe;
+        public bool IsCreation;
+        public float CreationDiameter;
+        public Vector3D CreationCenter;
     }
 
 

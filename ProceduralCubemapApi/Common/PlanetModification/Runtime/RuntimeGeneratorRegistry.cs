@@ -6,6 +6,7 @@ using Sandbox.Definitions;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
 using VRage.Game;
+using VRage.Game.ObjectBuilders;
 using VRage.ObjectBuilders;
 using VRage.Utils;
 
@@ -615,7 +616,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
             foreach (var entry in _runtimePackages.Settings.PlanetBuilders.Where(entry => entry != null))
             {
-                RebindGeneratorFolder(
+                RebindGeneratorArchive(
                     entry.Subtype,
                     BuildWorldStoragePath(
                         savePath,
@@ -636,9 +637,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
         }
 
 
-        private void RebindGeneratorFolder(
+        private void RebindGeneratorArchive(
             string subtype,
-            string absolutePlanetDataFolder)
+            string absoluteArchivePath)
         {
             MyPlanetGeneratorDefinition generator =
                 MyDefinitionManager.Static
@@ -651,16 +652,35 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             if (generator == null)
                 return;
 
+            string providerPath =
+                RuntimeArchiveLayout.GetProviderPath(
+                    absoluteArchivePath);
+
+            MyObjectBuilder_PlanetTextureMapProvider provider =
+                generator.MapProvider as
+                    MyObjectBuilder_PlanetTextureMapProvider;
+
             if (string.Equals(
-                NormalizePath(generator.FolderName),
-                NormalizePath(absolutePlanetDataFolder),
-                StringComparison.OrdinalIgnoreCase))
+                    NormalizePath(
+                        generator.Context == null
+                            ? null
+                            : generator.Context.ModPath),
+                    NormalizePath(
+                        absoluteArchivePath),
+                    StringComparison.OrdinalIgnoreCase) &&
+                provider != null &&
+                string.Equals(
+                    provider.Path,
+                    providerPath,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            generator.FolderName =
-                absolutePlanetDataFolder;
+            BindGeneratorArchive(
+                generator,
+                subtype,
+                absoluteArchivePath);
 
             generator.Postprocess();
 
@@ -681,7 +701,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
         internal MyPlanetGeneratorDefinition RegisterDefinition(MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder,
             string subtype,
-            string absolutePlanetDataFolder)
+            string absoluteArchivePath)
         {
             MyPlanetGeneratorDefinition existing =
                 MyDefinitionManager.Static
@@ -694,6 +714,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
             if (existing != null)
             {
+                BindGeneratorArchive(
+                    existing,
+                    subtype,
+                    absoluteArchivePath);
+
+                existing.Postprocess();
+
                 MyLog.Default.WriteLineAndConsole(
                     "[RuntimePlanetGenerator] Reusing already registered generator: " +
                     subtype);
@@ -711,17 +738,19 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             // which is why some source planets appeared to work while their
             // original rock/sand/etc. rules disappeared during Init().
             //
-            // Init() only needs the runtime Id and rooted FolderName while it
-            // consumes the builder, and it copies both values into the runtime
-            // definition. Temporarily override those two fields on the already
-            // valid captured/persisted builder, then restore the portable values
-            // immediately afterwards. This keeps the full material rule/layer
-            // graph intact and uses only ModAPI-whitelisted members.
+            // Init() only needs the runtime Id and texture-map provider while it
+            // consumes the builder. Temporarily override those fields on the
+            // already valid captured/persisted builder, then restore the portable
+            // values immediately afterwards. This keeps the full material
+            // rule/layer graph intact and uses only ModAPI-whitelisted members.
             SerializableDefinitionId originalId =
                 sourceBuilder.Id;
 
             string originalFolderName =
                 sourceBuilder.FolderName;
+
+            MyObjectBuilder_PlanetMapProvider originalMapProvider =
+                sourceBuilder.MapProvider;
 
 
             sourceBuilder.Id =
@@ -730,10 +759,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     subtype);
 
 
-            // FolderName is the absolute VRage virtual-folder path backed by
-            // one deterministic .zip file in this save's world storage.
-            sourceBuilder.FolderName =
-                absolutePlanetDataFolder;
+            RuntimeArchiveLayout.BindBuilder(
+                sourceBuilder,
+                absoluteArchivePath);
+
+            MyModContext runtimeContext =
+                CreateRuntimeContext(
+                    subtype,
+                    absoluteArchivePath);
 
 
             var runtimeGenerator =
@@ -742,24 +775,24 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
             try
             {
-                // Use OUR mod context now. The definition itself is complete and
-                // its planet maps live at an absolute FolderName, so there is no
-                // remaining dependency on the source definition's map folder.
                 runtimeGenerator.Init(
                     sourceBuilder,
-                    _modContext);
+                    runtimeContext);
 
                 runtimeGenerator.Postprocess();
             }
             finally
             {
                 // Keep the persisted/captured builder portable and reusable.
-                // RuntimeGenerator.Init() has already copied Id and FolderName.
+                // RuntimeGenerator.Init() has already copied the runtime values.
                 sourceBuilder.Id =
                     originalId;
 
                 sourceBuilder.FolderName =
                     originalFolderName;
+
+                sourceBuilder.MapProvider =
+                    originalMapProvider;
             }
 
 
@@ -790,14 +823,93 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             MyLog.Default.WriteLineAndConsole(
                 "[RuntimePlanetGenerator] Registered '" +
                 subtype +
-                "' from persisted/captured builder with absolute FolderName='" +
-                registered.FolderName +
-                "'");
+                "' with provider Path='" +
+                ((MyObjectBuilder_PlanetTextureMapProvider)
+                    registered.MapProvider).Path +
+                "', ModPath='" +
+                registered.Context.ModPath +
+                "'.");
 
 
             return registered;
         }
 
 
+        internal void BindGeneratorArchive(
+            MyPlanetGeneratorDefinition generator,
+            string subtype,
+            string absoluteArchivePath)
+        {
+            if (generator == null)
+                throw new ArgumentNullException(nameof(generator));
+
+            string providerPath =
+                RuntimeArchiveLayout.GetProviderPath(
+                    absoluteArchivePath);
+
+            generator.FolderName =
+                providerPath;
+
+            generator.MapProvider =
+                RuntimeArchiveLayout.CreateTextureMapProvider(
+                    absoluteArchivePath);
+
+            string contextName =
+                BuildRuntimeContextName(
+                    subtype,
+                    absoluteArchivePath);
+
+            MyModContext context =
+                generator.Context;
+
+            if (context == null ||
+                !string.Equals(
+                    context.ModName,
+                    contextName,
+                    StringComparison.Ordinal))
+            {
+                context =
+                    new MyModContext();
+
+                generator.Context =
+                    context;
+            }
+
+            context.Init(
+                contextName,
+                _modContext.CurrentFile,
+                absoluteArchivePath);
+        }
+
+
+        private MyModContext CreateRuntimeContext(
+            string subtype,
+            string absoluteArchivePath)
+        {
+            var context =
+                new MyModContext();
+
+            context.Init(
+                BuildRuntimeContextName(
+                    subtype,
+                    absoluteArchivePath),
+                _modContext.CurrentFile,
+                absoluteArchivePath);
+
+            return context;
+        }
+
+
+        private static string BuildRuntimeContextName(
+            string subtype,
+            string absoluteArchivePath)
+        {
+            return
+                "ProceduralCubemapApi.Runtime." +
+                subtype +
+                "." +
+                RuntimeArchiveLayout.GetProviderPath(
+                    absoluteArchivePath);
+        }
     }
 }

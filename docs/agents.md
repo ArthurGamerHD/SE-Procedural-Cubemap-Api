@@ -45,4 +45,6 @@ Before running the script:
 
 ## Deferred planet pushes
 
-`ModificationTemplate.GetPushAction()` freezes a template and returns only the worker-safe preparation phase. Clients may execute many returned actions with `MyAPIGateway.Parallel.Do`. After all actions return, each template must receive exactly one `CompletePush` call on the originating simulation/loading thread; that method registers definitions, commits engine entity state, and invokes its callback synchronously. Do not move definition registration or planet storage commits into the returned worker action.
+`ModificationTemplate.PushNoCommit()` freezes a template and returns only the worker-safe preparation phase. Clients may execute many returned actions with `MyAPIGateway.Parallel.Do`. After all actions return, each template must receive exactly one `CommitPendingPush` call on the originating simulation/loading thread; that method registers definitions, commits engine entity state, and invokes its callback synchronously. Do not move definition registration or planet storage commits into the returned worker action.
+
+`ApiProvider.CreatePlanetAtCenter` creates a deferred template rather than a live entity. Its entity ID remains zero while the worker action prepares the runtime package. Completion registers the runtime generator, computes the engine storage-cube offset from the requested center, spawns the planet once, and binds the resulting entity back to the template before invoking the success callback.

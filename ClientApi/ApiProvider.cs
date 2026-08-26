@@ -11,7 +11,7 @@ namespace ProceduralCubemapApi.Api
     public sealed class ApiProvider
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
-        private readonly Func<string, float, int, Vector3D, int, ApiData> _createPlanet;
+        private readonly Func<string, float, int, Vector3D, ApiData> _createPlanetAtCenter;
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<string[]> _getApiPlanetDetails;
         private readonly Func<ApiData> _getNoiseProvider;
@@ -31,10 +31,10 @@ namespace ProceduralCubemapApi.Api
                     api,
                     "GetModificationTemplate");
 
-            _createPlanet =
-                GetRequired<Func<string, float, int, Vector3D, int, ApiData>>(
+            _createPlanetAtCenter =
+                GetRequired<Func<string, float, int, Vector3D, ApiData>>(
                     api,
-                    "CreatePlanet");
+                    "CreatePlanetAtCenter");
 
             _getPlanetMetadata =
                 GetRequired<Func<long, bool, ApiData>>(
@@ -89,21 +89,18 @@ namespace ProceduralCubemapApi.Api
 
 
         /// <summary>
-        /// Creates a new planet entity from a loaded source generator and returns
-        /// a mutable template for that planet. Position is the planet's minimum
-        /// corner, matching IMyVoxelMaps.SpawnPlanet. Texture size controls both
-        /// generated height and material cubemap faces and must be a positive
-        /// multiple of four. Vanilla planets use 2048 by default.
+        /// Creates a deferred planet template centered at the requested world
+        /// position. The planet is not spawned until Push commits the final
+        /// runtime generator, so the live planet is initialized only once.
         /// </summary>
-        public ModificationTemplate CreatePlanet(
-            string sourceGeneratorName,
+        public ModificationTemplate CreatePlanetAtCenter(
+            string generatorSubtype,
             float diameter,
             int seed,
-            Vector3D position,
-            int textureSize = 2048)
+            Vector3D center)
         {
             ApiData nestedApi =
-                _createPlanet(sourceGeneratorName, diameter, seed, position, textureSize);
+                _createPlanetAtCenter(generatorSubtype, diameter, seed, center);
 
             return nestedApi == null
                 ? null
