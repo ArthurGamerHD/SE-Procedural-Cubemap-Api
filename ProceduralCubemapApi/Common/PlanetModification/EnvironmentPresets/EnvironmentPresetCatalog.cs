@@ -35,6 +35,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets
         }
 
 
+        internal void Refresh()
+        {
+            _presets.Clear();
+            ScanLoadedDefinitions();
+        }
+
+
         internal string[] GetPresetNames()
         {
             string[] names = _presets.Keys.ToArray();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Adk.Compression.Zip;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
@@ -128,6 +129,174 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
             throw new Exception(
                 "Could not locate the serialized live planet provider subtype " +
                 "and seed in VX2.");
+        }
+
+
+        internal void ReloadRuntimePlanetCubemaps(
+            string previousSavePath,
+            string currentSavePath)
+        {
+            previousSavePath =
+                RuntimeGeneratorRegistry.NormalizePath(
+                    previousSavePath);
+
+            currentSavePath =
+                RuntimeGeneratorRegistry.NormalizePath(
+                    currentSavePath);
+
+            if (string.IsNullOrWhiteSpace(currentSavePath) ||
+                string.Equals(
+                    previousSavePath,
+                    currentSavePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_runtimePackages.Settings == null ||
+                _runtimePackages.Settings.PlanetBuilders == null ||
+                _runtimePackages.Settings.PlanetBuilders.Count == 0)
+            {
+                return;
+            }
+
+
+            var visitedPlanets =
+                new HashSet<long>();
+
+            int reloadedCount =
+                0;
+
+            int failedCount =
+                0;
+
+
+            for (int index =
+                    _runtimePackages.Settings.PlanetBuilders.Count - 1;
+                index >= 0;
+                index--)
+            {
+                RuntimePlanetBuilderEntry entry =
+                    _runtimePackages.Settings.PlanetBuilders[index];
+
+                if (entry == null ||
+                    entry.SourceEntityId == 0 ||
+                    !visitedPlanets.Add(
+                        entry.SourceEntityId))
+                {
+                    continue;
+                }
+
+
+                IMyEntity entity;
+
+                if (!MyAPIGateway.Entities.TryGetEntityById(
+                        entry.SourceEntityId,
+                        out entity))
+                {
+                    continue;
+                }
+
+                MyPlanet planet =
+                    entity as MyPlanet;
+
+                if (planet == null ||
+                    planet.Storage == null ||
+                    planet.Provider == null ||
+                    planet.Generator == null ||
+                    !string.Equals(
+                        planet.Generator.Id.SubtypeName,
+                        entry.Subtype,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+
+                try
+                {
+                    ReloadPlanetCubemap(
+                        planet);
+
+                    reloadedCount++;
+                }
+                catch (Exception e)
+                {
+                    failedCount++;
+
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Could not reload live planet " +
+                        "cubemap after save-path transition. EntityId=" +
+                        planet.EntityId +
+                        ", Generator='" +
+                        entry.Subtype +
+                        "': " +
+                        e);
+                }
+            }
+
+
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Reloaded live runtime planet cubemaps " +
+                "after save-path transition. PreviousPath='" +
+                (previousSavePath ?? "<unbound>") +
+                "', SavePath='" +
+                currentSavePath +
+                "', Reloaded=" +
+                reloadedCount +
+                ", Failed=" +
+                failedCount +
+                ".");
+        }
+
+
+        private void ReloadPlanetCubemap(
+            MyPlanet planet)
+        {
+            byte[] serializedStorage;
+
+            planet.Storage.Save(
+                out serializedStorage);
+
+            if (serializedStorage == null ||
+                serializedStorage.Length == 0)
+            {
+                throw new Exception(
+                    "Live planet storage serialization returned no data.");
+            }
+
+
+            // Keen does not whitelist MyPlanetStorageProvider.Init() for mods.
+            // Reload the serialized provider through the supported ModAPI after
+            // its generator definition has been rebound. The planet entity and
+            // all serialized voxel deltas remain unchanged.
+            VRage.ModAPI.IMyStorage reloadedStorage =
+                MyAPIGateway.Session.VoxelMaps.CreateStorage(
+                    serializedStorage);
+
+            if (reloadedStorage == null)
+            {
+                throw new Exception(
+                    "CreateStorage() rejected the live planet provider reload.");
+            }
+
+
+            SpawnPlanetThroughVoxelMapStorageBridge(
+                planet,
+                reloadedStorage,
+                planet.Generator,
+                null,
+                false,
+                null);
+
+
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Reloaded live planet cubemap provider " +
+                "in place. EntityId=" +
+                planet.EntityId +
+                ", Generator='" +
+                planet.Generator.Id.SubtypeName +
+                "'.");
         }
 
 

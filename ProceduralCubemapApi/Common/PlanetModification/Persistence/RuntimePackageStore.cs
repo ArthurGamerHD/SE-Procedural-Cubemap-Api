@@ -112,8 +112,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             string> ProceduralGeneratorSignatureBuilder { get; set; }
 
 
-        internal void LoadPersistedRuntimeGenerators()
+        internal void LoadPersistedRuntimeGenerators(
+            RuntimeEnvironmentDefinitionCompiler environmentCompiler)
         {
+            if (environmentCompiler == null)
+                throw new ArgumentNullException(nameof(environmentCompiler));
             bool migrateLegacyWorldStorage;
 
             Settings =
@@ -176,6 +179,55 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             RecreateWorldStorageCache(
                 migrateLegacyWorldStorage);
+
+
+            // Recreate every caller-authored legacy environment before runtime
+            // generator registration. At this point no persisted planet entity has
+            // been initialized yet, so one full Keen definition reload is safe.
+            var environmentRequests =
+                new List<RuntimeEnvironmentCompileRequest>();
+
+            for (int i = 0;
+                i < Settings.PlanetBuilders.Count;
+                i++)
+            {
+                RuntimePlanetBuilderEntry entry =
+                    Settings.PlanetBuilders[i];
+
+                MyObjectBuilder_PlanetGeneratorDefinition builder =
+                    LoadGeneratorBuilderFromWorldStorage(
+                        entry.GeneratorFile);
+
+                if (!builder.Environment.HasValue &&
+                    builder.EnvironmentItems != null &&
+                    builder.EnvironmentItems.Length > 0)
+                {
+                    environmentRequests.Add(
+                        new RuntimeEnvironmentCompileRequest
+                        {
+                            OwnerGeneratorSubtype = entry.Subtype,
+                            Builder = builder
+                        });
+                }
+            }
+
+            Dictionary<string, string> compiledEnvironments =
+                environmentCompiler.Compile(
+                    environmentRequests);
+
+            foreach (RuntimePlanetBuilderEntry entry in Settings.PlanetBuilders)
+            {
+                string carrierSubtype;
+
+                if (entry != null &&
+                    compiledEnvironments.TryGetValue(
+                        entry.Subtype,
+                        out carrierSubtype))
+                {
+                    entry.EnvironmentCarrierSubtype =
+                        carrierSubtype;
+                }
+            }
 
 
             string savePath =

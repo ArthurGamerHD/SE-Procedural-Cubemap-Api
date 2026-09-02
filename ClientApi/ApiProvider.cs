@@ -11,7 +11,7 @@ namespace ProceduralCubemapApi.Api
     public sealed class ApiProvider
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
-        private readonly Func<string, float, int, Vector3D, ApiData> _createPlanetAtCenter;
+        private readonly Func<string, float, int, Vector3D, int, ApiData> _createPlanetAtCenter;
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<string[]> _getApiPlanetDetails;
         private readonly Func<ApiData> _getNoiseProvider;
@@ -32,7 +32,7 @@ namespace ProceduralCubemapApi.Api
                     "GetModificationTemplate");
 
             _createPlanetAtCenter =
-                GetRequired<Func<string, float, int, Vector3D, ApiData>>(
+                GetRequired<Func<string, float, int, Vector3D, int, ApiData>>(
                     api,
                     "CreatePlanetAtCenter");
 
@@ -92,15 +92,17 @@ namespace ProceduralCubemapApi.Api
         /// Creates a deferred planet template centered at the requested world
         /// position. The planet is not spawned until Push commits the final
         /// runtime generator, so the live planet is initialized only once.
+        /// Texture size controls the generated cubemap faces and defaults to 16.
         /// </summary>
         public ModificationTemplate CreatePlanetAtCenter(
             string generatorSubtype,
             float diameter,
             int seed,
-            Vector3D center)
+            Vector3D center,
+            int textureSize = 2048)
         {
             ApiData nestedApi =
-                _createPlanetAtCenter(generatorSubtype, diameter, seed, center);
+                _createPlanetAtCenter(generatorSubtype, diameter, seed, center, textureSize);
 
             return nestedApi == null
                 ? null

@@ -36,7 +36,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         private const string EMPTY_PLANET_GENERATOR_SUBTYPE =
             "ProceduralCubemapApiEmpty";
 
-        private const int DEFAULT_EMPTY_PLANET_TEXTURE_SIZE = 4;
+        private const int DEFAULT_EMPTY_PLANET_TEXTURE_SIZE = 16; // needs to be a number equal/greater than 8 and divisible by 4,
+                                                                  // otherwise the game will throw an exception when trying to load
+                                                                  // the cubemap or deadlock into pruning the voxel tree
 
         private const string EMPTY_PLANET_ARCHIVE_STEM =
             "ProceduralCubemapApiEmpty.runtime";
@@ -62,6 +64,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         private readonly RuntimeGeneratorRegistry _runtimeGenerators;
         private readonly PlanetStorageService _planetStorage;
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
+        private readonly RuntimeEnvironmentDefinitionCompiler _environmentCompiler;
         private readonly VoxelNetworkSession _network;
         private readonly Func<bool> _isUnloading;
         private readonly Func<bool> _isWorldStoragePathReady;
@@ -76,6 +79,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
         private bool _requestInProgress;
         private int _deferredPushCount;
+        private readonly object _deferredPushSync =
+            new object();
+        private readonly List<DeferredPlanetModificationPush> _deferredPushes =
+            new List<DeferredPlanetModificationPush>();
         private readonly object _runtimeGeneratorRegistrationSync =
             new object();
         private readonly Dictionary<int, string> _emptyPlanetAssetSavePaths =
@@ -91,6 +98,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             RuntimeGeneratorRegistry runtimeGenerators,
             PlanetStorageService planetStorage,
             EnvironmentPresetCatalog environmentPresetCatalog,
+            RuntimeEnvironmentDefinitionCompiler environmentCompiler,
             VoxelNetworkSession network,
             Func<bool> isUnloading,
             Func<bool> isWorldStoragePathReady)
@@ -109,6 +117,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             if (environmentPresetCatalog == null)
                 throw new ArgumentNullException(nameof(environmentPresetCatalog));
+
+            if (environmentCompiler == null)
+                throw new ArgumentNullException(nameof(environmentCompiler));
 
             if (network == null)
                 throw new ArgumentNullException(nameof(network));
@@ -133,6 +144,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             _environmentPresetCatalog =
                 environmentPresetCatalog;
+
+            _environmentCompiler =
+                environmentCompiler;
 
             _network =
                 network;
@@ -690,138 +704,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 template).GetApi();
         }
 
-
-        internal ApiData CreatePlanetTemplateApi(
-            string generatorSubtype,
-            float diameter,
-            int seed,
-            Vector3D center)
-        {
-            if (_isUnloading())
-                throw new Exception("Voxel Cubemap API server is unloading.");
-
-            if (!_isWorldStoragePathReady())
-            {
-                throw new Exception(
-                    "Voxel Cubemap API world storage is not ready. " +
-                    "Workshop save-path normalization is still in progress; " +
-                    "retry this operation shortly.");
-            }
-
-            if (MyAPIGateway.Session == null ||
-                !MyAPIGateway.Session.IsServer)
-            {
-                throw new Exception(
-                    "Planets can only be created by the server.");
-            }
-
-            if (string.IsNullOrWhiteSpace(generatorSubtype))
-            {
-                throw new ArgumentException(
-                    "Generator subtype is required.",
-                    nameof(generatorSubtype));
-            }
-
-            if (float.IsNaN(diameter) ||
-                float.IsInfinity(diameter) ||
-                diameter <= 0f)
-            {
-                throw new ArgumentException(
-                    "Planet diameter must be finite and greater than zero.",
-                    nameof(diameter));
-            }
-
-            if (!center.IsValid())
-            {
-                throw new ArgumentException(
-                    "Planet center must be finite.",
-                    nameof(center));
-            }
-
-            generatorSubtype =
-                generatorSubtype.Trim();
-
-            MyPlanetGeneratorDefinition sourceGenerator =
-                MyDefinitionManager.Static
-                    .GetPlanetsGeneratorsDefinitions()
-                    .FirstOrDefault(definition =>
-                        definition != null &&
-                        definition.Id.SubtypeName.Equals(
-                            generatorSubtype,
-                            StringComparison.OrdinalIgnoreCase));
-
-            if (sourceGenerator == null)
-            {
-                throw new Exception(
-                    "Planet generator '" +
-                    generatorSubtype +
-                    "' is not registered.");
-            }
-
-            bool usesGeneratedEmptyAssets =
-                string.Equals(
-                    sourceGenerator.Id.SubtypeName,
-                    EMPTY_PLANET_GENERATOR_SUBTYPE,
-                    StringComparison.OrdinalIgnoreCase);
-
-            string sourceArchiveFile =
-                usesGeneratedEmptyAssets
-                    ? EnsureEmptyPlanetRuntimeAssets()
-                    : null;
-
-            MyObjectBuilder_PlanetGeneratorDefinition builder =
-                _runtimeGenerators.CaptureSourceBuilder(
-                    sourceGenerator);
-
-            if (!string.IsNullOrWhiteSpace(builder.InheritFrom))
-            {
-                throw new Exception(
-                    "Deferred planet creation does not flatten inherited planet " +
-                    "generator definitions yet. Source='" +
-                    generatorSubtype +
-                    "', InheritFrom='" +
-                    builder.InheritFrom +
-                    "'.");
-            }
-
-            string sourceFolderName =
-                string.IsNullOrWhiteSpace(builder.FolderName)
-                    ? generatorSubtype
-                    : builder.FolderName;
-
-            var template =
-                new PlanetModificationTemplate(
-                    this,
-                    _planetDataArchives,
-                    null,
-                    sourceGenerator.Context,
-                    generatorSubtype,
-                    sourceFolderName,
-                    sourceArchiveFile,
-                    generatorSubtype,
-                    0,
-                    !usesGeneratedEmptyAssets,
-                    null,
-                    seed,
-                    builder,
-                    null,
-                    _environmentPresetCatalog,
-                    true,
-                    diameter,
-                    center);
-
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Created deferred planet template " +
-                template.TemplateId +
-                " from generator '" +
-                generatorSubtype +
-                "'.");
-
-            return new PlanetModificationTemplateApi(
-                template).GetApi();
-        }
-
-
         internal ApiData CreatePlanetTemplateApi(
             string sourceGeneratorName,
             float diameter,
@@ -906,11 +788,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     EMPTY_PLANET_GENERATOR_SUBTYPE,
                     StringComparison.OrdinalIgnoreCase);
 
-            if (usesGeneratedEmptyAssets)
-            {
-                EnsureEmptyPlanetRuntimeAssets(
-                    textureSize);
-            }
+            string sourceArchiveFile =
+                usesGeneratedEmptyAssets
+                    ? EnsureEmptyPlanetRuntimeAssets(
+                        textureSize)
+                    : null;
 
             MyObjectBuilder_PlanetGeneratorDefinition sourceBuilder =
                 _runtimeGenerators.CaptureSourceBuilder(
@@ -927,68 +809,42 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     "'.");
             }
 
-            MyPlanet planet =
-                MyAPIGateway.Session.VoxelMaps.SpawnPlanet(
+            string sourceFolderName =
+                string.IsNullOrWhiteSpace(
+                    sourceBuilder.FolderName)
+                    ? sourceGeneratorName
+                    : sourceBuilder.FolderName;
+
+            var template =
+                new PlanetModificationTemplate(
+                    this,
+                    _planetDataArchives,
+                    null,
+                    sourceGenerator.Context,
                     sourceGeneratorName,
-                    diameter,
+                    sourceFolderName,
+                    sourceArchiveFile,
+                    sourceGeneratorName,
+                    0,
+                    !usesGeneratedEmptyAssets,
+                    null,
                     seed,
-                    position) as MyPlanet;
+                    sourceBuilder,
+                    null,
+                    _environmentPresetCatalog,
+                    true,
+                    diameter,
+                    position);
 
-            if (planet == null)
-            {
-                throw new Exception(
-                    "Space Engineers did not create a planet from generator '" +
-                    sourceGeneratorName +
-                    "'.");
-            }
+            MyLog.Default.WriteLineAndConsole(
+                "[Voxel Cubemap API] Created deferred planet template " +
+                template.TemplateId +
+                " from generator '" +
+                sourceGeneratorName +
+                "'.");
 
-            try
-            {
-                if (usesGeneratedEmptyAssets)
-                {
-                    _emptyPlanetTextureSizes[planet.EntityId] =
-                        textureSize;
-                }
-
-                ApiData templateApi =
-                    CreateModificationTemplateApi(
-                        planet.EntityId);
-
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Created planet " +
-                    planet.EntityId +
-                    " from generator '" +
-                    sourceGeneratorName +
-                    "' with seed " +
-                    seed +
-                    " and diameter " +
-                    diameter +
-                    ".");
-
-                return templateApi;
-            }
-            catch
-            {
-                _emptyPlanetTextureSizes.Remove(
-                    planet.EntityId);
-
-                try
-                {
-                    MyAPIGateway.Entities.RemoveEntity(
-                        planet);
-
-                    planet.Close();
-                }
-                catch (Exception cleanupError)
-                {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Could not clean up planet after " +
-                        "template creation failed: " +
-                        cleanupError);
-                }
-
-                throw;
-            }
+            return new PlanetModificationTemplateApi(
+                template).GetApi();
         }
 
 
@@ -1221,6 +1077,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     RuntimeSyncPacket = runtimeSyncPacket
                 };
 
+            lock (_deferredPushSync)
+            {
+                _deferredPushes.Add(
+                    deferredPush);
+            }
+
             Interlocked.Increment(
                 ref _deferredPushCount);
 
@@ -1293,6 +1155,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 {
                     try
                     {
+                        CompilePendingDeferredEnvironments();
+
                         RegisterDeferredRuntimeGenerator(
                             deferredPush.WorkResult);
                     }
@@ -1316,6 +1180,114 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             {
                 ReleaseDeferredPush(
                     deferredPush);
+            }
+        }
+
+
+        private void CompilePendingDeferredEnvironments()
+        {
+            List<DeferredPlanetModificationPush> candidates;
+
+            lock (_deferredPushSync)
+            {
+                bool unfinishedDynamicCreation =
+                    _deferredPushes.Any(x =>
+                        x != null &&
+                        x.Snapshot != null &&
+                        x.Snapshot.IsCreation &&
+                        x.Snapshot.Builder != null &&
+                        !x.Snapshot.Builder.Environment.HasValue &&
+                        x.Snapshot.Builder.EnvironmentItems != null &&
+                        x.Snapshot.Builder.EnvironmentItems.Length > 0 &&
+                        !x.PreparationFinished);
+
+                if (unfinishedDynamicCreation)
+                {
+                    throw new InvalidOperationException(
+                        "All deferred planet creations with runtime EnvironmentItems " +
+                        "must finish their worker preparation before the first " +
+                        "CommitPendingPush. Run the returned PushNoCommit actions as " +
+                        "one batch before committing any template.");
+                }
+
+                candidates =
+                    _deferredPushes
+                        .Where(x =>
+                            x != null &&
+                            x.PreparationFinished &&
+                            x.WorkError == null &&
+                            x.WorkResult != null &&
+                            x.Snapshot != null &&
+                            x.Snapshot.IsCreation &&
+                            x.WorkResult.ReplacementGeneratorBuilder != null &&
+                            string.IsNullOrWhiteSpace(
+                                x.WorkResult.EnvironmentCarrierSubtype) &&
+                            !x.WorkResult.ReplacementGeneratorBuilder.Environment.HasValue &&
+                            x.WorkResult.ReplacementGeneratorBuilder.EnvironmentItems != null &&
+                            x.WorkResult.ReplacementGeneratorBuilder.EnvironmentItems.Length > 0)
+                        .ToList();
+            }
+
+            if (candidates.Count == 0)
+                return;
+
+            var requests =
+                candidates
+                    .Select(x =>
+                        new RuntimeEnvironmentCompileRequest
+                        {
+                            OwnerGeneratorSubtype =
+                                x.WorkResult.ReplacementGeneratorSubtype,
+                            Builder =
+                                x.WorkResult.ReplacementGeneratorBuilder
+                        })
+                    .ToArray();
+
+            Dictionary<string, string> compiled =
+                _environmentCompiler.Compile(
+                    requests);
+
+            // The full definition reload replaces every live definition object.
+            // Refresh XML-backed preset snapshots before exposing the API again.
+            _environmentPresetCatalog.Refresh();
+
+            for (int index = 0;
+                index < candidates.Count;
+                index++)
+            {
+                DeferredPlanetModificationPush candidate =
+                    candidates[index];
+
+                string carrierSubtype;
+
+                if (!compiled.TryGetValue(
+                        candidate.WorkResult.ReplacementGeneratorSubtype,
+                        out carrierSubtype))
+                {
+                    throw new Exception(
+                        "Runtime environment compiler did not return a carrier " +
+                        "for generator '" +
+                        candidate.WorkResult.ReplacementGeneratorSubtype +
+                        "'.");
+                }
+
+                candidate.Snapshot.EnvironmentCarrierSubtype =
+                    carrierSubtype;
+
+                candidate.PendingEntry.EnvironmentCarrierSubtype =
+                    carrierSubtype;
+
+                candidate.WorkResult.EnvironmentCarrierSubtype =
+                    carrierSubtype;
+
+                if (candidate.WorkResult.NewEntry != null)
+                {
+                    candidate.WorkResult.NewEntry.EnvironmentCarrierSubtype =
+                        carrierSubtype;
+                }
+
+                PlanetEnvironmentService.EnsureBiomeMapEnabled(
+                    candidate.WorkResult.ReplacementGeneratorBuilder);
             }
         }
 
@@ -1364,6 +1336,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 !deferredPush.TryRelease())
             {
                 return;
+            }
+
+            lock (_deferredPushSync)
+            {
+                _deferredPushes.Remove(
+                    deferredPush);
             }
 
             Interlocked.Decrement(

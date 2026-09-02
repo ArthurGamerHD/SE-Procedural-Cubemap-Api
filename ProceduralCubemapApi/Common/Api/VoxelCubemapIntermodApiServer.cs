@@ -58,19 +58,22 @@ namespace ProceduralCubemapApi.Common.Api
         /// Creates a deferred planet template centered at the requested world
         /// position. The planet is not spawned until Push commits the final
         /// runtime generator, so the live planet is initialized only once.
+        /// Texture size controls the generated cubemap faces and defaults to 16.
         /// </summary>
         [ApiMethod(typeof(PlanetModificationTemplate))]
         public Dictionary<string, Delegate> CreatePlanetAtCenter(
             string generatorSubtype,
             float diameter,
             int seed,
-            Vector3D center)
+            Vector3D center,
+            int textureSize = 2048)
         {
             return _coordinator.CreatePlanetTemplateApi(
                 generatorSubtype,
                 diameter,
                 seed,
-                center);
+                center,
+                textureSize);
         }
 
         /// <summary>

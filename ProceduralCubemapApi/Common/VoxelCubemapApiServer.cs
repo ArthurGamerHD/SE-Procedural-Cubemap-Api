@@ -33,6 +33,7 @@ namespace ProceduralCubemapApi.Common
         private RuntimePackageStore _runtimePackages;
         private PlanetDataArchiveService _planetDataArchives;
         private PersistedEnvironmentRestorer _environmentRestorer;
+        private RuntimeEnvironmentDefinitionCompiler _environmentCompiler;
         private PlanetModificationCoordinator _modifications;
         private RuntimeGeneratorRegistry _runtimeGenerators;
         private PlanetStorageService _planetStorage;
@@ -139,6 +140,9 @@ namespace ProceduralCubemapApi.Common
                     _runtimePackages,
                     _planetStorage);
 
+            _environmentCompiler =
+                new RuntimeEnvironmentDefinitionCompiler();
+
             _environmentPresets =
                 new EnvironmentPresetCatalog(
                     _runtimeGenerators);
@@ -153,6 +157,7 @@ namespace ProceduralCubemapApi.Common
                     _runtimeGenerators,
                     _planetStorage,
                     _environmentPresets,
+                    _environmentCompiler,
                     _network,
                     () => _unloading,
                     () => _worldStoragePathReady);
@@ -163,7 +168,15 @@ namespace ProceduralCubemapApi.Common
             _runtimePackages.ProceduralGeneratorSignatureBuilder =
                 _modifications.BuildProceduralGeneratorSignature;
 
-            _runtimePackages.LoadPersistedRuntimeGenerators();
+            // Persisted dynamic EnvironmentItems must be compiled before their
+            // runtime generators are registered and before world planet entities
+            // initialize. The compiler may perform one full definition reload.
+            _runtimePackages.LoadPersistedRuntimeGenerators(
+                _environmentCompiler);
+
+            // A startup compiler reload replaces definition objects captured by
+            // the initial preset scan. Refresh after persisted generators are back.
+            _environmentPresets.Refresh();
 
             _modifications.EnsureEmptyPlanetRuntimeAssets();
 
@@ -297,11 +310,23 @@ namespace ProceduralCubemapApi.Common
 
             try
             {
+                string previousSavePath =
+                    _runtimePackages.BoundSavePath;
+
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
 
                 _modifications.EnsureEmptyPlanetRuntimeAssets(
                     savePath: currentPath);
+
+                // A newly created world begins with CurrentPath pointing at its
+                // CustomWorld template while world storage already targets the
+                // promoted save. Save As produces the same stale-provider shape.
+                // Rebind definitions first, then make each live provider reload
+                // its cubemap while preserving the serialized voxel contents.
+                _planetStorage.ReloadRuntimePlanetCubemaps(
+                    previousSavePath,
+                    currentPath);
             }
             catch (Exception e)
             {
@@ -462,11 +487,22 @@ namespace ProceduralCubemapApi.Common
 
             try
             {
+                string previousSavePath =
+                    _runtimePackages.BoundSavePath;
+
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
 
                 _modifications.EnsureEmptyPlanetRuntimeAssets(
                     savePath: currentPath);
+
+                // BoundSavePath starts unbound for the first runtime generator
+                // in a new world and changes again after Save As. Rebind first,
+                // then refresh each matching live provider exactly once for the
+                // observed path transition.
+                _planetStorage.ReloadRuntimePlanetCubemaps(
+                    previousSavePath,
+                    currentPath);
             }
             catch (Exception e)
             {

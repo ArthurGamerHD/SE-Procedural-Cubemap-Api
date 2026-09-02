@@ -17,6 +17,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
         private readonly RuntimePackageStore _runtimePackages;
         private readonly MyModContext _modContext;
 
+        private readonly Dictionary<string, string> _sourceDefinitionXmlCache =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly Dictionary<string, string> _sourceDefinitionFileCache =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
 
         internal RuntimeGeneratorRegistry(
             RuntimePackageStore runtimePackages,
@@ -63,11 +69,29 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             string subtype =
                 sourceGenerator.Id.SubtypeName;
 
-            ReadSourceDefinitionXml(
-                context,
+            if (!_sourceDefinitionXmlCache.TryGetValue(
                 subtype,
-                out xml,
-                out resolvedFile);
+                out xml))
+            {
+                ReadSourceDefinitionXml(
+                    context,
+                    subtype,
+                    out xml,
+                    out resolvedFile);
+
+                _sourceDefinitionXmlCache[subtype] =
+                    xml;
+
+                _sourceDefinitionFileCache[subtype] =
+                    resolvedFile;
+            }
+            else if (!_sourceDefinitionFileCache.TryGetValue(
+                subtype,
+                out resolvedFile))
+            {
+                resolvedFile =
+                    "<cached source definition>";
+            }
 
 
             MyObjectBuilder_PlanetGeneratorDefinition builder =
@@ -550,14 +574,30 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 NormalizePath(
                     MyAPIGateway.Session.CurrentPath);
 
-            if (!string.IsNullOrWhiteSpace(currentPath))
+            string sessionName =
+                MyAPIGateway.Session.Name;
+
+            bool workshopSession =
+                IsWorkshopSessionName(
+                    sessionName);
+
+            bool contentCustomWorldPath =
+                IsContentCustomWorldPath(
+                    currentPath);
+
+            // New built-in worlds retain their Content/CustomWorlds template as
+            // CurrentPath until DelayedSaveAfterLoad runs. Session.Name already
+            // contains the exact promoted save name at this point, so bind new
+            // runtime generators to that save before planet/economy initialization.
+            // Workshop worlds have their own promotion flow and must continue to
+            // use the path supplied by the game/server normalization code.
+            if (!string.IsNullOrWhiteSpace(currentPath) &&
+                (!contentCustomWorldPath || workshopSession))
+            {
                 return currentPath;
+            }
 
 
-            // During the earliest LoadData() phase CurrentPath can still be
-            // unresolved. Use the normal saves root + current save/session
-            // name so persisted runtime generators can be registered before planet
-            // entities resolve their generator definition.
             if (MyAPIGateway.Utilities.GamePaths == null)
             {
                 throw new Exception(
@@ -569,7 +609,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     MyAPIGateway.Utilities.GamePaths.SavesPath);
 
             string saveName =
-                MyAPIGateway.Session.Name;
+                ResolvePromotedSaveName(
+                    sessionName);
 
             if (string.IsNullOrWhiteSpace(savesRoot) ||
                 string.IsNullOrWhiteSpace(saveName))
@@ -585,11 +626,62 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 saveName;
 
             MyLog.Default.WriteLineAndConsole(
-                "[RuntimePlanetGenerator] CurrentPath unresolved during LoadData; " +
-                "using initial save path fallback: " +
-                fallback);
+                contentCustomWorldPath
+                    ? "[RuntimePlanetGenerator] CurrentPath still points at the " +
+                      "built-in CustomWorld template; using the promoted initial " +
+                      "save path: " +
+                      fallback
+                    : "[RuntimePlanetGenerator] CurrentPath unresolved during " +
+                      "LoadData; using initial save path fallback: " +
+                      fallback);
 
             return fallback;
+        }
+
+
+        private static bool IsContentCustomWorldPath(
+            string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            return path.IndexOf(
+                    "/Content/CustomWorlds/",
+                    StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+
+        private static bool IsWorkshopSessionName(
+            string sessionName)
+        {
+            return !string.IsNullOrWhiteSpace(sessionName) &&
+                sessionName.StartsWith(
+                    "(Workshop) ",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+
+        private static string ResolvePromotedSaveName(
+            string sessionName)
+        {
+            const string workshopPrefix =
+                "(Workshop) ";
+
+            if (string.IsNullOrWhiteSpace(sessionName))
+                return sessionName;
+
+            if (sessionName.StartsWith(
+                    workshopPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                sessionName =
+                    sessionName.Substring(
+                        workshopPrefix.Length);
+            }
+
+            return sessionName.Replace(
+                ':',
+                '-');
         }
 
 
