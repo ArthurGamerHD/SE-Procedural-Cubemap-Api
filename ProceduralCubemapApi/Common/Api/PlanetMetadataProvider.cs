@@ -184,6 +184,23 @@ namespace ProceduralCubemapApi.Common.Api
 
 
         /// <summary>
+        /// Loads the ore (blue) channel of one material-map face.
+        /// </summary>
+        [ApiMethod]
+        private byte[] LoadOreFace(
+            string face)
+        {
+            lock (_sync)
+            {
+                EnsureOpen();
+
+                return _snapshot.LoadOreFace(
+                    face);
+            }
+        }
+
+
+        /// <summary>
         /// Closes only this caller's handle and subscriptions. The shared
         /// snapshot remains alive while another handle still uses it.
         /// </summary>
@@ -435,6 +452,19 @@ namespace ProceduralCubemapApi.Common.Api
                         true)),
                 1,
                 "biome");
+        }
+
+
+        internal byte[] LoadOreFace(
+            string face)
+        {
+            return ClonePlane(
+                LoadImage(
+                    BuildFaceFileName(
+                        face,
+                        true)),
+                2,
+                "ore");
         }
 
 

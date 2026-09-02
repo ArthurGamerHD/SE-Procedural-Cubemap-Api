@@ -15,6 +15,7 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<string, ushort[]> _loadHeightFace;
         private readonly Func<string, byte[]> _loadMaterialFace;
         private readonly Func<string, byte[]> _loadBiomeFace;
+        private readonly Func<string, byte[]> _loadOreFace;
         private readonly Action _close;
 
 
@@ -53,6 +54,11 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<string, byte[]>>(
                     api,
                     "LoadBiomeFace");
+
+            _loadOreFace =
+                GetRequired<Func<string, byte[]>>(
+                    api,
+                    "LoadOreFace");
 
             _close =
                 GetRequired<Action>(
@@ -121,6 +127,16 @@ namespace ProceduralCubemapApi.Api
             string face)
         {
             return _loadBiomeFace(face);
+        }
+
+
+        /// <summary>
+        /// Loads the ore (blue) channel of one material-map face.
+        /// </summary>
+        public byte[] LoadOreFace(
+            string face)
+        {
+            return _loadOreFace(face);
         }
 
 
