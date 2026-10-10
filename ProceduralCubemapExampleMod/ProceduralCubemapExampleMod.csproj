@@ -1,3 +1,4 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>netframework48</TargetFramework>
@@ -12,7 +13,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Mal.Mdk2.ModPackager" Version="2.2.10">
+    <PackageReference Include="Mal.Mdk2.ModPackager" Version="2.2.11">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -35,16 +36,11 @@
     <AdditionalFiles Remove="Content\Data\SBC files can go here" />
     <None Remove="thumb.png" />
   </ItemGroup>
-
   <Target Name="Mapjpgtopng" BeforeTargets="PostBuildEvent">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\thumb.jpg"
-          DestinationFiles="$(MSBuildProjectDirectory)\thumb.png"
-          SkipUnchangedFiles="true"/>
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\thumb.jpg" DestinationFiles="$(MSBuildProjectDirectory)\thumb.png" SkipUnchangedFiles="true" />
   </Target>
-
   <Target Name="RemoveThumbAlias" AfterTargets="MdkPack;MdkDidNotPack">
     <Delete Files="$(MSBuildProjectDirectory)\thumb.png" />
   </Target>
-
   <Import Project="..\ClientApi\ClientApi.projitems" Label="Shared" />
 </Project>

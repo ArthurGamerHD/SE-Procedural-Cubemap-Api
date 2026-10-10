@@ -15,7 +15,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Mal.Mdk2.ModPackager" Version="2.2.10">
+    <PackageReference Include="Mal.Mdk2.ModPackager" Version="2.2.11">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -41,46 +41,27 @@
     <AdditionalFiles Remove="Content\Data\SBC files can go here" />
     <None Remove="thumb.png" />
   </ItemGroup>
-
   <Target Name="Mapjpgtopng" BeforeTargets="PostBuildEvent">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\thumb.jpg"
-          DestinationFiles="$(MSBuildProjectDirectory)\thumb.png"
-          SkipUnchangedFiles="true"/>
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\thumb.jpg" DestinationFiles="$(MSBuildProjectDirectory)\thumb.png" SkipUnchangedFiles="true" />
   </Target>
-
   <Target Name="RemoveThumbAlias" AfterTargets="MdkPack;MdkDidNotPack">
     <Delete Files="$(MSBuildProjectDirectory)\thumb.png" />
   </Target>
-  
   <Import Project="..\External\Adk\Adk.Compression\Adk.Compression.projitems" Label="Shared" />
   <Import Project="..\External\Adk\Adk.Image\Adk.Image.projitems" Label="Shared" />
-
   <Target Name="ExportGeneratedClientApi" AfterTargets="CoreCompile">
-    <ReadLinesFromFile File="$(ClientApiOutputPath)\.generated-files"
-                       Condition="Exists('$(ClientApiOutputPath)\.generated-files')">
+    <ReadLinesFromFile File="$(ClientApiOutputPath)\.generated-files" Condition="Exists('$(ClientApiOutputPath)\.generated-files')">
       <Output TaskParameter="Lines" ItemName="PreviousGeneratedClientApi" />
     </ReadLinesFromFile>
-
     <ItemGroup>
       <GeneratedClientApiRunMarker Include="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\ApiProviderAttributes.g.cs" />
-      <GeneratedClientApi Include="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.cs"
-                          Exclude="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.g.cs" />
-      <GeneratedClientApiDestination Include="@(GeneratedClientApi->'$(ClientApiOutputPath)\%(Filename)%(Extension)')" />
+      <GeneratedClientApi Include="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.cs" Exclude="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator\*.g.cs" />
+      <GeneratedClientApiDestination Include="@(GeneratedClientApi-&gt;'$(ClientApiOutputPath)\%(Filename)%(Extension)')" />
     </ItemGroup>
-
-    <MakeDir Directories="$(ClientApiOutputPath)"
-             Condition="Exists('@(GeneratedClientApiRunMarker)')" />
-    <Delete Files="@(PreviousGeneratedClientApi)"
-            Condition="Exists('@(GeneratedClientApiRunMarker)')" />
-    <Copy SourceFiles="@(GeneratedClientApi)"
-          DestinationFiles="@(GeneratedClientApiDestination)"
-          SkipUnchangedFiles="true"
-          Condition="Exists('@(GeneratedClientApiRunMarker)')" />
-    <WriteLinesToFile File="$(ClientApiOutputPath)\.generated-files"
-                      Lines="@(GeneratedClientApiDestination)"
-                      Overwrite="true"
-                      Condition="Exists('@(GeneratedClientApiRunMarker)')" />
-    <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator"
-               Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <MakeDir Directories="$(ClientApiOutputPath)" Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <Delete Files="@(PreviousGeneratedClientApi)" Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <Copy SourceFiles="@(GeneratedClientApi)" DestinationFiles="@(GeneratedClientApiDestination)" SkipUnchangedFiles="true" Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <WriteLinesToFile File="$(ClientApiOutputPath)\.generated-files" Lines="@(GeneratedClientApiDestination)" Overwrite="true" Condition="Exists('@(GeneratedClientApiRunMarker)')" />
+    <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Adk.Analyzer\Adk.Analyzer.ApiProviderGenerator" Condition="Exists('@(GeneratedClientApiRunMarker)')" />
   </Target>
 </Project>

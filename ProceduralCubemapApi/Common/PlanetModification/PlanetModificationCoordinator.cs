@@ -237,6 +237,23 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 _emptyPlanetAssetSavePaths[textureSize] =
                     resolvedSavePath;
+
+                // The first archive may not exist when the initial path is
+                // computed. Probe again after world storage writes it.
+                absoluteArchivePath =
+                    _runtimeGenerators.BuildWorldStoragePath(
+                        resolvedSavePath,
+                        archiveFile);
+
+                generatorIsCurrent = generatorIsCurrent &&
+                    string.Equals(
+                        RuntimeGeneratorRegistry.NormalizePath(
+                            emptyGenerator.Context == null
+                                ? null
+                                : emptyGenerator.Context.ModPath),
+                        RuntimeGeneratorRegistry.NormalizePath(
+                            absoluteArchivePath),
+                        StringComparison.OrdinalIgnoreCase);
             }
 
             if (!generatorIsCurrent)

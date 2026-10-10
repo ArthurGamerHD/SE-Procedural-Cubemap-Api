@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using Generated;
 using Sandbox.Definitions;
+using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.Api;
@@ -13,7 +15,9 @@ using ProceduralCubemapApi.Common.PlanetModification.Runtime;
 using ProceduralCubemapApi.Common.PlanetModification.World;
 using VRage.Game;
 using VRage.Game.Components;
+using VRage.Game.ModAPI;
 using VRage.Utils;
+using VRageMath;
 
 namespace ProceduralCubemapApi.Common
 {
@@ -27,6 +31,9 @@ namespace ProceduralCubemapApi.Common
         private bool _workshopStorageWarningLogged;
         private bool _workshopStorageFailureLogged;
         private int _workshopStorageRetryFrames;
+        private bool _worldStorageFirstFrameSelfTestPending;
+        private bool _worldStorageVerificationFailed;
+        private bool _playerConnectedSubscribed;
         private CubemapIntermodApiServer _intermodApi;
 
         private CubemapApiConfig _config;
@@ -112,6 +119,19 @@ namespace ProceduralCubemapApi.Common
             _workshopStorageRetryFrames =
                 0;
 
+            _worldStorageFirstFrameSelfTestPending =
+                true;
+
+            _worldStorageVerificationFailed =
+                false;
+
+            _playerConnectedSubscribed =
+                MyAPIGateway.Session != null &&
+                MyAPIGateway.Session.IsServer;
+
+            if (_playerConnectedSubscribed)
+                MyVisualScriptLogicProvider.PlayerConnected += OnPlayerConnected;
+
             _config =
                 CubemapApiConfigStorage.LoadOrCreate();
 
@@ -128,6 +148,30 @@ namespace ProceduralCubemapApi.Common
                 new RuntimeGeneratorRegistry(
                     _runtimePackages,
                     (MyModContext)ModContext);
+
+            // Phase 1: provisional verification during LoadData(). Persisted
+            // runtime definitions created below should receive a usable physical
+            // ModPath whenever the engine's world-storage destination can already
+            // be resolved. The first simulation frame performs the authoritative
+            // second verification because workshop/Torch startup may rebind it.
+            if (MyAPIGateway.Session != null &&
+                MyAPIGateway.Session.IsServer)
+            {
+                try
+                {
+                    _runtimeGenerators.RunWorldStorageSelfTest(
+                        _runtimeGenerators.ResolveInitialSavePath(),
+"initial setup");
+                }
+                catch (Exception e)
+                {
+                    MyLog.Default.Log(
+                        MyLogSeverity.Warning,
+"[RuntimePlanetGenerator] Initial world-storage self-test "+
+"threw an exception; first-frame verification will retry: "+
+                        e.Message);
+                }
+            }
 
             _planetStorage =
                 new PlanetStorageService(
@@ -297,6 +341,16 @@ namespace ProceduralCubemapApi.Common
 
             try
             {
+                if (!TryRunWorldStorageSelfTest(
+                        currentPath,
+                        "workshop save-path normalization"))
+                {
+                    MyLog.Default.Log(MyLogSeverity.Warning,
+                        "[RuntimePlanetGenerator] World storage could not be " +
+                        "verified after the initial workshop save; " +
+                        "initialization will continue.");
+                }
+
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
 
@@ -393,6 +447,12 @@ namespace ProceduralCubemapApi.Common
             _unloading =
                 true;
 
+            if (_playerConnectedSubscribed)
+            {
+                MyVisualScriptLogicProvider.PlayerConnected -= OnPlayerConnected;
+                _playerConnectedSubscribed = false;
+            }
+
             if (_network != null)
             {
                 _network.Dispose();
@@ -433,6 +493,69 @@ namespace ProceduralCubemapApi.Common
             if (!EnsureWorldStoragePathReady())
                 return;
 
+            // Phase 2: authoritative verification on the first simulation frame
+            // after the existing workshop path-normalization logic has run.
+            if (MyAPIGateway.Session.IsServer &&
+                _worldStorageFirstFrameSelfTestPending)
+            {
+                _worldStorageFirstFrameSelfTestPending =
+                    false;
+
+                string previousVerifiedPath =
+                    _runtimeGenerators.VerifiedWorldSavePath;
+
+                string firstFramePath =
+                    RuntimeGeneratorRegistry.NormalizePath(
+                        MyAPIGateway.Session.CurrentPath);
+
+                bool selfTestPassed = TryRunWorldStorageSelfTest(
+                    firstFramePath,
+                    "first frame after world load");
+
+                if (!selfTestPassed)
+                {
+                    ReportWorldStorageVerificationFailure(
+                        _runtimeGenerators.UnixPathDetected
+                            ? "Linux-Compat plugin detected; path probing " +
+                              "cannot continue."
+                            : "SentinelCanary.txt could not be located through " +
+                              "the reported CurrentPath, enumerated saves, or " +
+                              "SavesPath + Session.Name.");
+                }
+                else
+                {
+                    _worldStorageVerificationFailed = false;
+
+                    string verifiedPath =
+                        _runtimeGenerators.VerifiedWorldSavePath;
+
+                    if (!string.Equals(
+                        previousVerifiedPath,
+                        verifiedPath,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            _runtimeGenerators.RebindToSavePath(
+                                firstFramePath);
+
+                            _modifications.EnsureEmptyPlanetRuntimeAssets(
+                                savePath: firstFramePath);
+                        }
+                        catch (Exception e)
+                        {
+                            _worldStoragePathReady = false;
+
+                            MyLog.Default.Log(MyLogSeverity.Error,
+                                "[RuntimePlanetGenerator] Runtime generator " +
+                                "rebinding failed after path verification: " + e);
+
+                            return;
+                        }
+                    }
+                }
+            }
+
             _modifications.UpdatePlanetMetadataProviders();
 
             _vegetationClearScheduler.Update();
@@ -462,6 +585,23 @@ namespace ProceduralCubemapApi.Common
 
             try
             {
+                if (MyAPIGateway.Session.IsServer)
+                {
+                    bool verified = TryRunWorldStorageSelfTest(
+                        currentPath,
+                        "save-path transition");
+
+                    if (verified)
+                        _worldStorageVerificationFailed = false;
+                    else
+                        ReportWorldStorageVerificationFailure(
+                            _runtimeGenerators.UnixPathDetected
+                                ? "Linux-Compat plugin detected; path probing " +
+                                  "cannot continue."
+                                : "World-storage path could not be verified " +
+                                  "after Save As.");
+                }
+
                 _runtimeGenerators.RebindToSavePath(
                     currentPath);
 
@@ -476,6 +616,99 @@ namespace ProceduralCubemapApi.Common
         }
 
 
+        private bool TryRunWorldStorageSelfTest(
+            string savePath,
+            string phase)
+        {
+            try
+            {
+                return _runtimeGenerators.RunWorldStorageSelfTest(
+                    savePath,
+                    phase);
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] World-storage self-test '" +
+                    phase + "' threw: " + e);
+                return false;
+            }
+        }
+
+
+        private void ReportWorldStorageVerificationFailure(
+            string reason)
+        {
+            const string banner =
+@"/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+/\    ARTHUR'S PROCEDURAL CUBEMAP API     /\
+\/                                        \/
+/\    INITIALIZATION SELF TEST FAILURE    /\
+\/       API MAYBE NOT READY!!!!!         \/
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/";
+
+            MyLog.Default.Log(
+                MyLogSeverity.Warning,
+                Environment.NewLine + banner + Environment.NewLine +
+                "[RuntimePlanetGenerator] World-storage verification failed; " +
+                "initialization will continue, but the mod cannot guarantee " +
+                "that it will work. Reason: " + reason);
+
+            if (_worldStorageVerificationFailed)
+                return;
+
+            _worldStorageVerificationFailed = true;
+
+            if (MyAPIGateway.Players == null)
+                return;
+
+            try
+            {
+                var players = new List<IMyPlayer>();
+                MyAPIGateway.Players.GetPlayers(players);
+
+                foreach (IMyPlayer player in players)
+                {
+                    if (player != null && !player.IsBot)
+                        SendVerificationWarning(player.IdentityId);
+                }
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not notify connected " +
+                    "players about failed verification: " + e);
+            }
+        }
+
+
+        private void OnPlayerConnected(long playerId)
+        {
+            if (_worldStorageVerificationFailed)
+                SendVerificationWarning(playerId);
+        }
+
+
+        private static void SendVerificationWarning(long playerId)
+        {
+            try
+            {
+                MyVisualScriptLogicProvider.SendChatMessageColored(
+                    "World-storage verification failed. Procedural Cubemap API " +
+                    "cannot guarantee that it will work on this server.",
+                    Color.Red,
+                    "Procedural Cubemap API",
+                    playerId);
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not notify player " +
+                    playerId + " about failed verification: " + e);
+            }
+        }
 
 
     }

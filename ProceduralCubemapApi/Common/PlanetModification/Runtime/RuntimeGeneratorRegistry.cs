@@ -7,6 +7,7 @@ using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
 using VRage.Game;
 using VRage.Game.ObjectBuilders;
+using VRage.Library.Utils;
 using VRage.ObjectBuilders;
 using VRage.Utils;
 
@@ -14,8 +15,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 {
     internal sealed class RuntimeGeneratorRegistry
     {
+        private const string WORLD_STORAGE_SENTINEL_FILE =
+"SentinelCanary.txt";
+
         private readonly RuntimePackageStore _runtimePackages;
         private readonly MyModContext _modContext;
+
+        private string _verifiedWorldSavePath;
+        private string _verifiedReportedSavePath;
+        private bool _linuxCompatWarningLogged;
+        private bool _unixPathDetected;
 
 
         internal RuntimeGeneratorRegistry(
@@ -34,6 +43,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             _modContext =
                 modContext;
         }
+
+
+        internal string VerifiedWorldSavePath =>
+            _verifiedWorldSavePath;
+
+        internal bool UnixPathDetected =>
+            _unixPathDetected;
 
 
         internal MyObjectBuilder_PlanetGeneratorDefinition
@@ -505,7 +521,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             string savePath,
             string fileName)
         {
-            if (MyAPIGateway.Utilities.GamePaths == null ||
+            if (MyAPIGateway.Utilities == null ||
+                MyAPIGateway.Utilities.GamePaths == null ||
                 string.IsNullOrWhiteSpace(savePath) ||
                 string.IsNullOrWhiteSpace(
                     MyAPIGateway.Utilities.GamePaths.ModScopeName))
@@ -515,9 +532,34 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             }
 
 
-            string worldSavePath =
-                ResolveWorldSavePath(
-                    savePath);
+            string worldSavePath;
+
+            string reportedSavePath =
+                ResolveWorldSavePath(savePath);
+
+            if (LooksLikeUnixPath(reportedSavePath))
+            {
+                WarnLinuxCompat(reportedSavePath);
+            }
+
+            if (_unixPathDetected)
+            {
+                worldSavePath = reportedSavePath;
+            }
+            else if (!string.IsNullOrWhiteSpace(_verifiedWorldSavePath) &&
+                string.Equals(reportedSavePath, _verifiedReportedSavePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                worldSavePath =
+                    _verifiedWorldSavePath;
+            }
+            else
+            {
+                worldSavePath =
+                    ResolveAccessibleWorldSavePath(
+                        reportedSavePath,
+                        fileName);
+            }
 
 
             return
@@ -526,6 +568,435 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 MyAPIGateway.Utilities.GamePaths.ModScopeName +
                 "/" +
                 fileName;
+        }
+
+
+        private string ResolveAccessibleWorldSavePath(
+            string reportedSavePath,
+            string fileName)
+        {
+            if (WorldStorageFileExists(reportedSavePath, fileName))
+                return reportedSavePath;
+
+            string enumeratedSavePath = ResolveEnumeratedWorldSavePath(
+                fileName, null);
+
+            if (_unixPathDetected)
+                return reportedSavePath;
+
+            if (!string.IsNullOrWhiteSpace(enumeratedSavePath))
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Runtime archive is not visible at " +
+                    "the reported save path. Using enumerated world-storage " +
+                    "path. CurrentPath='" + reportedSavePath +
+                    "', EnumeratedPath='" + enumeratedSavePath +
+                    "', Archive='" + fileName + "'.");
+
+                return enumeratedSavePath;
+            }
+
+            string sessionSavePath = ResolveSessionNamedSavePath();
+
+            if (string.IsNullOrWhiteSpace(sessionSavePath) ||
+                string.Equals(reportedSavePath, sessionSavePath,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !WorldStorageFileExists(sessionSavePath, fileName))
+            {
+                return reportedSavePath;
+            }
+
+            MyLog.Default.Log(MyLogSeverity.Warning,
+                "[RuntimePlanetGenerator] Runtime archive is not visible at " +
+                "the reported save path. Using session-name world-storage " +
+                "fallback. CurrentPath='" + reportedSavePath +
+                "', SessionPath='" + sessionSavePath +
+                "', Archive='" + fileName + "'.");
+
+            return sessionSavePath;
+        }
+
+
+        private string ResolveEnumeratedWorldSavePath(
+            string fileName,
+            string expectedToken)
+        {
+            string savesRoot = null;
+            try
+            {
+                if (MyAPIGateway.Utilities == null ||
+                    MyAPIGateway.Utilities.GamePaths == null ||
+                    string.IsNullOrWhiteSpace(fileName) ||
+                    string.IsNullOrWhiteSpace(
+                        MyAPIGateway.Utilities.GamePaths.UserDataPath) ||
+                    string.IsNullOrWhiteSpace(
+                        MyAPIGateway.Utilities.GamePaths.ModScopeName))
+                {
+                    return null;
+                }
+
+                savesRoot = NormalizePath(Path.Combine(
+                    MyAPIGateway.Utilities.GamePaths.UserDataPath,
+                    "Saves"));
+                string leafName = Path.GetFileName(fileName);
+                string storageSuffix = "/Storage/" +
+                    MyAPIGateway.Utilities.GamePaths.ModScopeName +
+                    "/" + leafName;
+
+                string[] foundFiles = PathUtils.GetFilesRecursively(
+                    savesRoot, leafName);
+                if (foundFiles == null)
+                    return null;
+
+                string resolved = null;
+                foreach (string foundFile in foundFiles)
+                {
+                    string normalized = NormalizePath(foundFile);
+                    if (LooksLikeUnixPath(normalized))
+                    {
+                        WarnLinuxCompat(normalized);
+                        return null;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(normalized) ||
+                        !normalized.StartsWith(savesRoot + "/",
+                            StringComparison.OrdinalIgnoreCase) ||
+                        !normalized.EndsWith(storageSuffix,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string candidate = normalized.Substring(
+                        0, normalized.Length - storageSuffix.Length);
+                    if (candidate.Length <= savesRoot.Length + 1 ||
+                        !(expectedToken == null
+                            ? WorldStorageFileExists(candidate, leafName)
+                            : WorldStorageSentinelMatches(candidate, expectedToken)))
+                    {
+                        continue;
+                    }
+
+                    if (resolved != null &&
+                        !string.Equals(resolved, candidate,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        MyLog.Default.Log(MyLogSeverity.Warning,
+                            "[RuntimePlanetGenerator] Multiple world-storage paths " +
+                            "matched the enumerated file '" + leafName +
+                            "'; refusing to choose one. FirstPath='" + resolved +
+                            "', OtherPath='" + candidate + "'.");
+                        return null;
+                    }
+
+                    resolved = candidate;
+                }
+
+                return resolved;
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not enumerate world-storage " +
+                    "files under '" + (savesRoot ?? "<unresolved>") +
+                    "': " + e);
+                return null;
+            }
+        }
+
+
+        private static bool WorldStorageFileExists(
+            string savePath,
+            string fileName)
+        {
+            if (MyAPIGateway.Utilities == null ||
+                MyAPIGateway.Utilities.GamePaths == null ||
+                string.IsNullOrWhiteSpace(savePath) ||
+                string.IsNullOrWhiteSpace(fileName) ||
+                string.IsNullOrWhiteSpace(
+                    MyAPIGateway.Utilities.GamePaths.ModScopeName))
+            {
+                return false;
+            }
+
+            try
+            {
+                return MyAPIGateway.Utilities.FileExistsInModLocation(
+                    Path.GetFileName(fileName),
+                    CreateWorldStorageProbeMod(savePath));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+        private static MyObjectBuilder_Checkpoint.ModItem CreateWorldStorageProbeMod(
+            string savePath)
+        {
+            string storageRoot =
+                NormalizePath(savePath).TrimEnd('/') +
+                "/Storage/" +
+                MyAPIGateway.Utilities.GamePaths.ModScopeName;
+
+            return new MyObjectBuilder_Checkpoint.ModItem(
+                storageRoot.Replace('/', '\\'), 0, null);
+        }
+
+
+        /// <summary>
+        /// Writes a unique canary through Keen's world-storage API, then checks
+        /// the reported path, enumerated save folders, and session-name path.
+        /// Each candidate is verified through ReadFileInModLocation().
+        /// Matching the canary content avoids accepting a stale sentinel left in
+        /// a previous save folder after a startup path transition.
+        /// </summary>
+        internal bool RunWorldStorageSelfTest(
+            string reportedSavePath,
+            string phase)
+        {
+            if (MyAPIGateway.Utilities == null ||
+                MyAPIGateway.Utilities.GamePaths == null)
+            {
+                _verifiedWorldSavePath =
+                    null;
+                _verifiedReportedSavePath =
+                    null;
+
+                return false;
+            }
+
+            string reported = ResolveWorldSavePath(reportedSavePath);
+
+            if (LooksLikeUnixPath(reported))
+            {
+                WarnLinuxCompat(reported);
+            }
+
+            if (_unixPathDetected)
+            {
+                _verifiedWorldSavePath = null;
+                _verifiedReportedSavePath = null;
+                return false;
+            }
+
+            string token =
+                (phase ?? "startup") +
+"|" +
+                DateTime.UtcNow.Ticks;
+
+            try
+            {
+                using (TextWriter writer =
+                    MyAPIGateway.Utilities.WriteFileInWorldStorage(
+                        WORLD_STORAGE_SENTINEL_FILE,
+                        typeof(CubemapApiServer)))
+                {
+                    writer.Write(
+                        token);
+                }
+            }
+            catch (Exception e)
+            {
+                _verifiedWorldSavePath =
+                    null;
+                _verifiedReportedSavePath =
+                    null;
+
+                MyLog.Default.Log(
+                    MyLogSeverity.Warning,
+"[RuntimePlanetGenerator] World-storage self-test '" +
+                    phase +
+"' could not write " +
+                    WORLD_STORAGE_SENTINEL_FILE +
+": " +
+                    e.Message);
+
+                return false;
+            }
+
+            string resolved =
+                null;
+
+            string resolutionSource =
+                null;
+
+            if (WorldStorageSentinelMatches(
+                    reported,
+                    token))
+            {
+                resolved =
+                    reported;
+                resolutionSource =
+                    "reported";
+            }
+            else
+            {
+                resolved = ResolveEnumeratedWorldSavePath(
+                    WORLD_STORAGE_SENTINEL_FILE, token);
+                if (resolved != null)
+                    resolutionSource = "enumerated";
+            }
+
+            if (_unixPathDetected)
+            {
+                _verifiedWorldSavePath = null;
+                _verifiedReportedSavePath = null;
+                return false;
+            }
+
+            string sessionNamed = resolved == null
+                ? ResolveSessionNamedSavePath()
+                : null;
+            if (resolved == null &&
+                !string.IsNullOrWhiteSpace(sessionNamed) &&
+                !string.Equals(reported, sessionNamed,
+                    StringComparison.OrdinalIgnoreCase) &&
+                WorldStorageSentinelMatches(sessionNamed, token))
+            {
+                resolved = sessionNamed;
+                resolutionSource = "session-name";
+            }
+
+            if (string.IsNullOrWhiteSpace(
+                    resolved))
+            {
+                _verifiedWorldSavePath =
+                    null;
+                _verifiedReportedSavePath =
+                    null;
+
+                MyLog.Default.Log(
+                    MyLogSeverity.Warning,
+"[RuntimePlanetGenerator] World-storage self-test '" +
+                    phase +
+"' could not locate the freshly written canary. " +
+"ReportedPath='" +
+                    (reported ?? "<null>") +
+"', SessionPath='" +
+                    (sessionNamed ?? "<null>") +
+"'.");
+
+                return false;
+            }
+
+            string previous =
+                _verifiedWorldSavePath;
+
+            _verifiedWorldSavePath =
+                NormalizePath(
+                    resolved);
+            _verifiedReportedSavePath =
+                reported;
+
+            MyLog.Default.Log(
+                string.Equals(
+                    reported,
+                    _verifiedWorldSavePath,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? MyLogSeverity.Info
+                    : MyLogSeverity.Warning,
+"[RuntimePlanetGenerator] World-storage self-test '" +
+                phase +
+"' resolved physical save path via " +
+                resolutionSource +
+                " lookup: '" +
+                _verifiedWorldSavePath +
+"'." +
+                (string.IsNullOrWhiteSpace(previous) ||
+                 string.Equals(
+                     previous,
+                     _verifiedWorldSavePath,
+                     StringComparison.OrdinalIgnoreCase)
+                    ? string.Empty
+                    : " Previous verified path was '" +
+                      previous +
+"'." ));
+
+            return true;
+        }
+
+
+        private static bool WorldStorageSentinelMatches(
+            string savePath,
+            string expectedToken)
+        {
+            if (MyAPIGateway.Utilities == null ||
+                MyAPIGateway.Utilities.GamePaths == null ||
+                string.IsNullOrWhiteSpace(savePath) ||
+                string.IsNullOrWhiteSpace(expectedToken) ||
+                string.IsNullOrWhiteSpace(
+                    MyAPIGateway.Utilities.GamePaths.ModScopeName))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (TextReader reader =
+                    MyAPIGateway.Utilities.ReadFileInModLocation(
+                        WORLD_STORAGE_SENTINEL_FILE,
+                        CreateWorldStorageProbeMod(savePath)))
+                {
+                    return string.Equals(
+                        reader.ReadToEnd(),
+                        expectedToken,
+                        StringComparison.Ordinal);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+
+        private static string ResolveSessionNamedSavePath()
+        {
+            try
+            {
+                if (MyAPIGateway.Session == null ||
+                    MyAPIGateway.Utilities == null ||
+                    MyAPIGateway.Utilities.GamePaths == null)
+                {
+                    return null;
+                }
+
+                string savesRoot =
+                    NormalizePath(
+                        MyAPIGateway.Utilities.GamePaths.SavesPath);
+
+                string saveName =
+                    MyAPIGateway.Session.Name;
+
+                if (string.IsNullOrWhiteSpace(savesRoot) ||
+                    string.IsNullOrWhiteSpace(saveName))
+                {
+                    return null;
+                }
+
+                const string workshopPrefix =
+"(Workshop) ";
+
+                saveName =
+                    saveName.StartsWith(workshopPrefix,
+                        StringComparison.OrdinalIgnoreCase)
+                        ? saveName.Substring(workshopPrefix.Length)
+                        : saveName;
+
+                saveName =
+                    saveName.Replace(':', '-');
+
+                return savesRoot.TrimEnd('/') + "/" + saveName;
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not resolve the " +
+                    "session-name world-storage fallback: " + e);
+                return null;
+            }
         }
 
 
@@ -696,6 +1167,32 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             return path
                 .Replace('\\', '/')
                 .TrimEnd('/');
+        }
+
+
+        private static bool LooksLikeUnixPath(
+            string path)
+        {
+            string normalized = NormalizePath(path);
+
+            return !string.IsNullOrWhiteSpace(normalized) &&
+                normalized.StartsWith("/", StringComparison.Ordinal) &&
+                !normalized.StartsWith("//", StringComparison.Ordinal);
+        }
+
+
+        private void WarnLinuxCompat(string path)
+        {
+            _unixPathDetected = true;
+
+            if (_linuxCompatWarningLogged)
+                return;
+
+            _linuxCompatWarningLogged = true;
+
+            MyLog.Default.Log(MyLogSeverity.Warning,
+                "[RuntimePlanetGenerator] Linux-Compat plugin detected, " +
+                "path probing cannot continue. SavePath='" + path + "'.");
         }
 
 
