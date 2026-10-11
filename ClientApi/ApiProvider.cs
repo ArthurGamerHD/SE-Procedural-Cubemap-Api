@@ -14,6 +14,7 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<string, float, int, Vector3D, ApiData> _createPlanetAtCenter;
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<string[]> _getApiPlanetDetails;
+        private readonly Func<long, string> _getPlanetRecipeXml;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<ApiData> _getEnvironmentPresets;
@@ -45,6 +46,11 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<string[]>>(
                     api,
                     "GetApiPlanetDetails");
+
+            _getPlanetRecipeXml =
+                GetRequired<Func<long, string>>(
+                    api,
+                    "GetPlanetRecipeXml");
 
             _getNoiseProvider =
                 GetRequired<Func<ApiData>>(
@@ -133,6 +139,14 @@ namespace ProceduralCubemapApi.Api
         public string[] GetApiPlanetDetails()
         {
             return _getApiPlanetDetails();
+        }
+
+
+        /// <summary>Returns the committed procedural recipe XML, or null for a PNG-backed planet.</summary>
+        public string GetPlanetRecipeXml(
+            long entityId)
+        {
+            return _getPlanetRecipeXml(entityId);
         }
 
 

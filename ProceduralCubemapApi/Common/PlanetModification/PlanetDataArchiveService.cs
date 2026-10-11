@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Adk.Compression.Zip;
 using Adk.Image.Png;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.Noise.fBm;
 using ProceduralCubemapApi.Common.PlanetModification.Features;
@@ -403,6 +404,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 "down"
             };
 
+            if (revisions.All(revision => revision.BrushOperations.Count == 0 &&
+                    revision.FeatureOperations.Count == 0 && revision.BiomeReplacementOperations.Count == 0 &&
+                    revision.FractalNoiseOperations.Count == 0))
+            {
+                var unchanged = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (string name in PlanetMapFileNames.All)
+                    unchanged.Add(name, ReadSnapshotPlanetDataFile(root, sourceFiles, name));
+                var allocations = new List<byte>();
+                foreach (PlanetModificationSnapshot revision in revisions)
+                    allocations.AddRange(revision.AllocatedComplexMaterialValues);
+                ValidateRoadMaterialAllocations(unchanged, allocations);
+                return unchanged;
+            }
+
             // Keep the six height faces resident so terrain-aware features can plan in
             // planet space. Material maps remain encoded between revisions and are
             // decoded one face at a time, avoiding six additional full material maps.
@@ -429,9 +444,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     ReadSnapshotPlanetDataFile(root, sourceFiles, materialFileName));
             }
 
+            var pendingAllocations = new List<byte>();
             for (int revisionIndex = 0; revisionIndex < revisions.Count; revisionIndex++)
             {
                 PlanetModificationSnapshot revision = revisions[revisionIndex];
+                pendingAllocations.AddRange(revision.AllocatedComplexMaterialValues);
+                bool haveBrushes = revision.BrushOperations.Count > 0;
+                bool haveMaterialEdits = revision.BiomeReplacementOperations.Count > 0 ||
+                                        revision.FractalNoiseOperations.Count > 0;
+                bool haveFeatures = revision.FeatureOperations.Count > 0;
+                // Roads run in the final pass. A road-only revision must not
+                // decode, scan and recompress all six material maps on a cold
+                // replay. Allocation checks can share the next material pass.
+                if (!haveBrushes && !haveMaterialEdits && !haveFeatures)
+                    continue;
 
                 // Brushes must happen before river planning because a height brush may
                 // change both source eligibility and the shoreline. Material-only work
@@ -439,6 +465,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 // material face is already decoded.
                 for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
                 {
+                    if (!haveBrushes && !haveMaterialEdits && pendingAllocations.Count == 0)
+                        break;
                     string heightFileName = faces[faceIndex] + ".png";
                     string materialFileName = faces[faceIndex] + "_mat.png";
                     PlanarPngBitmap heightImage = heightImages[heightFileName];
@@ -446,13 +474,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         materialFileName,
                         materialBytes[materialFileName]);
 
-                    if (revision.AllocatedComplexMaterialValues != null &&
-                        revision.AllocatedComplexMaterialValues.Count > 0)
+                    if (pendingAllocations.Count > 0)
                     {
                         PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
                             materialImage,
                             materialFileName,
-                            revision.AllocatedComplexMaterialValues);
+                            pendingAllocations);
                     }
 
                     PlanetMapOperations.ApplyBrushToPlanetImages(
@@ -477,8 +504,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         revision.PlanetSeed,
                         revision.FractalNoiseOperations);
 
-                    materialBytes[materialFileName] = materialImage.Encode();
+                    if (haveBrushes || haveMaterialEdits)
+                        materialBytes[materialFileName] = materialImage.Encode();
                 }
+                pendingAllocations.Clear();
 
                 List<GeneratedPlanetFeature> terrainFeatures =
                     PlanetFeatureProcessor.ResolveTerrainBlindFeatures(
@@ -521,6 +550,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 }
             }
 
+            if (pendingAllocations.Count > 0)
+                foreach (string face in faces)
+                {
+                    string name = face + "_mat.png";
+                    PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
+                        PlanetMapOperations.DecodePlanetPng(name, materialBytes[name]),
+                        name, pendingAllocations);
+                }
+
             var output = new Dictionary<string, byte[]>(
                 PlanetMapFileNames.All.Length,
                 StringComparer.OrdinalIgnoreCase);
@@ -536,6 +574,77 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             return output;
         }
 
+        internal void ValidateRoadMaterialAllocations(Dictionary<string, byte[]> files, List<byte> allocations)
+        {
+            if (allocations.Count == 0) return;
+            foreach (string name in PlanetMapFileNames.All)
+                if (name.EndsWith("_mat.png", StringComparison.OrdinalIgnoreCase))
+                    PlanetMapOperations.ValidateAllocatedComplexMaterialValues(
+                        PlanetMapOperations.DecodePlanetPng(name, files[name]), name, allocations);
+        }
+
+        internal void ApplyFinalProceduralLines(Dictionary<string, byte[]> files,
+            List<LineOperation> lines, MyPlanet targetPlanet)
+        {
+            if (lines == null || lines.Count == 0) return;
+            if (files == null) throw new ArgumentNullException(nameof(files));
+
+            string[] faces = { "front", "back", "left", "right", "up", "down" };
+            var heights = new Dictionary<string, PlanarPngBitmap>(StringComparer.OrdinalIgnoreCase);
+            var materials = new Dictionary<string, PlanarPngBitmap>(StringComparer.OrdinalIgnoreCase);
+            foreach (string face in faces)
+            {
+                string name = face + ".png";
+                heights.Add(name, PlanetMapOperations.DecodePlanetPng(name, files[name]));
+            }
+
+            bool[] changedFaces = SphericalLineRasterizer.ApplyCells(heights, new PlanetModificationSnapshot
+            {
+                TargetPlanet = targetPlanet,
+                LineOperations = lines
+            }, name =>
+            {
+                PlanarPngBitmap image;
+                if (!materials.TryGetValue(name, out image))
+                {
+                    image = PlanetMapOperations.DecodePlanetPng(name, files[name]);
+                    materials.Add(name, image);
+                }
+                return image;
+            });
+
+            // Encode independent faces concurrently, then publish in fixed face
+            // order. Unaffected encoded faces are reused byte-for-byte.
+            var encoded = new byte[12][];
+            var failures = new Exception[6];
+            Action<int> encode = face =>
+            {
+                if (!changedFaces[face]) return;
+                try
+                {
+                    encoded[face * 2] = heights[faces[face] + ".png"].Encode();
+                    encoded[face * 2 + 1] = materials[faces[face] + "_mat.png"].Encode();
+                }
+                catch (Exception error) { failures[face] = error; }
+            };
+            if (MyAPIGateway.Parallel == null)
+                for (int face = 0; face < 6; face++) encode(face);
+            else
+                // PNG compression allocates large temporary buffers. Two face
+                // jobs bound peak memory even on 4K/8K cubemaps.
+                MyAPIGateway.Parallel.For(0, 2, worker =>
+                {
+                    for (int face = worker; face < 6; face += 2) encode(face);
+                });
+            for (int face = 0; face < 6; face++)
+            {
+                if (failures[face] != null) throw failures[face];
+                if (!changedFaces[face]) continue;
+                files[faces[face] + ".png"] = encoded[face * 2];
+                files[faces[face] + "_mat.png"] = encoded[face * 2 + 1];
+            }
+        }
+
 
         private void ApplyQueuedBrushes(
             PlanetModificationSnapshot snapshot,
@@ -543,7 +652,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         {
             bool haveBrushes = snapshot.BrushOperations != null && snapshot.BrushOperations.Count > 0;
             bool haveFeatures = snapshot.FeatureOperations != null && snapshot.FeatureOperations.Count > 0;
-            if (!haveBrushes && !haveFeatures)
+            bool haveLines = snapshot.LineOperations != null && snapshot.LineOperations.Count > 0;
+            if (!haveBrushes && !haveFeatures && !haveLines)
                 return;
 
             string[] faces =
@@ -631,7 +741,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     snapshot.FeatureOperations);
 
             if (riverFeatures.Count == 0)
+            {
+                if (haveLines)
+                    SphericalLineRasterizer.Apply(heightImages, snapshot,
+                        delegate(string name) { return GetOrLoadSnapshotImage(snapshot, runtimeSourceFiles, name); });
                 return;
+            }
 
             for (int faceIndex = 0; faceIndex < faces.Length; faceIndex++)
             {
@@ -642,6 +757,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     heightFileName,
                     riverFeatures);
             }
+
+            // The road is an absolute terrain/material override, not a feature
+            // blended into terrain that later feature passes may overwrite.
+            if (haveLines)
+                SphericalLineRasterizer.Apply(heightImages, snapshot,
+                    delegate(string name) { return GetOrLoadSnapshotImage(snapshot, runtimeSourceFiles, name); });
         }
 
 

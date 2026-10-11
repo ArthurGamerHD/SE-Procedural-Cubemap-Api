@@ -27,6 +27,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public bool StorageCommitted;
         public bool ChangeMaterials;
         public bool ChangeEnvironment;
+        public List<LineOperation> LineOperations;
         public string RequestedPlanetName;
         public bool IsCreation;
         public float CreationDiameter;
@@ -47,6 +48,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public PlanetModificationWorkResult WorkResult;
         public NetworkPackage RuntimeSyncPacket;
         public Exception WorkError;
+        public IDisposable ProfileScope;
 
         public bool TryBeginPreparation()
         {
@@ -132,6 +134,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public bool ScaleHeightByRadial;
     }
 
+
+    internal sealed class LineOperation
+    {
+        public string Layer;
+        public int Material;
+        public double[] Geometry; // Start/end direction and endpoint tangents (12 doubles)
+        public double RadiusMeters;
+        public double WidthMeters;
+        public bool AverageHeight;
+        public double FillAngleDegrees;
+        public double MaximumSlopeDegrees;
+        public double SegmentDistanceMeters;
+        public double HeightRangeMeters;
+    }
 
     internal sealed class FeatureOperation
     {
@@ -243,6 +259,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public List<FractalNoiseOperation> FractalNoiseOperations;
         public List<BiomeReplacementOperation> BiomeReplacementOperations;
         public List<BrushOperation> BrushOperations;
+        public List<LineOperation> LineOperations;
         public List<FeatureOperation> FeatureOperations;
         public List<byte> AllocatedComplexMaterialValues;
         public string EnvironmentCarrierSubtype;

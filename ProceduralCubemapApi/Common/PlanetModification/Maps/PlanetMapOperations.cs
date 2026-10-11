@@ -713,6 +713,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
             byte[] red =
                 image.Planes[0];
 
+            var allocated = new bool[256];
+            foreach (byte value in allocatedValues)
+                allocated[value] = true;
+
             for (int pixel = 0;
                 pixel < red.Length;
                 pixel++)
@@ -720,20 +724,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                 byte sourceValue =
                     red[pixel];
 
-                for (int valueIndex = 0;
-                    valueIndex < allocatedValues.Count;
-                    valueIndex++)
+                if (allocated[sourceValue])
                 {
-                    if (sourceValue ==
-                        allocatedValues[valueIndex])
-                    {
-                        throw new Exception(
-                            "Allocated complex material-map value " +
-                            sourceValue +
-                            " already exists in source PNG " +
-                            faceFileName +
-                            ". The modification was not pushed.");
-                    }
+                    throw new Exception(
+                        "Allocated complex material-map value " +
+                        sourceValue +
+                        " already exists in source PNG " +
+                        faceFileName +
+                        ". The modification was not pushed.");
                 }
             }
         }

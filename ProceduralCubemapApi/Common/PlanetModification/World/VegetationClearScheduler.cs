@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System;
+using ProceduralCubemapApi.Common.PlanetModification.Templates;
 using Sandbox.Game.Entities;
 using Sandbox.Game.WorldEnvironment;
 using VRage.Game.Entity;
@@ -136,6 +138,77 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 " existing grid(s). EntityId=" +
                 planet.EntityId +
                 ".");
+        }
+
+
+        /// <summary>
+        /// Clear spawned environment items along freshly baked line corridors.
+        /// Uses short per-segment boxes rather than clearing the entire planet.
+        /// Called after the storage swap on the simulation thread.
+        /// </summary>
+        internal void ScheduleLines(MyPlanet planet, List<LineOperation> lines)
+        {
+            if (planet == null || planet.Closed || planet.MarkedForClose || lines == null)
+                return;
+
+            var boxes = new List<BoundingBoxD>();
+            Vector3D center = planet.PositionComp.GetPosition();
+            foreach (LineOperation line in lines)
+            {
+                if (line == null || line.Geometry == null || line.Geometry.Length != 12)
+                    continue;
+                double[] g = line.Geometry;
+                Vector3D a = new Vector3D(g[0], g[1], g[2]);
+                Vector3D b = new Vector3D(g[3], g[4], g[5]);
+                if (a.LengthSquared() < 1e-12 || b.LengthSquared() < 1e-12)
+                    continue;
+                a.Normalize(); b.Normalize();
+                Vector3D ta = new Vector3D(g[6], g[7], g[8]);
+                Vector3D tb = new Vector3D(g[9], g[10], g[11]);
+                ta -= a * Vector3D.Dot(ta, a);
+                tb -= b * Vector3D.Dot(tb, b);
+                if (ta.LengthSquared() < 1e-12 || tb.LengthSquared() < 1e-12)
+                    continue;
+                ta.Normalize(); tb.Normalize();
+                double arc = Math.Acos(Math.Max(-1, Math.Min(1, Vector3D.Dot(a,b))));
+                double tangent = arc * 0.5;
+                int segments = Math.Max(1, Math.Min(512,
+                    (int)Math.Ceiling(arc * line.RadiusMeters / 125.0)));
+                // The extra margin accounts for trees with canopies outside
+                // their roots, and a moderate amount of cut/fill terrain.
+                double radius = line.WidthMeters * 0.5 + 75.0;
+                Vector3D previous = Vector3D.Zero;
+                for (int i = 0; i <= segments; ++i)
+                {
+                    double t = (double)i / segments, t2=t*t, t3=t2*t;
+                    Vector3D n = a*(2*t3-3*t2+1) +
+                        ta*tangent*(t3-2*t2+t) +
+                        b*(-2*t3+3*t2) +
+                        tb*tangent*(t3-t2);
+                    if (n.LengthSquared() < 1e-12) continue;
+                    n.Normalize();
+                    Vector3D world = center + n * line.RadiusMeters;
+                    world = planet.GetClosestSurfacePointGlobal(world);
+                    if (i > 0)
+                    {
+                        Vector3D min = Vector3D.Min(previous, world) - radius;
+                        Vector3D max = Vector3D.Max(previous, world) + radius;
+                        boxes.Add(new BoundingBoxD(min, max));
+                    }
+                    previous = world;
+                }
+            }
+            if (boxes.Count == 0) return;
+            _pendingVegetationClears.Add(new PendingVegetationClear
+            {
+                PlanetEntityId = planet.EntityId,
+                Boxes = boxes,
+                Pass = 0,
+                TicksUntilNextPass = 0
+            });
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Scheduled line vegetation clear: " +
+                boxes.Count + " regions on planet " + planet.EntityId);
         }
 
 

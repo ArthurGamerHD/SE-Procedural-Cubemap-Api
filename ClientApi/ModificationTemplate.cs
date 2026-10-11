@@ -34,6 +34,8 @@ namespace ProceduralCubemapApi.Api
         private readonly Action<string, int, bool, double, int, int, double, double, int, int, double, double, int, int> _applyBrush;
         private readonly Action<string, int, int, int, int, double, int, int, double, double, int, int, double, double, int, int> _applyNoiseBrush;
         private readonly Action<string, int, double, double, double, double, int, int, int, int, double, double, int, int> _applyRadialBrush;
+        private readonly Action<string, int, double[], double, double, bool, double, double> _drawLine;
+        private readonly Action<string, int, double[], double, double, bool, double, double, double> _drawLineSmooth;
         private readonly Func<ApiData> _addFeature;
         private readonly Func<byte, bool> _removeMaterial;
         private readonly Action<Action<bool, string>> _push;
@@ -162,6 +164,16 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Action<string, int, double, double, double, double, int, int, int, int, double, double, int, int>>(
                     api,
                     "ApplyRadialBrush");
+
+            _drawLine =
+                GetRequired<Action<string, int, double[], double, double, bool, double, double>>(
+                    api,
+                    "DrawLine");
+
+            _drawLineSmooth =
+                GetRequired<Action<string, int, double[], double, double, bool, double, double, double>>(
+                    api,
+                    "DrawLineSmooth");
 
             _addFeature =
                 GetRequired<Func<ApiData>>(
@@ -499,6 +511,43 @@ namespace ProceduralCubemapApi.Api
             int materialFilter)
         {
             _applyRadialBrush(layer, fillValue, centerX, centerY, centerZ, radiusDegrees, (int)radialProfile, heightBlendMode, minimumAltitude, maximumAltitude, minimumLatitude, maximumLatitude, biomeFilter, materialFilter);
+        }
+
+
+        /// <summary>Queues a spherical line; geometry is 12 planet-local components:
+        /// start XYZ, end XYZ, start tangent XYZ, end tangent XYZ.
+        /// Endpoints are unit sphere directions. Width and radius are meters.
+        /// The line is baked into authoritative image data (not a procedural replay recipe).
+        /// </summary>
+        public void DrawLine(
+            string layer,
+            int material,
+            double[] geometry,
+            double radiusMeters,
+            double widthMeters,
+            bool averageHeight,
+            double fillAngleDegrees,
+            double maximumSlopeDegrees)
+        {
+            _drawLine(layer, material, geometry, radiusMeters, widthMeters, averageHeight, fillAngleDegrees, maximumSlopeDegrees);
+        }
+
+
+        /// <summary>Queues a spherical line with longitudinal grade smoothing.
+        /// Segment distance is the half-width, in meters, of the smoothing window;
+        /// zero preserves the original unsmoothed DrawLine behavior.</summary>
+        public void DrawLineSmooth(
+            string layer,
+            int material,
+            double[] geometry,
+            double radiusMeters,
+            double widthMeters,
+            bool averageHeight,
+            double fillAngleDegrees,
+            double maximumSlopeDegrees,
+            double segmentDistanceMeters)
+        {
+            _drawLineSmooth(layer, material, geometry, radiusMeters, widthMeters, averageHeight, fillAngleDegrees, maximumSlopeDegrees, segmentDistanceMeters);
         }
 
 

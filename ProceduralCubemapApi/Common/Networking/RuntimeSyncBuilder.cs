@@ -134,6 +134,29 @@ namespace ProceduralCubemapApi.Common.Networking
                 }
             }
 
+            var lines = new List<SyncedLineOperation>();
+            if (snapshot.LineOperations != null)
+            {
+                foreach (LineOperation line in snapshot.LineOperations)
+                {
+                    if (line == null || line.Geometry == null || line.Geometry.Length != 12)
+                        throw new ArgumentException("Snapshot contains an invalid line operation.", nameof(snapshot));
+                    lines.Add(new SyncedLineOperation
+                    {
+                        Layer = line.Layer,
+                        Material = line.Material,
+                        Geometry = (double[])line.Geometry.Clone(),
+                        RadiusMeters = line.RadiusMeters,
+                        WidthMeters = line.WidthMeters,
+                        AverageHeight = line.AverageHeight,
+                        FillAngleDegrees = line.FillAngleDegrees,
+                        MaximumSlopeDegrees = line.MaximumSlopeDegrees,
+                        SegmentDistanceMeters = line.SegmentDistanceMeters,
+                        HeightRangeMeters = line.HeightRangeMeters
+                    });
+                }
+            }
+
             return new RuntimeOperationSync
             {
                 PlanetEntityId = snapshot.TargetPlanet.EntityId,
@@ -144,6 +167,7 @@ namespace ProceduralCubemapApi.Common.Networking
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushes,
+                LineOperations = lines,
                 FeatureOperations = features,
                 AllocatedComplexMaterialValues =
                     snapshot.AllocatedComplexMaterialValues == null

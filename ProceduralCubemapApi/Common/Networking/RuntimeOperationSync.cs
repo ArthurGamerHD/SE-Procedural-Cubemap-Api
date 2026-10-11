@@ -72,6 +72,24 @@ namespace ProceduralCubemapApi.Common.Networking
 
         [ProtoMember(20)]
         public bool ChangeEnvironment;
+
+        [ProtoMember(21)]
+        public List<SyncedLineOperation> LineOperations;
+    }
+
+    [ProtoContract]
+    internal sealed class SyncedLineOperation
+    {
+        [ProtoMember(1)] public string Layer;
+        [ProtoMember(2)] public int Material;
+        [ProtoMember(3)] public double[] Geometry;
+        [ProtoMember(4)] public double RadiusMeters;
+        [ProtoMember(5)] public double WidthMeters;
+        [ProtoMember(6)] public bool AverageHeight;
+        [ProtoMember(7)] public double FillAngleDegrees;
+        [ProtoMember(8)] public double MaximumSlopeDegrees;
+        [ProtoMember(9)] public double SegmentDistanceMeters;
+        [ProtoMember(10)] public double HeightRangeMeters;
     }
 
     [ProtoContract]

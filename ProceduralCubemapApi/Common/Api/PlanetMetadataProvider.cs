@@ -184,6 +184,36 @@ namespace ProceduralCubemapApi.Common.Api
 
 
         /// <summary>
+        /// Copies the original 16-bit grayscale PNG for a cubemap height face.
+        /// Unlike LoadHeightFace, this returns encoded PNG bytes (not samples).
+        /// The caller owns the returned array; no mutable internal buffer escapes.
+        /// </summary>
+        [ApiMethod]
+        private byte[] LoadHeightFacePng(string face)
+        {
+            lock (_sync)
+            {
+                EnsureOpen();
+                return _snapshot.LoadFacePng(face, false);
+            }
+        }
+
+        /// <summary>
+        /// Copies the original material-map PNG for a cubemap face. The PNG
+        /// includes the original channels; LoadMaterialFace/LoadBiomeFace
+        /// remain available for consumers that only need decoded channels.
+        /// </summary>
+        [ApiMethod]
+        private byte[] LoadMaterialFacePng(string face)
+        {
+            lock (_sync)
+            {
+                EnsureOpen();
+                return _snapshot.LoadFacePng(face, true);
+            }
+        }
+
+        /// <summary>
         /// Closes only this caller's handle and subscriptions. The shared
         /// snapshot remains alive while another handle still uses it.
         /// </summary>
@@ -358,6 +388,22 @@ namespace ProceduralCubemapApi.Common.Api
             };
         }
 
+
+        internal byte[] LoadFacePng(string face, bool materialMap)
+        {
+            string fileName = BuildFaceFileName(face, materialMap);
+            lock (_sync)
+            {
+                EnsureOpen();
+                byte[] encoded;
+                if (!_pngFiles.TryGetValue(fileName, out encoded) || encoded == null)
+                    throw new InvalidDataException("Planet metadata snapshot is missing PNG '" + fileName + "'.");
+
+                byte[] copy = new byte[encoded.Length];
+                Buffer.BlockCopy(encoded, 0, copy, 0, encoded.Length);
+                return copy;
+            }
+        }
 
         internal ushort[] LoadHeightFace(
             string face)

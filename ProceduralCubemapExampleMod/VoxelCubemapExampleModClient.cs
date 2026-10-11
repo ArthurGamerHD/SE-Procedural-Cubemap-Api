@@ -22,7 +22,7 @@ namespace CubemapExampleMod
             0x5643584150490002L;
 
         private static readonly Version ClientApiVersion =
-            new Version(0, 0, 14);
+            new Version(0, 0, 16);
 
         private static CubemapExampleModClient _instance;
 
@@ -1398,6 +1398,62 @@ namespace CubemapExampleMod
         /// This exercises spherical path generation, segment tiling and the
         /// parallel feature raster pass.
         /// </summary>
+        /// <summary>Draws a 10 km spherical corridor along the player's horizontal heading.</summary>
+        [ChatCommand("testroad", "vcma")]
+        public static void TestRoad(double widthMeters = 100.0,
+            double maximumSlopeDegrees = 8.0,
+            double fillAngleDegrees = 35.0, bool averageHeight = false)
+        {
+            CubemapExampleModClient client = _instance;
+            ModificationTemplate template = null;
+            try
+            {
+                if (client == null) throw new InvalidOperationException("Test client unavailable.");
+                if (client._api == null) client.RequestApi();
+                if (client._api == null) throw new InvalidOperationException("Cubemap API unavailable.");
+                if (MyAPIGateway.Session == null || MyAPIGateway.Session.Player == null ||
+                    MyAPIGateway.Session.Player.Character == null)
+                    throw new InvalidOperationException("A controlled character is required.");
+                template = client._api.GetModificationTemplate(0);
+                if (template == null) throw new InvalidOperationException("No nearby API planet.");
+                IMyEntity entity = MyAPIGateway.Entities.GetEntityById(template.GetPlanetEntityId());
+                if (entity == null) throw new InvalidOperationException("Planet entity unavailable.");
+                var planet = entity as Sandbox.Game.Entities.MyPlanet;
+                if (planet == null) throw new InvalidOperationException("Target is not a planet.");
+                Vector3D origin = entity.WorldMatrix.Translation;
+                Vector3D n = MyAPIGateway.Session.Player.GetPosition() - origin;
+                n.Normalize();
+                Vector3D heading = MyAPIGateway.Session.Player.Character.WorldMatrix.Forward;
+                heading -= n * Vector3D.Dot(heading, n);
+                if (heading.LengthSquared() < 1e-10)
+                    throw new InvalidOperationException("Look toward the horizon to choose a heading.");
+                heading.Normalize();
+                double alpha = 10000.0 / planet.AverageRadius;
+                if (alpha >= Math.PI) throw new InvalidOperationException("Planet too small for a 10 km arc.");
+                Vector3D destination = n * Math.Cos(alpha) + heading * Math.Sin(alpha);
+                Vector3D endHeading = -n * Math.Sin(alpha) + heading * Math.Cos(alpha);
+                byte material = template.AddMaterial("Soil", 100f);
+                template.DrawLine("Material", material, new double[] {
+                    n.X, n.Y, n.Z, destination.X, destination.Y, destination.Z,
+                    heading.X, heading.Y, heading.Z,
+                    endHeading.X, endHeading.Y, endHeading.Z
+                }, planet.AverageRadius, widthMeters, averageHeight,
+                   fillAngleDegrees, maximumSlopeDegrees);
+                ModificationTemplate pushed = template;
+                template.Push(delegate(bool success, string message) {
+                    pushed.Close();
+                    ShowMessage(string.IsNullOrWhiteSpace(message)
+                        ? (success ? "Test road baked." : "Test road failed.") : message);
+                });
+            }
+            catch (Exception e)
+            {
+                if (template != null) template.Close();
+                MyLog.Default.WriteLineAndConsole("[VCM API Test Client] testroad: " + e);
+                ShowMessage("testroad: " + e.Message);
+            }
+        }
+
         [ChatCommand("testravine", "vcma")]
         public static void TestRavine(
             int ravineCount = 8,

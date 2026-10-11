@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Adk.Image.Png;
@@ -51,6 +51,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         private readonly List<BrushOperation>
             _brushOperations =
                 new List<BrushOperation>();
+
+        private readonly List<LineOperation> _lineOperations =
+            new List<LineOperation>();
 
         private readonly List<FeatureOperation>
             _featureOperations =
@@ -310,6 +313,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushOperations,
+                LineOperations = new List<LineOperation>(_lineOperations),
                 FeatureOperations = featureOperations,
                 AllocatedComplexMaterialValues = allocatedComplexValues,
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype,
@@ -1667,6 +1671,68 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         }
 
 
+        /// <summary>Queues a spherical line; geometry is 12 planet-local components:
+        /// start XYZ, end XYZ, start tangent XYZ, end tangent XYZ.
+        /// Endpoints are unit sphere directions. Width and radius are meters.
+        /// The line is baked into authoritative image data (not a procedural replay recipe).
+        /// </summary>
+        [ApiMethod]
+        private void DrawLine(string layer, int material, double[] geometry,
+            double radiusMeters, double widthMeters, bool averageHeight,
+            double fillAngleDegrees, double maximumSlopeDegrees)
+        {
+            DrawLineSmooth(layer, material, geometry, radiusMeters, widthMeters,
+                averageHeight, fillAngleDegrees, maximumSlopeDegrees, 0.0);
+        }
+
+        /// <summary>Queues a spherical line with longitudinal grade smoothing.
+        /// Segment distance is the half-width, in meters, of the smoothing window;
+        /// zero preserves the original unsmoothed DrawLine behavior.</summary>
+        [ApiMethod]
+        private void DrawLineSmooth(string layer, int material, double[] geometry,
+            double radiusMeters, double widthMeters, bool averageHeight,
+            double fillAngleDegrees, double maximumSlopeDegrees,
+            double segmentDistanceMeters)
+        {
+            EnsureEditable();
+            if (!_proceduralPersistenceEligible || _requiresAuthoritativeImageSync)
+                throw new InvalidOperationException(
+                    "DrawLine requires a procedural planet lineage; legacy PNG-backed planets cannot retain reversible line operations.");
+            int index = ParseBrushLayer(layer);
+            if (index == 3)
+                throw new ArgumentException("Use a paintable material/biome/ore layer.", nameof(layer));
+            if (material < 0 || material > 255)
+                throw new ArgumentException(nameof(material));
+            if (geometry == null || geometry.Length != 12)
+                throw new ArgumentException("Expected 12 geometry components.", nameof(geometry));
+            foreach (double value in geometry)
+                if (double.IsNaN(value) || double.IsInfinity(value))
+                    throw new ArgumentException("Geometry must be finite.", nameof(geometry));
+            if (double.IsNaN(radiusMeters) || double.IsInfinity(radiusMeters) || radiusMeters <= 0 ||
+                double.IsNaN(widthMeters) || double.IsInfinity(widthMeters) || widthMeters <= 0 ||
+                double.IsNaN(fillAngleDegrees) || double.IsInfinity(fillAngleDegrees) ||
+                fillAngleDegrees < 0 || fillAngleDegrees >= 90 ||
+                double.IsNaN(maximumSlopeDegrees) || double.IsInfinity(maximumSlopeDegrees) ||
+                maximumSlopeDegrees < 0 || maximumSlopeDegrees >= 90 ||
+                double.IsNaN(segmentDistanceMeters) || double.IsInfinity(segmentDistanceMeters) ||
+                segmentDistanceMeters < 0 || segmentDistanceMeters > 2000)
+                throw new ArgumentException("Invalid line radius, width or angle.");
+            if (index == 0 && !PlanetMaterialMap.UsesValue(Builder, (byte)material))
+                throw new ArgumentException("Undefined material-map value.", nameof(material));
+            EnsureLayerEnabled(index);
+            _changeEnvironment = true;
+            if (index == 0) _changeMaterials = true;
+            _lineOperations.Add(new LineOperation {
+                Layer = layer, Material = material, Geometry = (double[])geometry.Clone(),
+                RadiusMeters = radiusMeters, WidthMeters = widthMeters,
+                AverageHeight = averageHeight, FillAngleDegrees = fillAngleDegrees,
+                MaximumSlopeDegrees = maximumSlopeDegrees,
+                SegmentDistanceMeters = segmentDistanceMeters,
+                HeightRangeMeters = TargetPlanet == null ? 0.0 :
+                    TargetPlanet.MaximumRadius - TargetPlanet.MinimumRadius
+            });
+        }
+
         /// <summary>
         /// Adds one reusable procedural feature pass and returns its nested template.
         /// Feature generators are stored compactly and expanded only while baking.
@@ -2038,6 +2104,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
             var used =
                 new bool[256];
+            used[0] = true;
 
             string[] materialFaceFiles =
             {

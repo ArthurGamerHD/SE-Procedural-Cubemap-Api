@@ -445,6 +445,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 workResult.EnvironmentCarrierSubtype,
                 workResult.ChangeEnvironment,
                 workResult.RequestedPlanetName);
+
+            if (workResult.LineOperations != null && workResult.LineOperations.Count > 0)
+                _vegetationClearScheduler.ScheduleLines(
+                    workResult.TargetPlanet, workResult.LineOperations);
         }
 
 

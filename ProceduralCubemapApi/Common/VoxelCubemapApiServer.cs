@@ -103,6 +103,7 @@ namespace ProceduralCubemapApi.Common
 
             _unloading =
                 false;
+            CubemapGenerationFileLock.Reset();
 
             _worldStoragePathReady =
                 false;
@@ -446,6 +447,7 @@ namespace ProceduralCubemapApi.Common
         {
             _unloading =
                 true;
+            CubemapGenerationFileLock.Reset();
 
             if (_playerConnectedSubscribed)
             {

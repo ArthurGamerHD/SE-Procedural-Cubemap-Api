@@ -15,6 +15,8 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<string, ushort[]> _loadHeightFace;
         private readonly Func<string, byte[]> _loadMaterialFace;
         private readonly Func<string, byte[]> _loadBiomeFace;
+        private readonly Func<string, byte[]> _loadHeightFacePng;
+        private readonly Func<string, byte[]> _loadMaterialFacePng;
         private readonly Action _close;
 
 
@@ -53,6 +55,16 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<string, byte[]>>(
                     api,
                     "LoadBiomeFace");
+
+            _loadHeightFacePng =
+                GetRequired<Func<string, byte[]>>(
+                    api,
+                    "LoadHeightFacePng");
+
+            _loadMaterialFacePng =
+                GetRequired<Func<string, byte[]>>(
+                    api,
+                    "LoadMaterialFacePng");
 
             _close =
                 GetRequired<Action>(
@@ -121,6 +133,30 @@ namespace ProceduralCubemapApi.Api
             string face)
         {
             return _loadBiomeFace(face);
+        }
+
+
+        /// <summary>
+        /// Copies the original 16-bit grayscale PNG for a cubemap height face.
+        /// Unlike LoadHeightFace, this returns encoded PNG bytes (not samples).
+        /// The caller owns the returned array; no mutable internal buffer escapes.
+        /// </summary>
+        public byte[] LoadHeightFacePng(
+            string face)
+        {
+            return _loadHeightFacePng(face);
+        }
+
+
+        /// <summary>
+        /// Copies the original material-map PNG for a cubemap face. The PNG
+        /// includes the original channels; LoadMaterialFace/LoadBiomeFace
+        /// remain available for consumers that only need decoded channels.
+        /// </summary>
+        public byte[] LoadMaterialFacePng(
+            string face)
+        {
+            return _loadMaterialFacePng(face);
         }
 
 

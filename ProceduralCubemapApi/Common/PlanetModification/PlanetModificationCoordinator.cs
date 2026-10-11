@@ -58,6 +58,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         };
 
         private readonly RuntimePackageStore _runtimePackages;
+        private readonly ProceduralRoadReplayCache _roadReplayCache = new ProceduralRoadReplayCache();
         private readonly PlanetDataArchiveService _planetDataArchives;
         private readonly RuntimeGeneratorRegistry _runtimeGenerators;
         private readonly PlanetStorageService _planetStorage;
@@ -75,6 +76,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 new Dictionary<long, CachedPlanetMetadataProvider>();
 
         private bool _requestInProgress;
+        private IDisposable _pushProfile;
         private int _deferredPushCount;
         private readonly object _runtimeGeneratorRegistrationSync =
             new object();
@@ -321,6 +323,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
 
             return details;
+        }
+
+        internal string GetPlanetRecipeXml(long planetEntityId)
+        {
+            RuntimePlanetBuilderEntry entry = _runtimePackages.Settings == null ||
+                _runtimePackages.Settings.PlanetBuilders == null
+                    ? null
+                    : _runtimePackages.Settings.PlanetBuilders
+                        .Where(x => x != null && x.SourceEntityId == planetEntityId)
+                        .OrderByDescending(x => x.RuntimeRevision)
+                        .FirstOrDefault();
+            if (entry == null || RuntimePackageStore.GetPersistenceType(entry) !=
+                RuntimePlanetPersistenceType.Procedural)
+                return null;
+            return _runtimePackages.LoadRuntimeRecipeXml(entry);
         }
 
 
@@ -1077,6 +1094,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             _requestInProgress =
                 true;
+            _pushProfile = CubemapGenerationFileLock.Begin("push " + snapshot.TemplateId);
 
             PlanetModificationWorkResult workResult =
                 null;
@@ -1118,6 +1136,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 {
                     _requestInProgress =
                         false;
+
+                    EndPushProfile();
 
                     DispatchPushResponse(
                         callback,
@@ -1174,6 +1194,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 _requestInProgress =
                     false;
+
+                EndPushProfile();
 
                 DispatchPushResponse(
                     callback,
@@ -1257,6 +1279,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     "The deferred Push action can only be executed once.");
             }
 
+            deferredPush.ProfileScope = CubemapGenerationFileLock.Begin(
+                "deferred push " + deferredPush.Snapshot.TemplateId);
             try
             {
                 deferredPush.WorkResult =
@@ -1385,6 +1409,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             Interlocked.Decrement(
                 ref _deferredPushCount);
+            deferredPush.ProfileScope?.Dispose();
+            deferredPush.ProfileScope = null;
         }
 
 
@@ -1586,6 +1612,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             result.ChangeEnvironment =
                 snapshot.ChangeEnvironment;
 
+            result.LineOperations = snapshot.LineOperations;
+
             result.RequestedPlanetName =
                 snapshot.RequestedPlanetName;
 
@@ -1640,6 +1668,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 _runtimePackages.LoadGeneratorBuilderFromWorldStorage(
                     entry.GeneratorFile);
 
+            using (CubemapGenerationFileLock.Begin("rebuild " + entry.Subtype))
             try
             {
                 return BuildProceduralArchive(
@@ -1741,6 +1770,24 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     });
             }
 
+            for (int i = 0; i < snapshot.LineOperations.Count; i++)
+            {
+                LineOperation line = snapshot.LineOperations[i];
+                revision.Lines.Add(new RuntimeProceduralLineOperation
+                {
+                    Layer = line.Layer,
+                    Material = line.Material,
+                    Geometry = (double[])line.Geometry.Clone(),
+                    RadiusMeters = line.RadiusMeters,
+                    WidthMeters = line.WidthMeters,
+                    AverageHeight = line.AverageHeight,
+                    FillAngleDegrees = line.FillAngleDegrees,
+                    MaximumSlopeDegrees = line.MaximumSlopeDegrees,
+                    SegmentDistanceMeters = line.SegmentDistanceMeters,
+                    HeightRangeMeters = line.HeightRangeMeters
+                });
+            }
+
             for (int featureIndex = 0; featureIndex < snapshot.FeatureOperations.Count; featureIndex++)
             {
                 revision.Features.Add(
@@ -1801,6 +1848,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             MyPlanet targetPlanet,
             string templateId)
         {
+            DateTime started = DateTime.UtcNow;
             RuntimePackageStore.ValidateRuntimeRecipe(
                 recipe,
                 entry);
@@ -1809,11 +1857,55 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 ResolveProceduralSourceGenerator(
                     recipe.Source);
 
+            var originalFiles = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in PlanetMapFileNames.All)
+                originalFiles.Add(name, _planetDataArchives.ReadSourceFile(sourceGenerator.Context,
+                    recipe.Source.SourceSubtype, recipe.Source.SourceFolderName, name));
+            string sourceSignature;
+            using (var signature = RuntimeProceduralCache.CreateSignatureBuilder())
+            {
+                signature.AppendText("source-definition", MyAPIGateway.Utilities.SerializeToXML(
+                    _runtimeGenerators.CaptureSourceBuilder(sourceGenerator)));
+                foreach (string name in PlanetMapFileNames.All)
+                    signature.AppendBytes(name, originalFiles[name]);
+                sourceSignature = signature.Finish();
+            }
+
+            ProceduralRoadReplayCache.Entry cached =
+                _roadReplayCache.Find(entry.SourceEntityId, sourceSignature, recipe);
+            DateTime sourceReady = DateTime.UtcNow;
+            if (cached != null)
+            {
+                var appendedLines = new List<LineOperation>();
+                var allocated = new List<byte>();
+                for (int i = cached.RevisionCount; i < recipe.Revisions.Count; i++)
+                {
+                    PlanetModificationSnapshot stage = CreateProceduralRevisionSnapshot(recipe,
+                        recipe.Revisions[i], sourceGenerator, builder, targetPlanet,
+                        templateId + "-r" + i, null);
+                    appendedLines.AddRange(stage.LineOperations);
+                    allocated.AddRange(stage.AllocatedComplexMaterialValues);
+                }
+                _planetDataArchives.ValidateRoadMaterialAllocations(cached.BaseFiles, allocated);
+                var files = new Dictionary<string, byte[]>(cached.ResultFiles, StringComparer.OrdinalIgnoreCase);
+                DateTime baseReady = DateTime.UtcNow;
+                _planetDataArchives.ApplyFinalProceduralLines(files, appendedLines, targetPlanet);
+                DateTime linesReady = DateTime.UtcNow;
+                RuntimeProceduralCacheManifest manifest = RuntimeProceduralCache.CreateManifest(
+                    BuildProceduralGeneratorSignature(recipe, builder, sourceGenerator, originalFiles), recipe);
+                byte[] result = _planetDataArchives.PackProceduralArchive(files, manifest);
+                _roadReplayCache.Store(entry.SourceEntityId, sourceSignature, recipe, cached.BaseFiles, files);
+                LogRecipeReplay(entry.SourceEntityId, "appended cells", recipe.Revisions.Count,
+                    appendedLines.Count, started, sourceReady, baseReady, linesReady);
+                return result;
+            }
+
             Dictionary<string, byte[]> sourceFiles =
                 null;
 
             var pendingStages =
                 new List<PlanetModificationSnapshot>();
+            var finalLines = new List<LineOperation>();
 
             for (int revisionIndex = 0;
                 revisionIndex < recipe.Revisions.Count;
@@ -1832,6 +1924,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         templateId + "-r" + revisionIndex,
                         sourceFiles);
 
+                finalLines.AddRange(stage.LineOperations);
+
                 pendingStages.Add(
                     stage);
 
@@ -1841,7 +1935,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     sourceFiles =
                         _planetDataArchives.BuildProceduralRevisionFiles(
                             pendingStages,
-                            sourceFiles);
+                            sourceFiles ?? originalFiles);
 
                     pendingStages.Clear();
 
@@ -1882,30 +1976,57 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 sourceFiles =
                     _planetDataArchives.BuildProceduralRevisionFiles(
                         pendingStages,
-                        sourceFiles);
+                        sourceFiles ?? originalFiles);
             }
+
+            // Roads are absolute surface/material overrides. Apply all revisions'
+            // lines after every brush, feature, biome and environment remap.
+            var baseFiles = new Dictionary<string, byte[]>(sourceFiles, StringComparer.OrdinalIgnoreCase);
+            DateTime terrainReady = DateTime.UtcNow;
+            _planetDataArchives.ApplyFinalProceduralLines(
+                sourceFiles, finalLines, targetPlanet);
+            DateTime roadsReady = DateTime.UtcNow;
 
             string generatorSignature =
                 BuildProceduralGeneratorSignature(
                     recipe,
                     builder,
-                    sourceGenerator);
+                    sourceGenerator,
+                    originalFiles);
 
             RuntimeProceduralCacheManifest cacheManifest =
                 RuntimeProceduralCache.CreateManifest(
                     generatorSignature,
                     recipe);
 
-            return _planetDataArchives.PackProceduralArchive(
+            byte[] archive = _planetDataArchives.PackProceduralArchive(
                 sourceFiles,
                 cacheManifest);
+            _roadReplayCache.Store(entry.SourceEntityId, sourceSignature, recipe, baseFiles, sourceFiles);
+            LogRecipeReplay(entry.SourceEntityId, "cold cells", recipe.Revisions.Count,
+                finalLines.Count, started, sourceReady, terrainReady, roadsReady);
+            return archive;
+        }
+
+        private static void LogRecipeReplay(long planetId, string mode, int revisions, int roads,
+            DateTime start, DateTime source, DateTime terrain, DateTime lines)
+        {
+            DateTime end = DateTime.UtcNow;
+            MyLog.Default.WriteLineAndConsole("[Voxel Cubemap API] Recipe replay " + mode +
+                " planet=" + planetId + " revisions=" + revisions + " roads=" + roads +
+                " sourceMs=" + (source - start).TotalMilliseconds.ToString("F0") +
+                " terrainMs=" + (terrain - source).TotalMilliseconds.ToString("F0") +
+                " roadsMs=" + (lines - terrain).TotalMilliseconds.ToString("F0") +
+                " packageMs=" + (end - lines).TotalMilliseconds.ToString("F0") +
+                " totalMs=" + (end - start).TotalMilliseconds.ToString("F0"));
         }
 
 
         private string BuildProceduralGeneratorSignature(
             RuntimeProceduralPlanetRecipe recipe,
             MyObjectBuilder_PlanetGeneratorDefinition runtimeBuilder,
-            MyPlanetGeneratorDefinition sourceGenerator)
+            MyPlanetGeneratorDefinition sourceGenerator,
+            Dictionary<string, byte[]> originalFiles = null)
         {
             if (recipe == null)
                 throw new ArgumentNullException(nameof(recipe));
@@ -1944,7 +2065,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 foreach (var fileName in PlanetMapFileNames.All)
                 {
                     byte[] sourceData =
-                        _planetDataArchives.ReadSourceFile(
+                        originalFiles != null ? originalFiles[fileName] : _planetDataArchives.ReadSourceFile(
                             sourceGenerator.Context,
                             recipe.Source.SourceSubtype,
                             recipe.Source.SourceFolderName,
@@ -1994,6 +2115,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         new List<BiomeReplacementOperation>(),
                     BrushOperations =
                         new List<BrushOperation>(),
+                    LineOperations =
+                        new List<LineOperation>(),
                     FeatureOperations =
                         new List<FeatureOperation>(),
                     AllocatedComplexMaterialValues =
@@ -2016,6 +2139,24 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         CoveragePercent = operation.CoveragePercent,
                         Threshold = operation.Threshold
                     });
+            }
+
+            for (int i = 0; revision.Lines != null && i < revision.Lines.Count; i++)
+            {
+                RuntimeProceduralLineOperation line = revision.Lines[i];
+                snapshot.LineOperations.Add(new LineOperation
+                {
+                    Layer = line.Layer,
+                    Material = line.Material,
+                    Geometry = (double[])line.Geometry.Clone(),
+                    RadiusMeters = line.RadiusMeters,
+                    WidthMeters = line.WidthMeters,
+                    AverageHeight = line.AverageHeight,
+                    FillAngleDegrees = line.FillAngleDegrees,
+                    MaximumSlopeDegrees = line.MaximumSlopeDegrees,
+                    SegmentDistanceMeters = line.SegmentDistanceMeters,
+                    HeightRangeMeters = line.HeightRangeMeters
+                });
             }
 
             for (int i = 0; i < revision.BiomeReplacements.Count; i++)
@@ -2644,8 +2785,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 {
                     _requestInProgress =
                         false;
+                    EndPushProfile();
                 }
             }
+        }
+
+
+        private void EndPushProfile()
+        {
+            _pushProfile?.Dispose();
+            _pushProfile = null;
         }
 
 
@@ -2817,6 +2966,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 ConvertBrushOperations(
                     packet.BrushOperations);
 
+            snapshot.LineOperations =
+                ConvertLineOperations(packet.LineOperations);
+
             snapshot.FeatureOperations =
                 ConvertFeatureOperations(packet.FeatureOperations);
 
@@ -2834,11 +2986,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             Dictionary<string, byte[]> archiveFiles;
 
+            List<LineOperation> finalLines = snapshot.LineOperations;
+            snapshot.LineOperations = new List<LineOperation>();
+
             byte[] archive =
                 _planetDataArchives.BuildModifiedArchive(
                     snapshot,
                     false,
                     out archiveFiles);
+
+            snapshot.LineOperations = finalLines;
 
             RuntimePlanetBuilderEntry entry =
                 CreateRuntimeReplayEntry(
@@ -2861,11 +3018,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     snapshot,
                     entry,
                     archiveFiles);
-
-                archive =
-                    _planetDataArchives.BuildAuthoritativeImageArchive(
-                        archiveFiles);
             }
+
+            _planetDataArchives.ApplyFinalProceduralLines(
+                archiveFiles, finalLines, snapshot.TargetPlanet);
+            if (finalLines.Count > 0 || !string.IsNullOrWhiteSpace(snapshot.EnvironmentPresetName))
+                archive = _planetDataArchives.BuildAuthoritativeImageArchive(archiveFiles);
 
             return PrepareRuntimeReplaySwap(
                 snapshot,
@@ -3146,6 +3304,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     new List<BiomeReplacementOperation>(),
                 BrushOperations =
                     new List<BrushOperation>(),
+                LineOperations =
+                    new List<LineOperation>(),
                 FeatureOperations =
                     new List<FeatureOperation>(),
                 AllocatedComplexMaterialValues =
@@ -3248,6 +3408,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 result.ChangeEnvironment =
                     snapshot.ChangeEnvironment;
+
+                result.LineOperations = snapshot.LineOperations;
 
                 return result;
             }
@@ -3365,6 +3527,42 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             return result;
         }
 
+
+        private static List<LineOperation> ConvertLineOperations(
+            List<SyncedLineOperation> operations)
+        {
+            var result = new List<LineOperation>();
+            if (operations == null)
+                return result;
+            foreach (SyncedLineOperation operation in operations)
+            {
+                if (operation == null || operation.Geometry == null || operation.Geometry.Length != 12 ||
+                    operation.RadiusMeters <= 0 || operation.WidthMeters <= 0 ||
+                    operation.FillAngleDegrees < 0 || operation.FillAngleDegrees >= 90 ||
+                    operation.MaximumSlopeDegrees < 0 || operation.MaximumSlopeDegrees >= 90 ||
+                    double.IsNaN(operation.SegmentDistanceMeters) ||
+                    double.IsInfinity(operation.SegmentDistanceMeters) ||
+                    operation.SegmentDistanceMeters < 0 || operation.SegmentDistanceMeters > 2000)
+                    throw new ArgumentException("Invalid synchronized DrawLine operation.", nameof(operations));
+                foreach (double value in operation.Geometry)
+                    if (double.IsNaN(value) || double.IsInfinity(value))
+                        throw new ArgumentException("Invalid synchronized DrawLine geometry.", nameof(operations));
+                result.Add(new LineOperation
+                {
+                    Layer = operation.Layer,
+                    Material = operation.Material,
+                    Geometry = (double[])operation.Geometry.Clone(),
+                    RadiusMeters = operation.RadiusMeters,
+                    WidthMeters = operation.WidthMeters,
+                    AverageHeight = operation.AverageHeight,
+                    FillAngleDegrees = operation.FillAngleDegrees,
+                    MaximumSlopeDegrees = operation.MaximumSlopeDegrees,
+                    SegmentDistanceMeters = operation.SegmentDistanceMeters,
+                    HeightRangeMeters = operation.HeightRangeMeters
+                });
+            }
+            return result;
+        }
 
         private static List<BrushOperation> ConvertBrushOperations(
             List<SyncedBrushOperation> operations)

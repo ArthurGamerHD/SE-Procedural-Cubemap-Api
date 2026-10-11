@@ -731,6 +731,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         internal RuntimeProceduralPlanetRecipe LoadRuntimeRecipe(
             RuntimePlanetBuilderEntry entry)
         {
+            string xml = LoadRuntimeRecipeXml(entry);
+
+            RuntimeProceduralPlanetRecipe recipe =
+                MyAPIGateway.Utilities
+                    .SerializeFromXML<RuntimeProceduralPlanetRecipe>(xml);
+
+            ValidateRuntimeRecipe(recipe, entry);
+            return recipe;
+        }
+
+
+        internal string LoadRuntimeRecipeXml(
+            RuntimePlanetBuilderEntry entry)
+        {
             if (entry == null)
                 throw new ArgumentNullException(nameof(entry));
 
@@ -750,16 +764,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     variableName);
             }
 
-            RuntimeProceduralPlanetRecipe recipe =
-                MyAPIGateway.Utilities
-                    .SerializeFromXML<RuntimeProceduralPlanetRecipe>(
-                        xml);
-
-            ValidateRuntimeRecipe(
-                recipe,
-                entry);
-
-            return recipe;
+            return xml;
         }
 
 
@@ -2798,6 +2803,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 if (revision.Brushes == null)
                     revision.Brushes = new List<RuntimeProceduralBrushOperation>();
+                if (revision.Lines == null)
+                    revision.Lines = new List<RuntimeProceduralLineOperation>();
                 if (revision.BiomeReplacements == null)
                     revision.BiomeReplacements = new List<RuntimeProceduralBiomeReplacement>();
                 if (revision.FractalNoise == null)
@@ -2844,6 +2851,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 operationCount = checked(
                     operationCount +
                     revision.Brushes.Count +
+                    revision.Lines.Count +
                     revision.BiomeReplacements.Count +
                     revision.FractalNoise.Count +
                     Math.Max(
@@ -2884,6 +2892,33 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     {
                         throw new Exception(
                             "Procedural recipe contains a null biome replacement.");
+                    }
+                }
+
+                for (int i = 0; i < revision.Lines.Count; i++)
+                {
+                    RuntimeProceduralLineOperation line = revision.Lines[i];
+                    if (line == null ||
+                        (!string.Equals(line.Layer, "material", StringComparison.OrdinalIgnoreCase) &&
+                         !string.Equals(line.Layer, "biome", StringComparison.OrdinalIgnoreCase) &&
+                         !string.Equals(line.Layer, "ore", StringComparison.OrdinalIgnoreCase)) ||
+                        line.Material < 0 || line.Material > byte.MaxValue ||
+                        line.Geometry == null || line.Geometry.Length != 12 ||
+                        double.IsNaN(line.RadiusMeters) || double.IsInfinity(line.RadiusMeters) ||
+                        line.RadiusMeters <= 0 ||
+                        double.IsNaN(line.WidthMeters) || double.IsInfinity(line.WidthMeters) ||
+                        line.WidthMeters <= 0 ||
+                        double.IsNaN(line.FillAngleDegrees) || double.IsInfinity(line.FillAngleDegrees) ||
+                        line.FillAngleDegrees < 0 || line.FillAngleDegrees >= 90 ||
+                        double.IsNaN(line.MaximumSlopeDegrees) || double.IsInfinity(line.MaximumSlopeDegrees) ||
+                        line.MaximumSlopeDegrees < 0 || line.MaximumSlopeDegrees >= 90 ||
+                        double.IsNaN(line.SegmentDistanceMeters) || double.IsInfinity(line.SegmentDistanceMeters) ||
+                        line.SegmentDistanceMeters < 0 || line.SegmentDistanceMeters > 2000 ||
+                        double.IsNaN(line.HeightRangeMeters) || double.IsInfinity(line.HeightRangeMeters) ||
+                        line.HeightRangeMeters <= 0 ||
+                        line.Geometry.Any(x => double.IsNaN(x) || double.IsInfinity(x)))
+                    {
+                        throw new Exception("Procedural recipe contains an invalid line.");
                     }
                 }
 

@@ -51,6 +51,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         public List<RuntimeProceduralBrushOperation> Brushes =
             new List<RuntimeProceduralBrushOperation>();
 
+        public List<RuntimeProceduralLineOperation> Lines =
+            new List<RuntimeProceduralLineOperation>();
+
         public List<RuntimeProceduralFeatureOperation> Features =
             new List<RuntimeProceduralFeatureOperation>();
 
@@ -67,6 +70,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         public List<RuntimeProceduralEnvironmentMapRule> EnvironmentRemap =
             new List<RuntimeProceduralEnvironmentMapRule>();
+    }
+
+    public class RuntimeProceduralLineOperation
+    {
+        public string Layer;
+        public int Material;
+        public double[] Geometry;
+        public double RadiusMeters;
+        public double WidthMeters;
+        public bool AverageHeight;
+        public double FillAngleDegrees;
+        public double MaximumSlopeDegrees;
+        public double SegmentDistanceMeters;
+        public double HeightRangeMeters;
     }
 
 
