@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Adk.Image.Png;
+using Adk.Utils;
 using Generated;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
@@ -1210,7 +1211,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             Builder.PlanetMaps = planetMaps;
 
             string name = new[] { "Material", "Biome", "Ores" }[layerIndex];
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Enabled Planet Map layer " +
                 $"{name} for runtime map editing " +
                 $"(source generator had {name}=false).");

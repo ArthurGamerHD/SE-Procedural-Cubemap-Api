@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using VRage.Game;
@@ -218,7 +219,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 carrier.EnvironmentSectorType;
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Bound caller environment to runtime generator. " +
                 "Generator='" +
                 runtimeGenerator.Id.SubtypeName +
@@ -400,7 +402,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     sourcePlanet.PositionLeftBottomCorner =
                         positionLeftBottomCornerBeforeInit;
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Debug,
                         "[RuntimePlanetGenerator] Restored planet voxel origin after environment init. " +
                         "EntityId=" +
                         sourcePlanet.EntityId +
@@ -482,7 +485,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                             "Runtime generator did not initialize its configured planet environment component.");
                     }
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.LogInfo(
                         "[RuntimePlanetGenerator] Reinitialized live planet without an environment component. " +
                         "EntityId=" +
                         sourcePlanet.EntityId +
@@ -511,7 +514,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 }
 
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.LogInfo(
                     "[RuntimePlanetGenerator] Reinitialized live planet environment in place. " +
                     "EntityId=" +
                     sourcePlanet.EntityId +

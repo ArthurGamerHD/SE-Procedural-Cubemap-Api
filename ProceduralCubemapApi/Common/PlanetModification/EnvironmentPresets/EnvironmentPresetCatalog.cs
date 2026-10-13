@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Adk.Utils;
 using Sandbox.Definitions;
 using ProceduralCubemapApi.Common.PlanetModification.Runtime;
 using VRage.Game;
@@ -95,8 +96,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets
                 }
                 catch (Exception e)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Environment preset scan skipped '" +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Environment preset scan skipped '" +
                         (generator == null
                             ? "<null>"
                             : generator.Id.SubtypeName) +
@@ -108,8 +110,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets
 
                 if (_presets.ContainsKey(preset.Name))
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Duplicate environment preset '" +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Duplicate environment preset '" +
                         preset.Name +
                         "' encountered; the final loaded definition wins.");
                 }
@@ -118,8 +121,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.EnvironmentPresets
                     preset;
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Discovered " +
+            LogHelper.LogInfo(
+                "Discovered " +
                 _presets.Count +
                 " XML-backed environment presets.");
         }

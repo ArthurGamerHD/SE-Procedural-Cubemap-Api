@@ -47,6 +47,7 @@
   <Target Name="RemoveThumbAlias" AfterTargets="MdkPack;MdkDidNotPack">
     <Delete Files="$(MSBuildProjectDirectory)\thumb.png" />
   </Target>
+  <Import Project="..\External\Adk\Adk.Utils\Adk.Utils.projitems" Label="Shared" />
   <Import Project="..\External\Adk\Adk.Compression\Adk.Compression.projitems" Label="Shared" />
   <Import Project="..\External\Adk\Adk.Image\Adk.Image.projitems" Label="Shared" />
   <Target Name="ExportGeneratedClientApi" AfterTargets="CoreCompile">

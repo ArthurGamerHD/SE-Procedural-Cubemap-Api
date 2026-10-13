@@ -1,4 +1,5 @@
 using System;
+using Adk.Utils;
 using Sandbox.ModAPI;
 using VRage.Utils;
 
@@ -28,8 +29,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     }
                     catch (Exception error)
                     {
-                        MyLog.Default.WriteLineAndConsole(
-                            "[Voxel Cubemap API] Could not create " + FileName + ": " + error);
+                        LogHelper.Log(
+                            MyLogSeverity.Warning,
+                            "Could not create " + FileName + ": " + error);
                     }
                 }
                 return new Scope(_generation);
@@ -56,8 +58,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
             catch (Exception error)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Could not remove " + FileName + ": " + error);
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
+                    "Could not remove " + FileName + ": " + error);
             }
         }
 

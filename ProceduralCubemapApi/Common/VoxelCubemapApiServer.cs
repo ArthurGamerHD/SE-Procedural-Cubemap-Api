@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Adk.Utils;
 using Generated;
 using Sandbox.Definitions;
 using Sandbox.Game;
@@ -31,7 +32,7 @@ namespace ProceduralCubemapApi.Common
         private bool _workshopStorageWarningLogged;
         private bool _workshopStorageFailureLogged;
         private int _workshopStorageRetryFrames;
-        private bool _worldStorageFirstFrameSelfTestPending;
+        private bool _init;
         private bool _worldStorageVerificationFailed;
         private CubemapIntermodApiServer _intermodApi;
 
@@ -95,6 +96,8 @@ namespace ProceduralCubemapApi.Common
 
         public override void LoadData()
         {
+            LogHelper.LogInfo("Init - Version " + Constants.VersionName);
+            
             RegisterSingleton();
 
             _unloading =
@@ -115,9 +118,6 @@ namespace ProceduralCubemapApi.Common
 
             _workshopStorageRetryFrames =
                 0;
-
-            _worldStorageFirstFrameSelfTestPending =
-                true;
 
             _worldStorageVerificationFailed =
                 false;
@@ -190,8 +190,7 @@ namespace ProceduralCubemapApi.Common
                     () => _unloading,
                     () => _worldStoragePathReady);
 
-            _runtimePackages.ProceduralArchiveBuilder =
-                _modifications.RebuildProceduralArchive;
+            _runtimePackages.ProceduralArchiveBuilder = _modifications.RebuildProceduralArchive;
             _runtimePackages.CanonicalProceduralArchiveBuilder = _modifications.RebuildCanonicalProceduralArchive;
             _runtimePackages.SnapshotMaterialRemapper = _planetDataArchives.RemapSnapshotMaterials;
             _runtimePackages.OriginalMaterialSourceBuilder = _modifications.CaptureOriginalMaterialSource;
@@ -218,9 +217,10 @@ namespace ProceduralCubemapApi.Common
             if ((!MyAPIGateway.Session.IsServer ||
                  !HasWorkshopSavePathTransition()))
             {
-                _worldStoragePathReady =
-                    true;
+                _worldStoragePathReady = true;
             }
+            
+            
         }
 
 
@@ -239,7 +239,7 @@ namespace ProceduralCubemapApi.Common
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Startup persistence cleanup failed: " + e);
+                LogHelper.Log(MyLogSeverity.Warning, "[RuntimePlanetGenerator] Startup persistence cleanup failed: " + e);
             }
         }
 
@@ -269,15 +269,22 @@ namespace ProceduralCubemapApi.Common
                     "Normalizing the active save file before runtime archive requests begin.";
 
                 MyLog.Default.Log(MyLogSeverity.Warning, "[RuntimePlanetGenerator] " + message);
-                MyAPIGateway.Utilities.ShowMessage(nameof(ProceduralCubemapApi), message);
-                var notification = MyAPIGateway.Utilities.CreateNotification("TFM Updating Voxel... Done!");
-                notification.Show();
-                
-                
-                notification.Hide();
-                notification.ResetAliveTime();
-                notification.Text += " Done!";
-                notification.Show();
+                try
+                {
+                    MyAPIGateway.Utilities.ShowMessage(nameof(ProceduralCubemapApi), message);
+                    var notification = MyAPIGateway.Utilities.CreateNotification("TFM Updating Voxel... Done!");
+                    notification.Show();
+
+                    notification.Hide();
+                    notification.ResetAliveTime();
+                    notification.Text += " Done!";
+                    notification.Show();
+                }
+                catch (Exception e)
+                {
+                    LogHelper.Log(MyLogSeverity.Warning,
+                        "[RuntimePlanetGenerator] Could not display workshop path warning: " + e.Message);
+                }
             }
 
             if (_workshopStorageRetryFrames > 0)
@@ -361,7 +368,7 @@ namespace ProceduralCubemapApi.Common
             _worldStoragePathReady =
                 true;
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Workshop world-storage path " +
                 "normalized to CurrentPath: " +
                 currentPath);
@@ -481,14 +488,16 @@ namespace ProceduralCubemapApi.Common
             if (!EnsureWorldStoragePathReady())
                 return;
 
-            // Phase 2: authoritative verification on the first simulation frame
-            // after the existing workshop path-normalization logic has run.
-            if (MyAPIGateway.Session.IsServer &&
-                _worldStorageFirstFrameSelfTestPending)
-            {
-                _worldStorageFirstFrameSelfTestPending =
-                    false;
 
+            if (MyAPIGateway.Session.IsServer && !_init)
+            {
+                _init = true;
+
+                if (_runtimePackages.SchemaUpgraded)
+                    AnnounceToAllPlayers(AnnounceSchemaUpgrade);
+  
+                // Phase 2: authoritative verification on the first simulation frame
+                // after the existing workshop path-normalization logic has run.
                 string previousVerifiedPath =
                     _runtimeGenerators.VerifiedWorldSavePath;
 
@@ -603,11 +612,11 @@ namespace ProceduralCubemapApi.Common
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Error,
                     "[RuntimePlanetGenerator] Save-path rebind failed: " + e);
             }
         }
-
 
         private bool TryRunWorldStorageSelfTest(
             string savePath,
@@ -635,14 +644,16 @@ namespace ProceduralCubemapApi.Common
             // Keep the diagnostic banner/alerts on every platform. This state
             // controls notifications only; it must not gate saving or API work.
             const string banner =
-@"/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
-\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+@"
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
 /\    ARTHUR'S PROCEDURAL CUBEMAP API     /\
 \/                                        \/
 /\    INITIALIZATION SELF TEST FAILURE    /\
 \/       API MAYBE NOT READY!!!!!         \/
-/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
-\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/";
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+";
 
             MyLog.Default.Log(
                 MyLogSeverity.Warning,
@@ -659,6 +670,11 @@ namespace ProceduralCubemapApi.Common
             if (MyAPIGateway.Players == null)
                 return;
 
+            AnnounceToAllPlayers(PathValidationWarning);
+        }
+        
+        public void AnnounceToAllPlayers(Action<long> announcementAction)
+        {
             try
             {
                 var players = new List<IMyPlayer>();
@@ -667,27 +683,32 @@ namespace ProceduralCubemapApi.Common
                 foreach (IMyPlayer player in players)
                 {
                     if (player != null && !player.IsBot)
-                        SendVerificationWarning(player.IdentityId);
+                        announcementAction(player.IdentityId);
                 }
             }
             catch (Exception e)
             {
                 MyLog.Default.Log(MyLogSeverity.Warning,
-                    "[RuntimePlanetGenerator] Could not notify connected " +
-                    "players about failed verification: " + e);
+                    "[RuntimePlanetGenerator] Could not notify connected players:\n"+e);
             }
         }
 
         [NetworkCallback(typeof(Hello), NetworkCallbackFilter.IsServer | NetworkCallbackFilter.FromClient)]
-        public void OnRuntimeRevisionDecision(
-            ReceivedPacketEventArgs packet)
+        public void OnRuntimeRevisionDecision(ReceivedPacketEventArgs packet)
         {
+            var sender = MyAPIGateway.Players.TryGetIdentityId(packet.SenderId);
+            if (sender == 0)
+                return;
+            
             if (_worldStorageVerificationFailed)
-                SendVerificationWarning(MyAPIGateway.Players.TryGetIdentityId(packet.SenderId));
+                PathValidationWarning(sender);
+            
+            if(_runtimePackages.SchemaUpgraded)
+                AnnounceSchemaUpgrade(sender);
         }
 
 
-        private static void SendVerificationWarning(long playerId)
+        private static void PathValidationWarning(long playerId)
         {
             try
             {
@@ -705,7 +726,24 @@ namespace ProceduralCubemapApi.Common
                     playerId + " about failed verification: " + e);
             }
         }
-
-
+        
+        private void AnnounceSchemaUpgrade(long playerId)
+        {
+            try
+            {
+                MyVisualScriptLogicProvider.SendChatMessageColored(
+                    "\nStorage version upgraded:\n" +
+                    "- Trim unused brushes and materials to reduce loading time",
+                    Color.Lime,
+                    "Procedural Cubemap API", 
+                    playerId);
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not notify player " +
+                    playerId + " about schema upgrade: " + e);
+            }
+        }
     }
 }

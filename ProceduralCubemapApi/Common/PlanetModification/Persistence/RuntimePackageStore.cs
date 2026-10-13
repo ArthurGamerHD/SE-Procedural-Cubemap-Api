@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Adk.Compression.Zip;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -18,6 +19,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 {
     internal sealed class RuntimePackageStore
     {
+        public bool SchemaUpgraded { get; set; }
+
         private sealed class PersistentCacheValidationException : Exception
         {
             internal PersistentCacheValidationException(
@@ -61,12 +64,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         private readonly CubemapApiServer _server;
         private readonly CubemapApiConfig _config;
+
         private readonly object _persistenceSync =
             new object();
 
         private int _brushOptimizationVersion;
         private int _savedBrushOptimizationVersion;
         private int _brushOptimizationSaveRetryFrames;
+        private bool _schemaUpgradeBackupCreated;
 
         private readonly HashSet<string> _worldStorageCacheFiles =
             new HashSet<string>(
@@ -113,7 +118,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         internal Func<RuntimePlanetBuilderEntry, RuntimeProceduralPlanetRecipe,
             MyObjectBuilder_PlanetGeneratorDefinition, byte[]> CanonicalProceduralArchiveBuilder { get; set; }
+
         internal Func<RuntimePlanetBuilderEntry, byte[], byte[]> SnapshotMaterialRemapper { get; set; }
+
         internal Func<RuntimePlanetBuilderEntry, RuntimeProceduralPlanetRecipe,
             MyObjectBuilder_PlanetGeneratorDefinition> OriginalMaterialSourceBuilder { get; set; }
 
@@ -139,8 +146,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             for (int i = 0;
-                i < Settings.PlanetBuilders.Count;
-                i++)
+                 i < Settings.PlanetBuilders.Count;
+                 i++)
             {
                 RuntimePlanetBuilderEntry entry =
                     Settings.PlanetBuilders[i];
@@ -160,7 +167,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         entry);
 
                 if (persistenceType ==
-                        RuntimePlanetPersistenceType.Procedural &&
+                    RuntimePlanetPersistenceType.Procedural &&
                     entry.RecipeSchemaVersion != 1 && entry.RecipeSchemaVersion != 2)
                 {
                     throw new Exception(
@@ -173,6 +180,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             _manifest =
                 LoadPersistenceManifest();
+
+            // Capture all original XML before cleanup, schema conversion or
+            // palette/recipe compaction can publish replacement persistence.
+            if (Settings.PlanetBuilders.Any(entry =>
+                    GetPersistenceType(entry) == RuntimePlanetPersistenceType.Procedural &&
+                    entry.RecipeSchemaVersion < 2))
+                EnsureSchemaUpgradeBackup();
 
             CleanupAbandonedPersistencePackages();
             SeedPersistenceManifestFromSettings();
@@ -193,8 +207,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             for (int i = 0;
-                i < Settings.PlanetBuilders.Count;
-                i++)
+                 i < Settings.PlanetBuilders.Count;
+                 i++)
             {
                 RuntimePlanetBuilderEntry entry =
                     Settings.PlanetBuilders[i];
@@ -207,7 +221,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 Generators[
-                    entry.Subtype] =
+                        entry.Subtype] =
                     generator;
             }
 
@@ -216,7 +230,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 savePath;
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Loaded persisted runtime generators: " +
                 Generators.Count);
         }
@@ -231,22 +245,22 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             string xml;
 
-            if (!MyAPIGateway.Utilities.GetVariable<string>(
-                RUNTIME_SETTINGS_VARIABLE,
-                out xml))
+            if (!MyAPIGateway.Utilities.GetVariable(
+                    RUNTIME_SETTINGS_VARIABLE,
+                    out xml))
             {
                 if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                    RUNTIME_SETTINGS_FILE,
-                    typeof(CubemapApiServer)))
+                        RUNTIME_SETTINGS_FILE,
+                        typeof(CubemapApiServer)))
                 {
                     return new RuntimePlanetGeneratorSettings();
                 }
 
 
                 using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
-                        RUNTIME_SETTINGS_FILE,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                           RUNTIME_SETTINGS_FILE,
+                           typeof(CubemapApiServer)))
                 {
                     xml =
                         reader.ReadToEnd();
@@ -260,7 +274,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 migratedLegacyWorldStorage =
                     true;
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.LogInfo(
                     "[RuntimePlanetGenerator] Migrating persistence from " +
                     "WorldStorage to session variables.");
             }
@@ -298,7 +312,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 string xml =
                     MyAPIGateway.Utilities
-                        .SerializeToXML<RuntimePlanetGeneratorSettings>(
+                        .SerializeToXML(
                             Settings);
 
 
@@ -324,7 +338,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 string xml =
                     MyAPIGateway.Utilities
-                        .SerializeToXML<MyObjectBuilder_PlanetGeneratorDefinition>(
+                        .SerializeToXML(
                             builder);
 
 
@@ -373,8 +387,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         }
 
                         RuntimeProceduralPlanetRecipe recipe = LoadRuntimeRecipe(entry);
-                        MyObjectBuilder_PlanetGeneratorDefinition canonicalBuilder = LoadGeneratorBuilderFromWorldStorage(entry.GeneratorFile);
-                        bool changed = MyAPIGateway.Session.IsServer && recipe.SchemaVersion < 2;
+                        MyObjectBuilder_PlanetGeneratorDefinition canonicalBuilder =
+                            LoadGeneratorBuilderFromWorldStorage(entry.GeneratorFile);
+                        var needsSchemaUpgrade = MyAPIGateway.Session.IsServer && recipe.SchemaVersion < 2;
                         int previousRevisionCount = recipe.Revisions.Count;
                         RuntimeMaterialCanonicalizer.Result materials = deduplicateMaterials
                             ? RuntimeMaterialCanonicalizer.DeduplicateOwnedMaterials(canonicalBuilder, recipe,
@@ -384,13 +399,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             MyAPIGateway.Session.IsServer
                                 ? RuntimeBrushReplayPlanner.Compact(recipe)
                                 : new List<RuntimeBrushOptimizer.Removal>();
-                        changed |= materials.RemovedDefinitions > 0 || removed.Count > 0 || previousRevisionCount != recipe.Revisions.Count;
+                        needsSchemaUpgrade |= materials.RemovedDefinitions > 0 || removed.Count > 0 ||
+                                          previousRevisionCount != recipe.Revisions.Count;
 
                         if (!_config.PersistentCache)
                         {
-                            MyLog.Default.Log(MyLogSeverity.Info, "[RuntimePlanetGenerator] Persistent cache is disabled, rebuilding: " + entry.ArchiveFile + " (" + entry.Subtype + ").");
+                           LogHelper.LogInfo("[RuntimePlanetGenerator] Persistent cache is disabled, rebuilding: " +
+                                             entry.ArchiveFile + " (" + entry.Subtype + ").");
                         }
-                        else if (!changed && TryUsePersistentProceduralCache(entry, recipe))
+                        else if (!needsSchemaUpgrade && TryUsePersistentProceduralCache(entry, recipe))
                             continue;
 
                         // Keep live settings on the old schema until both the
@@ -402,12 +419,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                                 MyAPIGateway.Utilities.SerializeToXML(entry));
                             buildEntry.RecipeSchemaVersion = recipe.SchemaVersion;
                         }
+
                         int replaySize = recipe.Revisions.Count + recipe.Revisions.Sum(r => r.Brushes.Count);
-                        byte[] archive = changed
+                        byte[] archive = needsSchemaUpgrade
                             ? CanonicalProceduralArchiveBuilder(buildEntry, recipe, canonicalBuilder)
                             : ProceduralArchiveBuilder(buildEntry, recipe);
-                        changed |= MyAPIGateway.Session.IsServer &&
-                            replaySize != recipe.Revisions.Count + recipe.Revisions.Sum(r => r.Brushes.Count);
+                        needsSchemaUpgrade |= MyAPIGateway.Session.IsServer &&
+                                   replaySize != recipe.Revisions.Count + recipe.Revisions.Sum(r => r.Brushes.Count);
+
+                        if (needsSchemaUpgrade) EnsureSchemaUpgradeBackup();
 
                         WriteWorldStorageBinaryCache(entry.ArchiveFile, archive);
                         TrackPersistentCacheFile(entry.ArchiveFile);
@@ -415,21 +435,26 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         // Publish the optimized XML only after its replacement
                         // archive has been rebuilt successfully. The new recipe
                         // signature also invalidates the session replay cache.
-                        if (changed)
+                        if (needsSchemaUpgrade)
                         {
+                            SchemaUpgraded = true;
                             SaveGeneratorBuilder(entry.GeneratorFile, canonicalBuilder);
                             SaveRuntimeRecipe(buildEntry, recipe);
                             if (entry.RecipeSchemaVersion != recipe.SchemaVersion)
                             {
                                 entry.RecipeSchemaVersion = recipe.SchemaVersion;
-                                RuntimePersistencePackageEntry package = FindPersistenceManifestPackage(entry.ArchiveFile);
+                                RuntimePersistencePackageEntry package =
+                                    FindPersistenceManifestPackage(entry.ArchiveFile);
                                 if (package != null) package.RecipeSchemaVersion = recipe.SchemaVersion;
                                 SaveRuntimeSettings();
                                 SavePersistenceManifest();
                             }
+
                             RecordBrushOptimization(entry, removed);
                             if (removed.Count == 0) _brushOptimizationVersion++;
-                            MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Canonicalized runtime materials for planet " +
+                            LogHelper.Log(
+                                MyLogSeverity.Debug,
+                                "[RuntimePlanetGenerator] Canonicalized runtime materials for planet " +
                                 entry.SourceEntityId + ": removed " + materials.RemovedGroups +
                                 " complex groups and " + materials.RemovedCustomMaterials +
                                 " custom material entries; allocation history discarded.");
@@ -447,13 +472,17 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                                 OriginalMaterialSourceBuilder(entry, null));
                             if (materials.RemovedDefinitions > 0)
                             {
+                                EnsureSchemaUpgradeBackup();
                                 byte[] archive = SnapshotMaterialRemapper(entry, materials.Map);
                                 SaveRuntimeArchive(entry.ArchiveFile, archive);
                                 SaveGeneratorBuilder(entry.GeneratorFile, builder);
                                 _brushOptimizationVersion++;
-                                MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Deduplicated " + materials.RemovedGroups +
-                                    " complex groups and " + materials.RemovedCustomMaterials +
-                                    " custom material entries for snapshot planet " + entry.SourceEntityId + ".");
+                                LogHelper.Log(MyLogSeverity.Debug, "[RuntimePlanetGenerator] Deduplicated " +
+                                                                  materials.RemovedGroups +
+                                                                  " complex groups and " +
+                                                                  materials.RemovedCustomMaterials +
+                                                                  " custom material entries for snapshot planet " +
+                                                                  entry.SourceEntityId + ".");
                             }
                         }
                     }
@@ -461,6 +490,143 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
         }
 
+
+        private void EnsureSchemaUpgradeBackup()
+        {
+            if (!MyAPIGateway.Session.IsServer) return;
+
+            lock (_persistenceSync)
+            {
+                if (_schemaUpgradeBackupCreated) return;
+
+                string backupFile = null;
+                try
+                {
+                    var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                    string xml;
+                    if (!MyAPIGateway.Utilities.GetVariable(RUNTIME_SETTINGS_VARIABLE, out xml))
+                        xml = MyAPIGateway.Utilities.SerializeToXML(Settings);
+                    AddSchemaUpgradeBackupXml(files, "settings.xml", xml);
+                    if (!MyAPIGateway.Utilities.GetVariable(PERSISTENCE_MANIFEST_VARIABLE, out xml))
+                        xml = MyAPIGateway.Utilities.SerializeToXML(_manifest);
+                    AddSchemaUpgradeBackupXml(files, "persistence-manifest.xml", xml);
+
+                    // Read persisted strings, never the in-memory builders or
+                    // recipes that the optimizer may already have rewritten.
+                    foreach (RuntimePlanetBuilderEntry entry in Settings.PlanetBuilders)
+                    {
+                        if (!MyAPIGateway.Utilities.GetVariable(
+                                BuildGeneratorVariableName(entry.GeneratorFile), out xml))
+                        {
+                            using (TextReader reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                                       entry.GeneratorFile, typeof(CubemapApiServer)))
+                                xml = reader.ReadToEnd();
+                        }
+
+                        if (string.IsNullOrWhiteSpace(xml))
+                            throw new Exception("Cannot back up an empty generator: " + entry.GeneratorFile);
+                        AddSchemaUpgradeBackupXml(files, "generators/" +
+                                                         RuntimeArchiveLayout.GetProviderPath(entry.GeneratorFile),
+                            xml);
+
+                        if (GetPersistenceType(entry) == RuntimePlanetPersistenceType.Procedural)
+                            AddSchemaUpgradeBackupXml(files, "recipes/" +
+                                                             RuntimeArchiveLayout.GetProviderPath(entry.ArchiveFile) +
+                                                             ".recipe.xml",
+                                LoadRuntimeRecipeXml(entry));
+                    }
+
+                    string worldName = MyAPIGateway.Session.Name;
+                    DateTime created = DateTime.Now;
+                    files.Add("README.txt", Encoding.UTF8.GetBytes(
+                        "Procedural Cubemap API - pre-migration persistence backup\n" +
+                        "World: " + worldName + "\nCreated: " + created.ToString("O") + "\n" +
+                        "Original generator and recipe XML for all persisted planets, plus settings and manifest.\n" +
+                        "This is not a full world/voxel backup. Snapshot planets have no procedural recipe.\n"));
+
+                    string stem = BuildSchemaUpgradeBackupStem(worldName, created);
+                    backupFile = stem + ".zip";
+                    int suffix = 2;
+                    while (MyAPIGateway.Utilities.FileExistsInLocalStorage(backupFile, typeof(CubemapApiServer)))
+                        backupFile = stem + "-" + suffix++ + ".zip";
+
+                    byte[] archive = MinimalZip.WriteBytes(files.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                        .Select(pair =>
+                            new MinimalZip.Entry(pair.Key, pair.Value, MinimalZip.CompressionMode.Deflate)));
+                    using (BinaryWriter writer = MyAPIGateway.Utilities.WriteBinaryFileInLocalStorage(
+                               backupFile, typeof(CubemapApiServer)))
+                        writer.Write(archive);
+
+                    // Verify the closed file byte-for-byte before allowing any
+                    // upgraded generator/recipe to replace authoritative data.
+                    using (BinaryReader reader = MyAPIGateway.Utilities.ReadBinaryFileInLocalStorage(
+                               backupFile, typeof(CubemapApiServer)))
+                    {
+                        if (reader.BaseStream.Length != archive.Length)
+                            throw new Exception("Schema-upgrade backup length verification failed.");
+                        var buffer = new byte[64 * 1024];
+                        int offset = 0;
+                        while (offset < archive.Length)
+                        {
+                            int read = reader.Read(buffer, 0, Math.Min(buffer.Length, archive.Length - offset));
+                            if (read == 0) throw new Exception("Schema-upgrade backup is incomplete.");
+                            for (int i = 0; i < read; i++)
+                                if (buffer[i] != archive[offset + i])
+                                    throw new Exception("Schema-upgrade backup content verification failed.");
+                            offset += read;
+                        }
+                    }
+
+                    _schemaUpgradeBackupCreated = true;
+                    LogHelper.LogInfo(
+                        "[RuntimePlanetGenerator] Verified pre-migration backup in mod local storage: " + backupFile);
+                }
+                catch (Exception e)
+                {
+                    // Never trust an existing/partial file on a retry, and
+                    // never overwrite it. Only a verified write sets the flag.
+                    throw new Exception("Schema upgrade stopped: could not create and verify its mod-storage backup" +
+                                        (backupFile == null ? "." : " '" + backupFile + "'.") + " " + e.Message, e);
+                }
+            }
+        }
+
+        private static void AddSchemaUpgradeBackupXml(Dictionary<string, byte[]> files, string name, string xml)
+        {
+            byte[] previous;
+            // SerializeToXML normally declares UTF-16. Preserve the original
+            // XML text and honor that declaration instead of writing UTF-8
+            // bytes into a file which advertises a different encoding.
+            int declarationEnd = xml.StartsWith("<?xml", StringComparison.Ordinal)
+                ? xml.IndexOf("?>", StringComparison.Ordinal)
+                : -1;
+            string declaration = declarationEnd < 0 ? "" : xml.Substring(0, declarationEnd);
+            Encoding encoding = declaration.IndexOf("utf-16", StringComparison.OrdinalIgnoreCase) >= 0
+                ? Encoding.Unicode
+                : Encoding.UTF8;
+            byte[] bytes = encoding.GetBytes(xml);
+            if (Equals(encoding, Encoding.Unicode))
+                bytes = encoding.GetPreamble().Concat(bytes).ToArray();
+            if (files.TryGetValue(name, out previous))
+            {
+                if (!previous.SequenceEqual(bytes))
+                    throw new Exception("Conflicting schema-upgrade backup entry: " + name);
+                return;
+            }
+
+            files.Add(name, bytes);
+        }
+
+        private static string BuildSchemaUpgradeBackupStem(string worldName, DateTime created)
+        {
+            string safeName = new string((worldName ?? "World").Select(c =>
+                c < ' ' || "<>:\"/\\|?*".IndexOf(c) >= 0 ? '_' : c).ToArray()).Trim().TrimEnd('.');
+            if (safeName.Length == 0) safeName = "World";
+            // Leave room for the date and a same-day collision suffix.
+            if (safeName.Length > 120) safeName = safeName.Substring(0, 120).TrimEnd(' ', '.');
+            return safeName + "-SchemaUpgrade-" +
+                   created.ToString("dd-MM-yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         private bool TryUsePersistentProceduralCache(
             RuntimePlanetBuilderEntry entry,
@@ -473,29 +639,28 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 return false;
             }
 
-            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                entry.ArchiveFile,
-                typeof(CubemapApiServer)))
-            {
-                RejectPersistentProceduralCache(
-                    entry,
-                    "archive is missing");
-
-                return false;
-            }
-
-            if (ProceduralGeneratorSignatureBuilder == null)
-            {
-                throw new Exception(
-                    "Procedural generator signature reconstruction is not configured.");
-            }
-
             try
             {
-                using (BinaryReader reader =
-                    MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                // Cache probing is optional too: a failed existence check must
+                // take the same rebuild path as an unreadable archive.
+                if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
                         entry.ArchiveFile,
                         typeof(CubemapApiServer)))
+                {
+                    RejectPersistentProceduralCache(entry, "archive is missing");
+                    return false;
+                }
+
+                if (ProceduralGeneratorSignatureBuilder == null)
+                {
+                    throw new Exception(
+                        "Procedural generator signature reconstruction is not configured.");
+                }
+
+                using (BinaryReader reader =
+                       MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                           entry.ArchiveFile,
+                           typeof(CubemapApiServer)))
                 {
                     Stream stream =
                         reader.BaseStream;
@@ -503,8 +668,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     string comment;
 
                     if (!MinimalZip.TryReadComment(
-                        stream,
-                        out comment) ||
+                            stream,
+                            out comment) ||
                         !string.Equals(
                             comment,
                             RuntimeProceduralCache.ZipComment,
@@ -517,10 +682,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     byte[] manifestBytes;
 
                     if (!MinimalZip.TryReadEntry(
-                        stream,
-                        RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
-                        out manifestBytes,
-                        false))
+                            stream,
+                            RuntimeProceduralCache.ARCHIVE_MANIFEST_FILE,
+                            out manifestBytes))
                     {
                         throw new PersistentCacheValidationException(
                             "cache manifest is missing");
@@ -550,9 +714,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             recipe);
 
                     if (!string.Equals(
-                        manifest.RecipeSignature,
-                        recipeSignature,
-                        StringComparison.OrdinalIgnoreCase))
+                            manifest.RecipeSignature,
+                            recipeSignature,
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         throw new PersistentCacheValidationException(
                             "procedural recipe changed");
@@ -564,9 +728,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             recipe);
 
                     if (!string.Equals(
-                        manifest.GeneratorSignature,
-                        generatorSignature,
-                        StringComparison.OrdinalIgnoreCase))
+                            manifest.GeneratorSignature,
+                            generatorSignature,
+                            StringComparison.OrdinalIgnoreCase))
                     {
                         throw new PersistentCacheValidationException(
                             "source/runtime generator changed");
@@ -579,7 +743,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 TrackPersistentCacheFile(
                     entry.ArchiveFile);
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Debug,
                     "[RuntimePlanetGenerator] Persistent cache hit: " +
                     entry.ArchiveFile +
                     " (" +
@@ -598,6 +763,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
             catch (Exception e)
             {
+                LogHelper.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not validate optional cache '" +
+                    entry.ArchiveFile + "'; rebuilding from the recipe: " + e.Message);
                 RejectPersistentProceduralCache(
                     entry,
                     "cache validation failed: " +
@@ -625,7 +793,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             RuntimePlanetBuilderEntry entry,
             string reason)
         {
-            MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Persistent cache miss for '" + entry.ArchiveFile + "': " + reason + ".");
+            LogHelper.Log(MyLogSeverity.Debug, "[RuntimePlanetGenerator] Persistent cache miss for '" +
+                                              entry.ArchiveFile + "': " + reason + ".");
         }
 
 
@@ -635,10 +804,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         {
             string xml;
 
-            if (!MyAPIGateway.Utilities.GetVariable<string>(
-                BuildGeneratorVariableName(
-                    fileName),
-                out xml))
+            if (!MyAPIGateway.Utilities.GetVariable(
+                    BuildGeneratorVariableName(
+                        fileName),
+                    out xml))
             {
                 if (!allowLegacyMigration ||
                     !MyAPIGateway.Utilities.FileExistsInWorldStorage(
@@ -652,9 +821,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
-                        fileName,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                           fileName,
+                           typeof(CubemapApiServer)))
                 {
                     xml =
                         reader.ReadToEnd();
@@ -689,8 +858,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             byte[] archive;
 
             if (!TryLoadRuntimeArchiveVariables(
-                fileName,
-                out archive))
+                    fileName,
+                    out archive))
             {
                 if (!allowLegacyMigration ||
                     !MyAPIGateway.Utilities.FileExistsInWorldStorage(
@@ -704,9 +873,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 using (BinaryReader reader =
-                    MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
-                        fileName,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(
+                           fileName,
+                           typeof(CubemapApiServer)))
                 {
                     archive =
                         BinaryData.ReadAll(
@@ -722,7 +891,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             WriteWorldStorageBinaryCache(
                 fileName,
-                archive);
+                RuntimeArchiveLayout.PrepareProviderArchive(fileName, archive));
         }
 
 
@@ -793,7 +962,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 string xml =
                     MyAPIGateway.Utilities
-                        .SerializeToXML<RuntimeProceduralPlanetRecipe>(
+                        .SerializeToXML(
                             recipe);
 
                 if (string.IsNullOrWhiteSpace(xml))
@@ -853,7 +1022,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 {
                     lock (_persistenceSync)
                         _savedBrushOptimizationVersion = version;
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.LogInfo(
                         "[RuntimePlanetGenerator] Re-saved world after compacting runtime brushes, revisions and materials.");
                     return;
                 }
@@ -880,8 +1049,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     .SerializeFromXML<RuntimeProceduralPlanetRecipe>(xml);
 
             ValidateRuntimeRecipe(recipe, entry);
-            if (recipe.SchemaVersion == 2 && string.IsNullOrWhiteSpace(recipe.SourceSignature))
-                throw new Exception("Procedural recipe has no source signature.");
             return recipe;
         }
 
@@ -898,7 +1065,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             string xml;
 
-            if (!MyAPIGateway.Utilities.GetVariable<string>(
+            if (!MyAPIGateway.Utilities.GetVariable(
                     variableName,
                     out xml) ||
                 string.IsNullOrWhiteSpace(xml))
@@ -934,7 +1101,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             int previousChunkCount;
 
             bool hadPreviousChunkCount =
-                MyAPIGateway.Utilities.GetVariable<int>(
+                MyAPIGateway.Utilities.GetVariable(
                     chunkCountVariable,
                     out previousChunkCount);
 
@@ -959,7 +1126,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             int previousArchiveLength;
 
             bool hadPreviousArchiveLength =
-                MyAPIGateway.Utilities.GetVariable<int>(
+                MyAPIGateway.Utilities.GetVariable(
                     BuildArchiveLengthVariableName(
                         fileName),
                     out previousArchiveLength);
@@ -970,16 +1137,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             for (int chunkIndex = 0;
-                chunkIndex < previousChunkCount;
-                chunkIndex++)
+                 chunkIndex < previousChunkCount;
+                 chunkIndex++)
             {
                 string previousChunk;
 
-                if (!MyAPIGateway.Utilities.GetVariable<string>(
-                    BuildArchiveChunkVariableName(
-                        fileName,
-                        chunkIndex),
-                    out previousChunk) ||
+                if (!MyAPIGateway.Utilities.GetVariable(
+                        BuildArchiveChunkVariableName(
+                            fileName,
+                            chunkIndex),
+                        out previousChunk) ||
                     previousChunk == null)
                 {
                     throw new Exception(
@@ -998,9 +1165,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int chunkCount =
                 (int)(((long)archive.Length +
-                    ARCHIVE_CHUNK_SIZE_BYTES -
-                    1) /
-                    ARCHIVE_CHUNK_SIZE_BYTES);
+                       ARCHIVE_CHUNK_SIZE_BYTES -
+                       1) /
+                      ARCHIVE_CHUNK_SIZE_BYTES);
 
             ValidateArchiveChunkCount(
                 chunkCount,
@@ -1033,8 +1200,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             try
             {
                 for (int chunkIndex = 0;
-                    chunkIndex < chunkCount;
-                    chunkIndex++)
+                     chunkIndex < chunkCount;
+                     chunkIndex++)
                 {
                     int offset =
                         chunkIndex *
@@ -1078,8 +1245,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int chunkIndex = 0;
-                    chunkIndex < previousChunks.Count;
-                    chunkIndex++)
+                     chunkIndex < previousChunks.Count;
+                     chunkIndex++)
                 {
                     MyAPIGateway.Utilities.SetVariable(
                         BuildArchiveChunkVariableName(
@@ -1129,10 +1296,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int chunkCount;
 
-            if (!MyAPIGateway.Utilities.GetVariable<int>(
-                BuildArchiveChunkCountVariableName(
-                    fileName),
-                out chunkCount))
+            if (!MyAPIGateway.Utilities.GetVariable(
+                    BuildArchiveChunkCountVariableName(
+                        fileName),
+                    out chunkCount))
             {
                 return false;
             }
@@ -1140,7 +1307,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int archiveLength;
 
-            if (!MyAPIGateway.Utilities.GetVariable<int>(
+            if (!MyAPIGateway.Utilities.GetVariable(
                     BuildArchiveLengthVariableName(
                         fileName),
                     out archiveLength) ||
@@ -1156,9 +1323,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int expectedChunkCount =
                 (int)(((long)archiveLength +
-                    ARCHIVE_CHUNK_SIZE_BYTES -
-                    1) /
-                    ARCHIVE_CHUNK_SIZE_BYTES);
+                       ARCHIVE_CHUNK_SIZE_BYTES -
+                       1) /
+                      ARCHIVE_CHUNK_SIZE_BYTES);
 
             if (chunkCount != expectedChunkCount)
             {
@@ -1174,16 +1341,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             for (int chunkIndex = 0;
-                chunkIndex < chunkCount;
-                chunkIndex++)
+                 chunkIndex < chunkCount;
+                 chunkIndex++)
             {
                 string encodedChunk;
 
-                if (!MyAPIGateway.Utilities.GetVariable<string>(
-                    BuildArchiveChunkVariableName(
-                        fileName,
-                        chunkIndex),
-                    out encodedChunk) ||
+                if (!MyAPIGateway.Utilities.GetVariable(
+                        BuildArchiveChunkVariableName(
+                            fileName,
+                            chunkIndex),
+                        out encodedChunk) ||
                     string.IsNullOrEmpty(encodedChunk))
                 {
                     throw new Exception(
@@ -1303,7 +1470,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         {
             string xml;
 
-            if (!MyAPIGateway.Utilities.GetVariable<string>(
+            if (!MyAPIGateway.Utilities.GetVariable(
                     PERSISTENCE_MANIFEST_VARIABLE,
                     out xml) ||
                 string.IsNullOrWhiteSpace(xml))
@@ -1339,7 +1506,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         {
             string xml =
                 MyAPIGateway.Utilities
-                    .SerializeToXML<RuntimePersistenceManifest>(
+                    .SerializeToXML(
                         _manifest);
 
             MyAPIGateway.Utilities.SetVariable(
@@ -1407,10 +1574,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int chunkCount;
 
-            if (!MyAPIGateway.Utilities.GetVariable<int>(
-                BuildArchiveChunkCountVariableName(
-                    entry.ArchiveFile),
-                out chunkCount))
+            if (!MyAPIGateway.Utilities.GetVariable(
+                    BuildArchiveChunkCountVariableName(
+                        entry.ArchiveFile),
+                    out chunkCount))
             {
                 chunkCount =
                     0;
@@ -1430,7 +1597,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 ArchiveFile = entry.ArchiveFile,
                 ChunkCount =
                     GetPersistenceType(entry) ==
-                        RuntimePlanetPersistenceType.Procedural
+                    RuntimePlanetPersistenceType.Procedural
                         ? 0
                         : chunkCount,
                 PersistenceType = entry.PersistenceType,
@@ -1469,10 +1636,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 int chunkCount;
 
-                if (!MyAPIGateway.Utilities.GetVariable<int>(
-                    BuildArchiveChunkCountVariableName(
-                        entry.ArchiveFile),
-                    out chunkCount))
+                if (!MyAPIGateway.Utilities.GetVariable(
+                        BuildArchiveChunkCountVariableName(
+                            entry.ArchiveFile),
+                        out chunkCount))
                 {
                     chunkCount =
                         0;
@@ -1497,7 +1664,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 package.ChunkCount =
                     GetPersistenceType(entry) ==
-                        RuntimePlanetPersistenceType.Procedural
+                    RuntimePlanetPersistenceType.Procedural
                         ? 0
                         : chunkCount;
 
@@ -1530,9 +1697,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int packageIndex =
-                        _manifest.Packages.Count - 1;
-                    packageIndex >= 0;
-                    packageIndex--)
+                         _manifest.Packages.Count - 1;
+                     packageIndex >= 0;
+                     packageIndex--)
                 {
                     RuntimePersistencePackageEntry package =
                         _manifest.Packages[packageIndex];
@@ -1598,8 +1765,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int entryIndex = 0;
-                    entryIndex < Settings.PlanetBuilders.Count;
-                    entryIndex++)
+                     entryIndex < Settings.PlanetBuilders.Count;
+                     entryIndex++)
                 {
                     RuntimePlanetBuilderEntry entry =
                         Settings.PlanetBuilders[entryIndex];
@@ -1614,10 +1781,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                     int chunkCount;
 
-                    if (!MyAPIGateway.Utilities.GetVariable<int>(
-                        BuildArchiveChunkCountVariableName(
-                            entry.ArchiveFile),
-                        out chunkCount))
+                    if (!MyAPIGateway.Utilities.GetVariable(
+                            BuildArchiveChunkCountVariableName(
+                                entry.ArchiveFile),
+                            out chunkCount))
                     {
                         chunkCount =
                             0;
@@ -1637,7 +1804,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                             ArchiveFile = entry.ArchiveFile,
                             ChunkCount =
                                 GetPersistenceType(entry) ==
-                                    RuntimePlanetPersistenceType.Procedural
+                                RuntimePlanetPersistenceType.Procedural
                                     ? 0
                                     : chunkCount,
                             PersistenceType = entry.PersistenceType,
@@ -1683,8 +1850,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             for (int chunkIndex = 0;
-                chunkIndex < chunkCount;
-                chunkIndex++)
+                 chunkIndex < chunkCount;
+                 chunkIndex++)
             {
                 MyAPIGateway.Utilities.RemoveVariable(
                     BuildArchiveChunkVariableName(
@@ -1712,10 +1879,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             int chunkCount;
 
-            if (!MyAPIGateway.Utilities.GetVariable<int>(
-                BuildArchiveChunkCountVariableName(
-                    package.ArchiveFile),
-                out chunkCount))
+            if (!MyAPIGateway.Utilities.GetVariable(
+                    BuildArchiveChunkCountVariableName(
+                        package.ArchiveFile),
+                    out chunkCount))
             {
                 chunkCount =
                     package.ChunkCount;
@@ -1758,7 +1925,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             if (!string.IsNullOrWhiteSpace(
-                package.Subtype))
+                    package.Subtype))
             {
                 Generators.Remove(
                     package.Subtype);
@@ -1801,10 +1968,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 }
                 else
                 {
-                    if (!MyAPIGateway.Utilities.GetVariable<int>(
-                        BuildArchiveChunkCountVariableName(
-                            entry.ArchiveFile),
-                        out chunkCount))
+                    if (!MyAPIGateway.Utilities.GetVariable(
+                            BuildArchiveChunkCountVariableName(
+                                entry.ArchiveFile),
+                            out chunkCount))
                     {
                         throw new Exception(
                             "Pending runtime package has no chunk-count metadata: " +
@@ -1842,11 +2009,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 if (!Settings.PlanetBuilders.Any(x =>
-                    x != null &&
-                    string.Equals(
-                        x.Subtype,
-                        entry.Subtype,
-                        StringComparison.OrdinalIgnoreCase)))
+                        x != null &&
+                        string.Equals(
+                            x.Subtype,
+                            entry.Subtype,
+                            StringComparison.OrdinalIgnoreCase)))
                 {
                     Settings.PlanetBuilders.Add(
                         entry);
@@ -1884,8 +2051,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int i = 0;
-                    i < supersededEntries.Count;
-                    i++)
+                     i < supersededEntries.Count;
+                     i++)
                 {
                     RuntimePlanetBuilderEntry supersededEntry =
                         supersededEntries[i];
@@ -1993,8 +2160,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 new Dictionary<RuntimePlanetBuilderEntry, string>();
 
             foreach (IGrouping<long, RuntimePlanetBuilderEntry> group in
-                entries.GroupBy(x =>
-                    x.SourceEntityId))
+                     entries.GroupBy(x =>
+                         x.SourceEntityId))
             {
                 MyPlanet planet =
                     PlanetLocator.FindByEntityId(
@@ -2005,7 +2172,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     planet.Closed ||
                     planet.MarkedForClose)
                 {
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] Retaining runtime packages for planet " +
                         group.Key +
                         " because the live planet is unavailable during startup reconciliation.");
@@ -2026,7 +2194,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 }
                 catch (Exception e)
                 {
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] Retaining packages for planet " +
                         group.Key +
                         " because its live provider could not be resolved: " +
@@ -2037,11 +2206,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 foreach (RuntimePlanetBuilderEntry entry in
-                    group.Where(x =>
-                        !string.Equals(
-                            x.Subtype,
-                            providerSubtype,
-                            StringComparison.OrdinalIgnoreCase)))
+                         group.Where(x =>
+                             !string.Equals(
+                                 x.Subtype,
+                                 providerSubtype,
+                                 StringComparison.OrdinalIgnoreCase)))
                 {
                     staleEntries.Add(
                         entry);
@@ -2063,14 +2232,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int entryIndex = 0;
-                    entryIndex < staleEntries.Count;
-                    entryIndex++)
+                     entryIndex < staleEntries.Count;
+                     entryIndex++)
                 {
                     RuntimePlanetBuilderEntry staleEntry =
                         staleEntries[entryIndex];
 
                     if (!Settings.PlanetBuilders.Contains(
-                        staleEntry))
+                            staleEntry))
                     {
                         continue;
                     }
@@ -2082,7 +2251,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         staleEntry,
                         out liveProviderSubtype);
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.LogInfo(
                         "[RuntimePlanetGenerator] Removing stale runtime package. " +
                         "Subtype='" +
                         staleEntry.Subtype +
@@ -2128,7 +2297,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 SaveRuntimeSettings();
                 SavePersistenceManifest();
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.LogInfo(
                     "[RuntimePlanetGenerator] Removed stale runtime packages: " +
                     removedCount);
             }
@@ -2172,8 +2341,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Could not resolve live provider after " +
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
+                    "Could not resolve live provider after " +
                     "a commit error: " +
                     e.Message);
 
@@ -2187,9 +2357,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             string contents)
         {
             using (TextWriter writer =
-                MyAPIGateway.Utilities.WriteFileInWorldStorage(
-                    fileName,
-                    typeof(CubemapApiServer)))
+                   MyAPIGateway.Utilities.WriteFileInWorldStorage(
+                       fileName,
+                       typeof(CubemapApiServer)))
             {
                 writer.Write(
                     contents);
@@ -2205,18 +2375,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             string fileName,
             byte[] contents)
         {
-            byte[] providerArchive =
-                RuntimeArchiveLayout.PrepareProviderArchive(
-                    fileName,
-                    contents);
-
+            // Builders already use the final provider entry paths. Persist the
+            // same bytes without inflating/recompressing the entire archive.
             using (BinaryWriter writer =
-                MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
-                    fileName,
-                    typeof(CubemapApiServer)))
+                   MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(
+                       fileName,
+                       typeof(CubemapApiServer)))
             {
                 writer.Write(
-                    providerArchive);
+                    contents);
             }
 
 
@@ -2309,8 +2476,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         .ToList();
 
                 for (int index = 0;
-                    index < supersededEntries.Count;
-                    index++)
+                     index < supersededEntries.Count;
+                     index++)
                 {
                     RuntimePlanetBuilderEntry superseded =
                         supersededEntries[index];
@@ -2390,8 +2557,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     _persistentCacheManifest.Files.ToArray();
 
                 for (int index = 0;
-                    index < disabledCacheFiles.Length;
-                    index++)
+                     index < disabledCacheFiles.Length;
+                     index++)
                 {
                     TryDeleteWorldStorageCacheFile(
                         disabledCacheFiles[index]);
@@ -2410,7 +2577,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         .Where(entry =>
                             entry != null &&
                             GetPersistenceType(entry) ==
-                                RuntimePlanetPersistenceType.Procedural &&
+                            RuntimePlanetPersistenceType.Procedural &&
                             !string.IsNullOrWhiteSpace(
                                 entry.ArchiveFile))
                         .Select(entry =>
@@ -2421,14 +2588,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 _persistentCacheManifest.Files.ToArray();
 
             for (int index = 0;
-                index < trackedCacheFiles.Length;
-                index++)
+                 index < trackedCacheFiles.Length;
+                 index++)
             {
                 string fileName =
                     trackedCacheFiles[index];
 
                 if (referencedCacheFiles.Contains(
-                    fileName))
+                        fileName))
                 {
                     continue;
                 }
@@ -2445,22 +2612,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         private RuntimePersistentCacheStorageManifest
             LoadPersistentCacheManifest()
         {
-            if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                PERSISTENT_CACHE_MANIFEST_FILE,
-                typeof(CubemapApiServer)))
-            {
-                return new RuntimePersistentCacheStorageManifest();
-            }
-
-
             try
             {
+                if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        PERSISTENT_CACHE_MANIFEST_FILE,
+                        typeof(CubemapApiServer)))
+                {
+                    return new RuntimePersistentCacheStorageManifest();
+                }
+
                 string xml;
 
                 using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInWorldStorage(
-                        PERSISTENT_CACHE_MANIFEST_FILE,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                           PERSISTENT_CACHE_MANIFEST_FILE,
+                           typeof(CubemapApiServer)))
                 {
                     xml =
                         reader.ReadToEnd();
@@ -2469,7 +2635,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 RuntimePersistentCacheStorageManifest manifest =
                     MyAPIGateway.Utilities.SerializeFromXML<
                         RuntimePersistentCacheStorageManifest>(
-                            xml);
+                        xml);
 
                 if (manifest == null)
                 {
@@ -2487,7 +2653,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
                     "[RuntimePlanetGenerator] Could not load persistent " +
                     "cache manifest; replacing it: " +
                     e.Message);
@@ -2571,9 +2738,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         _persistentCacheManifest);
 
                 using (TextWriter writer =
-                    MyAPIGateway.Utilities.WriteFileInWorldStorage(
-                        PERSISTENT_CACHE_MANIFEST_FILE,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.WriteFileInWorldStorage(
+                           PERSISTENT_CACHE_MANIFEST_FILE,
+                           typeof(CubemapApiServer)))
                 {
                     writer.Write(
                         xml);
@@ -2581,7 +2748,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
                     "[RuntimePlanetGenerator] Could not save persistent " +
                     "cache manifest: " +
                     e.Message);
@@ -2594,10 +2762,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             lock (_persistenceSync)
             {
                 foreach (string fileName in
-                    _worldStorageCacheFiles)
+                         _worldStorageCacheFiles)
                 {
                     if (ShouldPreservePersistentCacheFile(
-                        fileName))
+                            fileName))
                     {
                         continue;
                     }
@@ -2621,8 +2789,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
                 for (int i = 0;
-                    i < Settings.PlanetBuilders.Count;
-                    i++)
+                     i < Settings.PlanetBuilders.Count;
+                     i++)
                 {
                     RuntimePlanetBuilderEntry entry =
                         Settings.PlanetBuilders[i];
@@ -2635,7 +2803,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         entry.GeneratorFile);
 
                     if (!ShouldPreservePersistentCacheFile(
-                        entry.ArchiveFile))
+                            entry.ArchiveFile))
                     {
                         TryDeleteWorldStorageCacheFile(
                             entry.ArchiveFile);
@@ -2659,7 +2827,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             return Settings.PlanetBuilders.Any(entry =>
                 entry != null &&
                 GetPersistenceType(entry) ==
-                    RuntimePlanetPersistenceType.Procedural &&
+                RuntimePlanetPersistenceType.Procedural &&
                 string.Equals(
                     entry.ArchiveFile,
                     fileName,
@@ -2687,8 +2855,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             try
             {
                 if (MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                    fileName,
-                    typeof(CubemapApiServer)))
+                        fileName,
+                        typeof(CubemapApiServer)))
                 {
                     MyAPIGateway.Utilities.DeleteFileInWorldStorage(
                         fileName,
@@ -2700,7 +2868,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
                     "[RuntimePlanetGenerator] Could not clear WorldStorage " +
                     "cache file '" +
                     fileName +
@@ -2715,8 +2884,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 string fileName)
         {
             if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(
-                fileName,
-                typeof(CubemapApiServer)))
+                    fileName,
+                    typeof(CubemapApiServer)))
             {
                 throw new Exception(
                     "Missing persisted runtime generator builder: " +
@@ -2727,9 +2896,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             string xml;
 
             using (TextReader reader =
-                MyAPIGateway.Utilities.ReadFileInWorldStorage(
-                    fileName,
-                    typeof(CubemapApiServer)))
+                   MyAPIGateway.Utilities.ReadFileInWorldStorage(
+                       fileName,
+                       typeof(CubemapApiServer)))
             {
                 xml =
                     reader.ReadToEnd();
@@ -2771,7 +2940,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
 
             if (!string.IsNullOrWhiteSpace(
-                entry.EnvironmentCarrierSubtype))
+                    entry.EnvironmentCarrierSubtype))
             {
                 PlanetEnvironmentService.EnsureBiomeMapEnabled(
                     builder);
@@ -2803,9 +2972,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
 
             if (entry.PersistenceType ==
-                    (int)RuntimePlanetPersistenceType.Procedural ||
+                (int)RuntimePlanetPersistenceType.Procedural ||
                 entry.PersistenceType ==
-                    (int)RuntimePlanetPersistenceType.PngSnapshot)
+                (int)RuntimePlanetPersistenceType.PngSnapshot)
             {
                 return (RuntimePlanetPersistenceType)entry.PersistenceType;
             }
@@ -2826,9 +2995,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             }
 
             if (entry.PersistenceType ==
-                    (int)RuntimePlanetPersistenceType.Procedural ||
+                (int)RuntimePlanetPersistenceType.Procedural ||
                 entry.PersistenceType ==
-                    (int)RuntimePlanetPersistenceType.PngSnapshot)
+                (int)RuntimePlanetPersistenceType.PngSnapshot)
             {
                 return (RuntimePlanetPersistenceType)entry.PersistenceType;
             }
@@ -2895,9 +3064,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             if (recipe.Source.SourceSubtype.Length > 512 ||
                 recipe.Source.SourceFolderName.Length > 1024 ||
                 (recipe.Source.ModName != null &&
-                    recipe.Source.ModName.Length > 1024) ||
+                 recipe.Source.ModName.Length > 1024) ||
                 (recipe.Source.PublishedServiceName != null &&
-                    recipe.Source.PublishedServiceName.Length > 128))
+                 recipe.Source.PublishedServiceName.Length > 128))
             {
                 throw new Exception(
                     "Procedural recipe source identity is too long.");
@@ -2930,7 +3099,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 recipe.Revisions = new List<RuntimeProceduralRevision>();
 
             if (recipe.SourceSignature != null && recipe.SourceSignature.Length > 128)
-                throw new Exception("Invalid procedural source signature.");
+            {
+                // This is diagnostic/cache metadata, not the planet recipe.
+                LogHelper.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Ignoring invalid procedural source signature; " +
+                    "replay will use the currently installed source.");
+                recipe.SourceSignature = null;
+            }
 
             if (recipe.Revisions.Count > 4096)
                 throw new Exception("Procedural recipe revision limit exceeded.");
@@ -2938,8 +3113,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             int operationCount = 0;
 
             for (int revisionIndex = 0;
-                revisionIndex < recipe.Revisions.Count;
-                revisionIndex++)
+                 revisionIndex < recipe.Revisions.Count;
+                 revisionIndex++)
             {
                 RuntimeProceduralRevision revision =
                     recipe.Revisions[revisionIndex];
@@ -2977,8 +3152,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     new HashSet<byte>();
 
                 for (int i = 0;
-                    i < revision.EnvironmentRemap.Count;
-                    i++)
+                     i < revision.EnvironmentRemap.Count;
+                     i++)
                 {
                     RuntimeProceduralEnvironmentMapRule rule =
                         revision.EnvironmentRemap[i];
@@ -3031,8 +3206,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                 }
 
                 for (int i = 0;
-                    i < revision.BiomeReplacements.Count;
-                    i++)
+                     i < revision.BiomeReplacements.Count;
+                     i++)
                 {
                     if (revision.BiomeReplacements[i] == null)
                     {
@@ -3097,37 +3272,37 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         operation.MaterialFilter < -1 ||
                         operation.MaterialFilter > byte.MaxValue ||
                         (operation.UseNoise &&
-                            (double.IsNaN(operation.NoiseFrequency) ||
-                             double.IsInfinity(operation.NoiseFrequency) ||
-                             operation.NoiseFrequency <= 0.0 ||
-                             operation.NoiseOctaves < 1 ||
-                             operation.NoiseOctaves > 8 ||
-                             operation.NoiseSamplingQuality <
-                                (int)NoiseSamplingQuality.Low ||
-                             operation.NoiseSamplingQuality >
-                                (int)NoiseSamplingQuality.Direct ||
-                             operation.BlendNoiseMinimum < 0.0 ||
-                             operation.BlendNoiseMinimum > 1.0 ||
-                             operation.BlendNoiseMaximum < 0.0 ||
-                             operation.BlendNoiseMaximum > 1.0 ||
-                             operation.BlendNoiseMinimum >
-                                operation.BlendNoiseMaximum)) ||
+                         (double.IsNaN(operation.NoiseFrequency) ||
+                          double.IsInfinity(operation.NoiseFrequency) ||
+                          operation.NoiseFrequency <= 0.0 ||
+                          operation.NoiseOctaves < 1 ||
+                          operation.NoiseOctaves > 8 ||
+                          operation.NoiseSamplingQuality <
+                          (int)NoiseSamplingQuality.Low ||
+                          operation.NoiseSamplingQuality >
+                          (int)NoiseSamplingQuality.Direct ||
+                          operation.BlendNoiseMinimum < 0.0 ||
+                          operation.BlendNoiseMinimum > 1.0 ||
+                          operation.BlendNoiseMaximum < 0.0 ||
+                          operation.BlendNoiseMaximum > 1.0 ||
+                          operation.BlendNoiseMinimum >
+                          operation.BlendNoiseMaximum)) ||
                         (operation.UseRadial &&
-                            (double.IsNaN(operation.RadialCenterX) ||
-                             double.IsInfinity(operation.RadialCenterX) ||
-                             double.IsNaN(operation.RadialCenterY) ||
-                             double.IsInfinity(operation.RadialCenterY) ||
-                             double.IsNaN(operation.RadialCenterZ) ||
-                             double.IsInfinity(operation.RadialCenterZ) ||
-                             operation.RadialCenterX * operation.RadialCenterX +
-                                operation.RadialCenterY * operation.RadialCenterY +
-                                operation.RadialCenterZ * operation.RadialCenterZ < 1e-12 ||
-                             double.IsNaN(operation.RadialRadiusDegrees) ||
-                             double.IsInfinity(operation.RadialRadiusDegrees) ||
-                             operation.RadialRadiusDegrees <= 0.0 ||
-                             operation.RadialRadiusDegrees > 180.0 ||
-                             operation.RadialProfile < 0 ||
-                             operation.RadialProfile > 3)))
+                         (double.IsNaN(operation.RadialCenterX) ||
+                          double.IsInfinity(operation.RadialCenterX) ||
+                          double.IsNaN(operation.RadialCenterY) ||
+                          double.IsInfinity(operation.RadialCenterY) ||
+                          double.IsNaN(operation.RadialCenterZ) ||
+                          double.IsInfinity(operation.RadialCenterZ) ||
+                          operation.RadialCenterX * operation.RadialCenterX +
+                          operation.RadialCenterY * operation.RadialCenterY +
+                          operation.RadialCenterZ * operation.RadialCenterZ < 1e-12 ||
+                          double.IsNaN(operation.RadialRadiusDegrees) ||
+                          double.IsInfinity(operation.RadialRadiusDegrees) ||
+                          operation.RadialRadiusDegrees <= 0.0 ||
+                          operation.RadialRadiusDegrees > 180.0 ||
+                          operation.RadialProfile < 0 ||
+                          operation.RadialProfile > 3)))
                     {
                         throw new Exception("Procedural recipe contains an invalid brush.");
                     }
@@ -3141,7 +3316,5 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     operationCount);
             }
         }
-
-
     }
 }

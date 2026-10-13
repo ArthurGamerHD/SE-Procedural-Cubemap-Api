@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Adk.Compression.Zip;
 using Adk.Image.Png;
+using Adk.Utils;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.Noise.fBm;
@@ -23,8 +24,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         private const ushort FLAT_HEIGHT_SAMPLE = 32768;
 
         private readonly RuntimePackageStore _runtimePackages;
-        private readonly Dictionary<int, byte[]> _emptyPlanetArchives =
-            new Dictionary<int, byte[]>();
+        private readonly Dictionary<string, byte[]> _emptyPlanetArchives =
+            new Dictionary<string, byte[]>(StringComparer.Ordinal);
 
 
         internal PlanetDataArchiveService(
@@ -45,7 +46,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             byte[] archive =
                 BuildModifiedArchive(
                     snapshot,
-                    true);
+                    true, archiveFileName);
 
             _runtimePackages.SaveRuntimeArchive(
                 archiveFileName,
@@ -53,13 +54,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         }
 
 
-        internal byte[] GetEmptyPlanetArchive(
-            int textureSize)
+        internal byte[] GetEmptyPlanetArchive(int textureSize, string archiveFileName)
         {
             byte[] archive;
 
+            string cacheKey = textureSize + ":" + RuntimeArchiveLayout.GetProviderPath(archiveFileName);
+
             if (_emptyPlanetArchives.TryGetValue(
-                    textureSize,
+                    cacheKey,
                     out archive))
             {
                 return archive;
@@ -106,7 +108,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             {
                 entries.Add(
                     new MinimalZip.Entry(
-                        fileName,
+                        RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, fileName),
                         fileName.EndsWith(
                             "_mat.png",
                             StringComparison.OrdinalIgnoreCase)
@@ -119,7 +121,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 MinimalZip.WriteBytes(entries);
 
             _emptyPlanetArchives.Add(
-                textureSize,
+                cacheKey,
                 archive);
 
             return archive;
@@ -139,23 +141,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         }
 
 
-        internal byte[] BuildModifiedArchive(
-            PlanetModificationSnapshot snapshot,
-            bool resolveFractalThresholds)
+        internal byte[] BuildModifiedArchive(PlanetModificationSnapshot snapshot,
+            bool resolveFractalThresholds, string archiveFileName)
         {
             Dictionary<string, byte[]> files;
 
             return BuildModifiedArchive(
                 snapshot,
                 resolveFractalThresholds,
-                out files);
+                out files, archiveFileName);
         }
 
 
-        internal byte[] BuildModifiedArchive(
-            PlanetModificationSnapshot snapshot,
+        internal byte[] BuildModifiedArchive(PlanetModificationSnapshot snapshot,
             bool resolveFractalThresholds,
-            out Dictionary<string, byte[]> outputFiles)
+            out Dictionary<string, byte[]> outputFiles, string archiveFileName)
         {
             if (snapshot == null)
                 throw new ArgumentNullException(nameof(snapshot));
@@ -320,7 +320,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 entries.Add(
                     new MinimalZip.Entry(
-                        fileName,
+                        archiveFileName == null ? fileName :
+                            RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, fileName),
                         data,
                         MinimalZip.CompressionMode.Deflate));
 
@@ -330,20 +331,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
 
 
-            byte[] archive =
-                MinimalZip.WriteBytes(
-                    entries);
+            // Client replay still has environment/road edits to apply. Let it
+            // consume outputFiles and pack only once after those final edits.
+            byte[] archive = archiveFileName == null ? null : MinimalZip.WriteBytes(entries);
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Packed modification template " +
+            LogHelper.LogInfo(
+                "Prepared modification template " +
                 snapshot.TemplateId +
                 ": changed PNGs=" +
-                entries.Count(x =>
+                outputFiles.Keys.Count(name =>
                     (snapshot.Images != null &&
-                        snapshot.Images.ContainsKey(x.Name)) ||
+                        snapshot.Images.ContainsKey(name)) ||
                     (snapshot.ImageTransforms != null &&
-                        snapshot.ImageTransforms.ContainsKey(x.Name)) ||
-                    (x.Name.EndsWith(
+                        snapshot.ImageTransforms.ContainsKey(name)) ||
+                    (name.EndsWith(
                             "_mat.png",
                             StringComparison.OrdinalIgnoreCase) &&
                         ((snapshot.FractalNoiseOperations != null &&
@@ -351,7 +352,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                          (snapshot.BiomeReplacementOperations != null &&
                             snapshot.BiomeReplacementOperations.Count > 0)))) +
                 ", archive bytes=" +
-                archive.Length +
+                (archive == null ? 0 : archive.Length) +
                 ".");
 
             return archive;
@@ -904,7 +905,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     }
 
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Debug,
                         "[RuntimePlanetGenerator] Resolved source planet map " +
                         "from loaded mod " +
                         mod.PublishedFileId +
@@ -1081,7 +1083,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(x =>
                         new MinimalZip.Entry(
-                            x.Key,
+                            RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, x.Key),
                             x.Value,
                             MinimalZip.CompressionMode.Deflate))
                     .ToList();
@@ -1096,7 +1098,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         {
             Dictionary<string, byte[]> files = ReadRuntimeArchive(entry.ArchiveFile);
             RemapMaterialFiles(files, map);
-            return BuildAuthoritativeImageArchive(files);
+            return BuildAuthoritativeImageArchive(files, entry.ArchiveFile);
+        }
+
+        // These files came from our renderer, not an incoming image packet.
+        // Do not decode all twelve PNGs again just to package their bytes.
+        internal byte[] PackRenderedArchive(IDictionary<string, byte[]> files, string archiveFileName)
+        {
+            return MinimalZip.WriteBytes(files
+                .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new MinimalZip.Entry(
+                    RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, x.Key),
+                    x.Value, MinimalZip.CompressionMode.Deflate)));
         }
 
         internal static void RemapMaterialFiles(Dictionary<string, byte[]> files, byte[] map)
@@ -1118,8 +1131,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
         }
 
-        internal byte[] BuildAuthoritativeImageArchive(
-            IDictionary<string, byte[]> files)
+        internal byte[] BuildAuthoritativeImageArchive(IDictionary<string, byte[]> files, string archiveFileName)
         {
             if (files == null)
                 throw new ArgumentNullException(nameof(files));
@@ -1168,7 +1180,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 entries.Add(
                     new MinimalZip.Entry(
-                        fileName,
+                        RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, fileName),
                         data,
                         MinimalZip.CompressionMode.Deflate));
             }
@@ -1178,9 +1190,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         }
 
 
-        internal byte[] PackProceduralArchive(
-            IDictionary<string, byte[]> files,
-            RuntimeProceduralCacheManifest cacheManifest)
+        internal byte[] PackProceduralArchive(IDictionary<string, byte[]> files,
+            RuntimeProceduralCacheManifest cacheManifest, string archiveFileName)
         {
             if (files == null ||
                 files.Count != PlanetMapFileNames.All.Length)
@@ -1233,7 +1244,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
                 entries.Add(
                     new MinimalZip.Entry(
-                        fileName,
+                        RuntimeArchiveLayout.BuildPlanetEntryPath(archiveFileName, fileName),
                         data,
                         MinimalZip.CompressionMode.Deflate));
             }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -235,7 +236,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 _runtimePackages.WriteWorldStorageBinaryCache(
                     archiveFile,
                     _planetDataArchives.GetEmptyPlanetArchive(
-                        textureSize));
+                        textureSize, archiveFile));
 
                 _emptyPlanetAssetSavePaths[textureSize] =
                     resolvedSavePath;
@@ -268,8 +269,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 emptyGenerator.Postprocess();
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Generated " +
+            LogHelper.LogInfo(
+                "Generated " +
                 textureSize +
                 "x" +
                 textureSize +
@@ -712,8 +713,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     _environmentPresetCatalog);
 
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Created modification template " +
+            LogHelper.LogInfo(
+                "Created modification template " +
                 template.TemplateId +
                 " for planet " +
                 targetPlanet.EntityId +
@@ -844,8 +845,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     diameter,
                     center);
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Created deferred planet template " +
+            LogHelper.LogInfo(
+                "Created deferred planet template " +
                 template.TemplateId +
                 " from generator '" +
                 generatorSubtype +
@@ -988,8 +989,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     CreateModificationTemplateApi(
                         planet.EntityId);
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Created planet " +
+                LogHelper.LogInfo(
+                    "Created planet " +
                     planet.EntityId +
                     " from generator '" +
                     sourceGeneratorName +
@@ -1015,8 +1016,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 }
                 catch (Exception cleanupError)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Could not clean up planet after " +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Could not clean up planet after " +
                         "template creation failed: " +
                         cleanupError);
                 }
@@ -1904,7 +1906,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 sourceSignature = signature.Finish();
             }
 
-            RuntimeMaterialCanonicalizer.BindSource(recipe, sourceSignature);
+            if (!(recipe.SchemaVersion < 2))
+            {
+                if (string.IsNullOrWhiteSpace(recipe.SourceSignature) || recipe.SourceSignature != sourceSignature)
+                {
+                    LogHelper.Log(MyLogSeverity.Warning,
+                        "[RuntimePlanetGenerator] Source signature is missing or differs for planet " +
+                        entry.SourceEntityId + ". Continuing replay with the currently installed source. " +
+                        "Material IDs cannot be verified against the source used before replay pruning.");
+                }
+
+                recipe.SourceSignature = sourceSignature;
+            }
 
             ProceduralRoadReplayCache.Entry cached =
                 _roadReplayCache.Find(entry.SourceEntityId, sourceSignature, recipe);
@@ -1928,7 +1941,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 DateTime linesReady = DateTime.UtcNow;
                 RuntimeProceduralCacheManifest manifest = RuntimeProceduralCache.CreateManifest(
                     BuildProceduralGeneratorSignature(recipe, builder, sourceGenerator, originalFiles), recipe);
-                byte[] result = _planetDataArchives.PackProceduralArchive(files, manifest);
+                byte[] result = _planetDataArchives.PackProceduralArchive(files, manifest, entry.ArchiveFile);
                 _roadReplayCache.Store(entry.SourceEntityId, sourceSignature, recipe, cached.BaseFiles, files);
                 LogRecipeReplay(entry.SourceEntityId, "appended cells", recipe.Revisions.Count,
                     appendedLines.Count, started, sourceReady, baseReady, linesReady);
@@ -1948,7 +1961,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     " (planet " + entry.SourceEntityId + ", layer " + skipped.LayerIndex +
                     "; zero-based history indices; saved history retained).");
             }
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Brush replay plan for planet " + entry.SourceEntityId +
                 ": " + recipe.Revisions.Sum(r => r.Brushes.Count) + " recorded, " +
                 replayPlan.Revisions.Sum(r => r.Brushes.Count) + " executed; generator-owned material IDs.");
@@ -2054,7 +2068,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                             unscanned++;
                 int empty = RuntimeBrushReplayPlanner.RemoveEmptyRevisions(recipe);
                 if (unscanned > 0 || empty > 0)
-                    MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Pruned " + unscanned +
+                    LogHelper.LogInfo("[RuntimePlanetGenerator] Pruned " + unscanned +
                         " never-scanned brushes and " + empty + " empty revisions for planet " + entry.SourceEntityId +
                         " after complete six-face max-depth replay.");
             }
@@ -2073,7 +2087,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             byte[] archive = _planetDataArchives.PackProceduralArchive(
                 sourceFiles,
-                cacheManifest);
+                cacheManifest, entry.ArchiveFile);
             _roadReplayCache.Store(entry.SourceEntityId, sourceSignature, recipe, baseFiles, sourceFiles);
             LogRecipeReplay(entry.SourceEntityId, "cold cells", recipe.Revisions.Count,
                 finalLines.Count, started, sourceReady, terrainReady, roadsReady);
@@ -2084,7 +2098,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             DateTime start, DateTime source, DateTime terrain, DateTime lines)
         {
             DateTime end = DateTime.UtcNow;
-            MyLog.Default.WriteLineAndConsole("[Voxel Cubemap API] Recipe replay " + mode +
+            LogHelper.Log(MyLogSeverity.Debug, "Recipe replay " + mode +
                 " planet=" + planetId + " revisions=" + revisions + " roads=" + roads +
                 " sourceMs=" + (source - start).TotalMilliseconds.ToString("F0") +
                 " terrainMs=" + (terrain - source).TotalMilliseconds.ToString("F0") +
@@ -2598,8 +2612,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             RemappedEnvironmentPreset remapped,
             int changedBiomePixels)
         {
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Environment preset '" +
+            LogHelper.Log(
+                MyLogSeverity.Debug,
+                "Environment preset '" +
                 preset.Name +
                 "': source='" +
                 preset.SourceGeneratorSubtype +
@@ -2756,8 +2771,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 {
                     // The authoritative commit already succeeded. A transport
                     // failure must not report the committed Push as rolled back.
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Runtime sync broadcast failed after " +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Runtime sync broadcast failed after " +
                         "commit: " +
                         broadcastError);
                 }
@@ -2793,8 +2809,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         }
                         catch (Exception cleanupError)
                         {
-                            MyLog.Default.WriteLineAndConsole(
-                                "[Voxel Cubemap API] Deferred superseded-package cleanup: " +
+                            LogHelper.Log(
+                                MyLogSeverity.Warning,
+                                "Deferred superseded-package cleanup: " +
                                 cleanupError);
                         }
                     }
@@ -2816,8 +2833,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     }
                     catch (Exception cleanupError)
                     {
-                        MyLog.Default.WriteLineAndConsole(
-                            "[Voxel Cubemap API] Failed package cleanup also failed: " +
+                        LogHelper.Log(
+                            MyLogSeverity.Warning,
+                            "Failed package cleanup also failed: " +
                             cleanupError);
                     }
                 }
@@ -2826,8 +2844,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     commitAttempted &&
                     !providerStateResolved)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Retaining staged package because " +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Retaining staged package because " +
                         "the live provider could not be resolved safely.");
                 }
 
@@ -2842,8 +2861,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 }
 
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Push failed: " +
+                LogHelper.Log(
+                    MyLogSeverity.Error,
+                    "Push failed: " +
                     e);
 
                 DispatchPushResponse(
@@ -2978,8 +2998,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Runtime revision " +
+                LogHelper.Log(
+                    MyLogSeverity.Error,
+                    "Runtime revision " +
                     (commit ? "commit" : "abort") +
                     " decision could not be broadcast: " +
                     e);
@@ -3003,8 +3024,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Push callback failed: " +
+                LogHelper.Log(
+                    MyLogSeverity.Error,
+                    "Push callback failed: " +
                     e);
             }
         }
@@ -3065,7 +3087,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 _planetDataArchives.BuildModifiedArchive(
                     snapshot,
                     false,
-                    out archiveFiles);
+                    out archiveFiles, null);
 
             snapshot.LineOperations = finalLines;
 
@@ -3094,8 +3116,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             _planetDataArchives.ApplyFinalProceduralLines(
                 archiveFiles, finalLines, snapshot.TargetPlanet);
-            if (finalLines.Count > 0 || !string.IsNullOrWhiteSpace(snapshot.EnvironmentPresetName))
-                archive = _planetDataArchives.BuildAuthoritativeImageArchive(archiveFiles);
+            archive = _planetDataArchives.PackRenderedArchive(archiveFiles, entry.ArchiveFile);
 
             return PrepareRuntimeReplaySwap(
                 snapshot,
@@ -3185,7 +3206,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             byte[] archive =
                 _planetDataArchives.BuildAuthoritativeImageArchive(
-                    images);
+                    images, packet.ArchiveFile);
 
             RuntimePlanetBuilderEntry entry =
                 CreateRuntimeReplayEntry(
@@ -4354,8 +4375,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 }
                 catch (Exception e)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Runtime planet change callback " +
+                    LogHelper.Log(
+                        MyLogSeverity.Error,
+                        "Runtime planet change callback " +
                         "failed: " +
                         e);
                 }

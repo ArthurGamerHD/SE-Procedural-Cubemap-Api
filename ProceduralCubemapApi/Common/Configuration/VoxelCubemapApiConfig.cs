@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Adk.Utils;
 using Sandbox.ModAPI;
 using VRage.Utils;
 
@@ -63,8 +64,8 @@ namespace ProceduralCubemapApi.Common.Configuration
             }
             catch (Exception e)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Could not load " +
+                LogHelper.Log(MyLogSeverity.Warning,
+                    "Could not load " +
                     CONFIG_FILE +
                     "; using defaults for this session: " +
                     e);

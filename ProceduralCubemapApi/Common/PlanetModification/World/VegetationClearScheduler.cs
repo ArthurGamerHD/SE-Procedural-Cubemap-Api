@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System;
+using Adk.Utils;
 using ProceduralCubemapApi.Common.PlanetModification.Templates;
 using Sandbox.Game.Entities;
 using Sandbox.Game.WorldEnvironment;
@@ -132,7 +133,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 pending);
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Scheduled vegetation clear around " +
                 boxes.Count +
                 " existing grid(s). EntityId=" +
@@ -206,7 +208,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 Pass = 0,
                 TicksUntilNextPass = 0
             });
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Scheduled line vegetation clear: " +
                 boxes.Count + " regions on planet " + planet.EntityId);
         }
@@ -254,10 +257,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 }
 
 
-                int sectorsTouched =
-                    ClearEnvironmentItemsInBoxes(
+                int sectorsTouched = 0;
+                try
+                {
+                    sectorsTouched = ClearEnvironmentItemsInBoxes(
                         planet,
                         pending.Boxes);
+                }
+                catch (Exception e)
+                {
+                    // Vegetation cleanup must not take down the simulation.
+                    // Advance the bounded pass schedule even on failure.
+                    LogHelper.Log(MyLogSeverity.Warning,
+                        "[RuntimePlanetGenerator] Vegetation clear pass failed for planet " +
+                        pending.PlanetEntityId + "; some environment items may remain: " + e.Message);
+                }
 
 
                 pending.Pass++;
@@ -268,7 +282,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     _pendingVegetationClears.RemoveAt(
                         i);
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.LogInfo(
                         "[RuntimePlanetGenerator] Finished post-terraform vegetation clear. " +
                         "EntityId=" +
                         planet.EntityId +

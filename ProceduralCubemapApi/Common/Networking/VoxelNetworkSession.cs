@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Adk.Utils;
 using Generated;
 using Sandbox.ModAPI;
 using VRage.Game.ModAPI;
@@ -111,8 +112,9 @@ namespace ProceduralCubemapApi.Common.Networking
                 }
                 catch (Exception e)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Runtime packet " +
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
+                        "Runtime packet " +
                         packet.Id +
                         " could not be sent to player " +
                         player.SteamUserId +
@@ -121,8 +123,8 @@ namespace ProceduralCubemapApi.Common.Networking
                 }
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Broadcast runtime packet " +
+            LogHelper.LogInfo(
+                "Broadcast runtime packet " +
                 packet.Id +
                 " to " +
                 recipients +

@@ -1,5 +1,6 @@
 using System;
 using Adk.Compression.Zip;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -343,7 +344,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     patchedRaw);
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Prepared planet provider for " +
                 operationName +
                 ". bytes=" +
@@ -428,7 +430,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     "CreateStorage() rejected the patched VX2.");
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] Committing prepared provider for " +
                 (workResult.OperationName ?? "planet modification") +
                 ". ModAPI storage size=" +
@@ -750,7 +753,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                     }
                     else
                     {
-                        MyLog.Default.WriteLineAndConsole(
+                        LogHelper.Log(
+                            MyLogSeverity.Debug,
                             "[RuntimePlanetGenerator] Reusing existing live planet environment; " +
                             "caller definition and generator identity are unchanged. EntityId=" +
                             sourcePlanet.EntityId +
@@ -790,7 +794,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
                 }
 
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.LogInfo(
                     "[RuntimePlanetGenerator] Patched live planet in-place. " +
                     "EntityId=" +
                     sourcePlanet.EntityId +
@@ -993,7 +997,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.World
             }
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Debug,
                 "[RuntimePlanetGenerator] VX2 provider subtype patched: '" +
                 fromValue +
                 "' -> '" +

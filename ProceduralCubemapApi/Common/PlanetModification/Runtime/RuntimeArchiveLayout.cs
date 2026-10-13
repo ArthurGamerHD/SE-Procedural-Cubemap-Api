@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Adk.Compression.Zip;
+using ProceduralCubemapApi.Common.PlanetModification.Maps;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
 using VRage;
 using VRage.Game;
@@ -126,6 +127,17 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     contents,
                     contents.Length))
             {
+                // Snapshot restores may already contain final provider paths.
+                // Inspect only the directory; never inflate those PNG payloads.
+                bool preparedLayout = true;
+                foreach (string name in PlanetMapFileNames.All)
+                    if (!MinimalZip.ContainsEntry(stream, BuildPlanetEntryPath(archivePath, name)))
+                    {
+                        preparedLayout = false;
+                        break;
+                    }
+                if (preparedLayout) return contents;
+
                 source =
                     MinimalZip.Read(
                         stream);

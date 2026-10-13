@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -67,7 +68,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     _retryTicks =
                         100;
 
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] Persisted environment restore failed: " +
                         e);
                 }
@@ -180,7 +182,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 }
                 catch (Exception e)
                 {
-                    MyLog.Default.WriteLineAndConsole(
+                    LogHelper.Log(
+                        MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] Could not restore caller environment " +
                         "for planet " +
                         planetEntityId +
@@ -350,7 +353,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 runtimeGenerator);
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Migrated persisted planet to native runtime generator. " +
                 "EntityId=" +
                 sourcePlanet.EntityId +

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Adk.Utils;
 using ProceduralCubemapApi.Common.PlanetModification.Templates;
 using VRage.Game;
+using VRage.Utils;
 
 namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 {
@@ -20,15 +22,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             var map = new byte[256];
             for (int i = 0; i < map.Length; i++) map[i] = (byte)i;
             return map;
-        }
-
-        internal static void BindSource(RuntimeProceduralPlanetRecipe recipe, string signature)
-        {
-            if (recipe.SchemaVersion < 2) return;
-            if (!string.IsNullOrEmpty(recipe.SourceSignature) && recipe.SourceSignature != signature)
-                throw new Exception("The original planet source changed since its recipe was compacted. " +
-                    "Restore that source or explicitly rebuild/rebase the planet; replay pruning depends on this source.");
-            recipe.SourceSignature = signature;
         }
 
         internal static Result Deduplicate(MyObjectBuilder_PlanetGeneratorDefinition builder,

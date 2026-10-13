@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Adk.Utils;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.Networking;
 using ProceduralCubemapApi.Common.PlanetModification;
@@ -102,8 +103,9 @@ namespace ProceduralCubemapApi.Client.Networking
                     packet.GeneratorFile,
                     packet.ArchiveFile))
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Rejected malformed runtime operation packet.");
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
+                    "Rejected malformed runtime operation packet.");
 
                 return;
             }
@@ -132,8 +134,8 @@ namespace ProceduralCubemapApi.Client.Networking
                 packet.Images == null ||
                 packet.Images.Count == 0)
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Rejected malformed runtime image packet.");
+                LogHelper.Log(MyLogSeverity.Warning,
+                    "Rejected malformed runtime image packet.");
 
                 return;
             }
@@ -157,8 +159,9 @@ namespace ProceduralCubemapApi.Client.Networking
                 string.IsNullOrWhiteSpace(
                     packet.RuntimeSubtype))
             {
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Rejected malformed runtime revision decision.");
+                LogHelper.Log(
+                    MyLogSeverity.Warning,
+                    "Rejected malformed runtime revision decision.");
 
                 return;
             }
@@ -189,8 +192,9 @@ namespace ProceduralCubemapApi.Client.Networking
                     packet.Commit;
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Received runtime revision " +
+            LogHelper.Log(
+                MyLogSeverity.Debug,
+                "Received runtime revision " +
                 packet.Revision +
                 (packet.Commit ? " commit" : " abort") +
                 " decision for planet " +
@@ -233,8 +237,9 @@ namespace ProceduralCubemapApi.Client.Networking
 
                 if (pending.Revision <= expectedBase)
                 {
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Ignored stale runtime revision " +
+                    LogHelper.Log(
+                        MyLogSeverity.Debug,
+                        "Ignored stale runtime revision " +
                         pending.Revision +
                         " for planet " +
                         pending.PlanetEntityId +
@@ -279,8 +284,9 @@ namespace ProceduralCubemapApi.Client.Networking
                     pending.PlanetEntityId] =
                     pending.Revision;
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Enqueued runtime revision " +
+                LogHelper.Log(
+                    MyLogSeverity.Debug,
+                    "Enqueued runtime revision " +
                     pending.Revision +
                     " for planet " +
                     pending.PlanetEntityId +
@@ -474,8 +480,9 @@ namespace ProceduralCubemapApi.Client.Networking
                         _awaitingDecisionError =
                             workError;
 
-                        MyLog.Default.WriteLineAndConsole(
-                            "[Voxel Cubemap API] Prepared runtime revision " +
+                        LogHelper.Log(
+                            MyLogSeverity.Debug,
+                            "Prepared runtime revision " +
                             pending.Revision +
                             " for planet " +
                             pending.PlanetEntityId +
@@ -499,8 +506,9 @@ namespace ProceduralCubemapApi.Client.Networking
                             false;
                     }
 
-                    MyLog.Default.WriteLineAndConsole(
-                        "[Voxel Cubemap API] Discarded aborted runtime revision " +
+                    LogHelper.Log(
+                        MyLogSeverity.Debug,
+                        "Discarded aborted runtime revision " +
                         pending.Revision +
                         " for planet " +
                         pending.PlanetEntityId +
@@ -531,8 +539,8 @@ namespace ProceduralCubemapApi.Client.Networking
                         pending.Revision;
                 }
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Applied runtime revision " +
+                LogHelper.LogInfo(
+                    "Applied runtime revision " +
                     pending.Revision +
                     " to planet " +
                     pending.PlanetEntityId +
@@ -543,8 +551,9 @@ namespace ProceduralCubemapApi.Client.Networking
                 _coordinator.DiscardRuntimeReplay(
                     workResult);
 
-                MyLog.Default.WriteLineAndConsole(
-                    "[Voxel Cubemap API] Runtime replay failed for planet " +
+                LogHelper.Log(
+                    MyLogSeverity.Error,
+                    "Runtime replay failed for planet " +
                     pending.PlanetEntityId +
                     ", revision " +
                     pending.Revision +
@@ -737,8 +746,9 @@ namespace ProceduralCubemapApi.Client.Networking
                 queue.Clear();
             }
 
-            MyLog.Default.WriteLineAndConsole(
-                "[Voxel Cubemap API] Planet " +
+            LogHelper.Log(
+                MyLogSeverity.Warning,
+                "Planet " +
                 planetEntityId +
                 " requires authoritative resync: " +
                 reason +

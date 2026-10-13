@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Adk.Utils;
 using Sandbox.Definitions;
 using Sandbox.ModAPI;
 using ProceduralCubemapApi.Common.PlanetModification.Persistence;
@@ -102,7 +103,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             }
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Loaded source generator directly " +
                 "from content XML: Subtype='" +
                 subtype +
@@ -1057,7 +1058,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 "/" +
                 saveName;
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.Log(
+                MyLogSeverity.Warning,
                 "[RuntimePlanetGenerator] CurrentPath unresolved during LoadData; " +
                 "using initial save path fallback: " +
                 fallback);
@@ -1101,7 +1103,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 savePath;
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Runtime generator save path rebound: " +
                 "SavePath='" +
                 _runtimePackages.BoundSavePath +
@@ -1223,7 +1225,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
                 existing.Postprocess();
 
-                MyLog.Default.WriteLineAndConsole(
+                LogHelper.Log(
+                    MyLogSeverity.Debug,
                     "[RuntimePlanetGenerator] Reusing already registered generator: " +
                     subtype);
 
@@ -1322,7 +1325,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             }
 
 
-            MyLog.Default.WriteLineAndConsole(
+            LogHelper.LogInfo(
                 "[RuntimePlanetGenerator] Registered '" +
                 subtype +
                 "' with provider Path='" +
