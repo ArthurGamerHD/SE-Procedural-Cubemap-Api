@@ -742,6 +742,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         /// Adds a simple voxel material definition using a server-allocated map
         /// value and returns that value. This is the preferred registration path
         /// when the caller does not require a specific byte ID.
+        /// Reuses an existing simple material with the same subtype and depth.
         /// </summary>
         [ApiMethod("AddMaterialSequential")]
         private byte AddMaterial(
@@ -752,6 +753,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             ValidateSimpleMaterial(
                 materialSubtype,
                 maxDepth);
+
+            byte existingValue;
+            if (PlanetMaterialReuse.TryFindSimple(Builder, materialSubtype, maxDepth, out existingValue))
+                return existingValue;
 
             EnsureUsedMaterialMapValues();
 
@@ -811,8 +816,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
 
         /// <summary>
-        /// Clones a complex material group and returns a map value unused by the
-        /// source maps and template definitions.
+        /// Reuses an existing complex material with identical ordered rules, or
+        /// clones the group into an unused map value. Group name/value are ignored
+        /// for reuse; material layers and placement constraints must match.
         /// </summary>
         [ApiMethod]
         private byte AddComplexMaterial(MyPlanetMaterialGroup materialGroup)
@@ -831,6 +837,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             }
 
 
+            byte existingValue;
+            if (PlanetMaterialReuse.TryFindComplex(Builder, materialGroup, out existingValue))
+                return existingValue;
+
             EnsureUsedMaterialMapValues();
 
             byte mapValue =
@@ -841,6 +851,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             var clone =
                 (MyPlanetMaterialGroup)
                 materialGroup.Clone();
+
+            // Keen's rule clone shares Layers. Own those arrays so caller edits
+            // cannot silently change a registered material (and future reuse).
+            foreach (MyPlanetMaterialPlacementRule rule in clone.MaterialRules)
+                if (rule.Layers != null)
+                    rule.Layers = (MyPlanetMaterialLayer[])rule.Layers.Clone();
 
             clone.Value = mapValue;
 
@@ -853,8 +869,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
 
             Builder.ComplexMaterials = AppendToArray(Builder.ComplexMaterials, clone);
-
-            _allocatedComplexMaterialValues.Add(mapValue);
 
             return mapValue;
         }

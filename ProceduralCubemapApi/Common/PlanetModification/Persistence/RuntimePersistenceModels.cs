@@ -30,6 +30,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         public RuntimeProceduralSource Source;
         public long PlanetSeed;
         public int NoiseVersion;
+        // Source identity also guards recipes pruned using actual replay depth.
+        public string SourceSignature;
         public List<RuntimeProceduralRevision> Revisions =
             new List<RuntimeProceduralRevision>();
     }
@@ -65,6 +67,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         public List<byte> AllocatedComplexMaterialValues =
             new List<byte>();
+
+        // Read legacy schema-1 checks for migration, never write empty history.
+        public bool ShouldSerializeAllocatedComplexMaterialValues()
+        {
+            return AllocatedComplexMaterialValues != null && AllocatedComplexMaterialValues.Count > 0;
+        }
 
         public string EnvironmentPresetName;
 

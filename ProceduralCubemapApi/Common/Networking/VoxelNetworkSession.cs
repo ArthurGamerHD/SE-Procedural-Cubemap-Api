@@ -49,6 +49,9 @@ namespace ProceduralCubemapApi.Common.Networking
 
                 throw;
             }
+            
+            if(!MyAPIGateway.Session.IsServer)
+                _network.TransmitToServer(new Hello());
         }
 
 

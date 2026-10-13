@@ -205,10 +205,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                 FractalBrownianMotion.GetCubemapFaceIndex(
                     faceFileName);
 
-            // Preserve operation ordering, but collapse consecutive operations
-            // that target the same underlying image into one pixel traversal.
-            // Material/Biome/Ore all target materialImage, so typical surface
-            // repaint workloads become a single pass per cubemap face.
+            // Independent material/biome/ore paints can run newest-first per
+            // pixel. Filters and height edits form ordered batch boundaries.
             int batchStart = 0;
             while (batchStart < operations.Count)
             {
@@ -217,6 +215,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                     throw new ArgumentNullException(nameof(operations));
 
                 bool targetsHeight = first.LayerIndex == 3;
+                bool independentPaint = !targetsHeight && first.BiomeFilter < 0 && first.MaterialFilter < 0;
                 int batchEnd = batchStart + 1;
 
                 while (batchEnd < operations.Count)
@@ -226,6 +225,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                         throw new ArgumentNullException(nameof(operations));
 
                     if ((next.LayerIndex == 3) != targetsHeight)
+                        break;
+
+                    bool nextIndependent = next.LayerIndex != 3 && next.BiomeFilter < 0 && next.MaterialFilter < 0;
+                    if (nextIndependent != independentPaint)
                         break;
 
                     batchEnd++;
@@ -257,6 +260,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
             PlanarPngBitmap targetImage)
         {
             int batchCount = batchEnd - batchStart;
+            BrushOperation first = operations[batchStart];
+            bool deferredHeight = first.LayerIndex == 3;
+            bool newestFirst = first.LayerIndex != 3 && first.BiomeFilter < 0 && first.MaterialFilter < 0;
+            int targetLayers = 0;
+            if (newestFirst)
+                for (int i = batchStart; i < batchEnd; i++)
+                    targetLayers |= 1 << operations[i].LayerIndex;
             var noiseGrids = new double[batchCount][];
             var directNoiseFields = new INoise3D[batchCount];
             var radialFields = new RadialField[batchCount];
@@ -361,8 +371,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                 }
             }
 
+            int lowestScannedIndex = batchEnd;
+            var scanDepthLock = new object();
             Action<int> processRow = y =>
             {
+                int rowLowestScannedIndex = batchEnd;
+                // Reuse a small operation stack for this row, never a pixel mask.
+                // Height predicates and arithmetic need the older height, so
+                // resolve them while unwinding, not while scanning backwards.
+                int[] deferredIndices = deferredHeight ? new int[batchCount] : null;
+                double[] deferredScores = deferredHeight ? new double[batchCount] : null;
                 int targetRow = y * targetImage.Width;
                 int heightRow = heightYMap[y] * heightImage.Width;
                 int materialRow = materialYMap[y] * materialImage.Width;
@@ -379,18 +397,29 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                     bool radialDirectionCalculated = false;
                     Vector3D radialDirection = Vector3D.Zero;
 
-                    for (int localIndex = 0; localIndex < batchCount; localIndex++)
+                    // Three bits local to this pixel, not a texture-sized mask.
+                    // Once a channel has a winner, no older paint can affect it.
+                    int paintedLayers = 0;
+                    int deferredCount = 0;
+                    for (int step = 0; step < batchCount; step++)
                     {
+                        int localIndex = newestFirst || deferredHeight ? batchCount - 1 - step : step;
+                        if (batchStart + localIndex < rowLowestScannedIndex)
+                            rowLowestScannedIndex = batchStart + localIndex;
                         BrushOperation operation =
                             operations[batchStart + localIndex];
 
-                        if (operation.MinimumAltitude >= 0 &&
+                        int layerBit = 1 << operation.LayerIndex;
+                        if (newestFirst && (paintedLayers & layerBit) != 0)
+                            continue;
+
+                        if (!deferredHeight && operation.MinimumAltitude >= 0 &&
                             altitude < operation.MinimumAltitude)
                         {
                             continue;
                         }
 
-                        if (operation.MaximumAltitude >= 0 &&
+                        if (!deferredHeight && operation.MaximumAltitude >= 0 &&
                             altitude > operation.MaximumAltitude)
                         {
                             continue;
@@ -493,6 +522,24 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                             noiseScore = radialScore;
                         }
 
+                        if (deferredHeight)
+                        {
+                            deferredIndices[deferredCount] = localIndex;
+                            deferredScores[deferredCount++] = noiseScore;
+
+                            // A matching Replace with no altitude dependency
+                            // supplies the base; anything below it is invisible.
+                            // Conditional replacements still need older height.
+                            if (operation.HeightBlendMode != 1 &&
+                                operation.HeightBlendMode != 2 &&
+                                operation.MinimumAltitude <= 0 &&
+                                (operation.MaximumAltitude < 0 ||
+                                 operation.MaximumAltitude >= ushort.MaxValue))
+                                break;
+
+                            continue;
+                        }
+
                         altitude = ApplyBrushFill(
                             heightImage,
                             materialImage,
@@ -500,8 +547,36 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                             targetOffset,
                             altitude,
                             noiseScore);
+
+                        if (newestFirst)
+                        {
+                            paintedLayers |= layerBit;
+                            if (paintedLayers == targetLayers) break;
+                        }
+                    }
+
+                    for (int pending = deferredCount - 1; pending >= 0; pending--)
+                    {
+                        BrushOperation operation = operations[batchStart + deferredIndices[pending]];
+                        if (operation.MinimumAltitude >= 0 && altitude < operation.MinimumAltitude)
+                            continue;
+                        if (operation.MaximumAltitude >= 0 && altitude > operation.MaximumAltitude)
+                            continue;
+
+                        altitude = ApplyBrushFill(
+                            heightImage,
+                            materialImage,
+                            operation,
+                            targetOffset,
+                            altitude,
+                            deferredScores[pending]);
                     }
                 }
+                // Reduce once per row, not once per pixel/brush. Noise rows may
+                // execute concurrently; the deepest scan is the lowest index.
+                lock (scanDepthLock)
+                    if (rowLowestScannedIndex < lowestScannedIndex)
+                        lowestScannedIndex = rowLowestScannedIndex;
             };
 
             if (hasNoise)
@@ -516,6 +591,19 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                 for (int y = 0; y < targetImage.Height; y++)
                     processRow(y);
             }
+            // Only a complete face contributes evidence. Across the six calls,
+            // a brush stays marked if ANY face reaches it. Forward batches scan
+            // every operation; reverse batches may leave an untouched prefix.
+            for (int index = lowestScannedIndex; index < batchEnd; index++)
+                operations[index].WasScanned = true;
+#if DEBUG
+            VRage.Utils.MyLog.Default?.WriteLine(
+                "[CubemapApi] run operation " + (deferredHeight ? "height" : "paint") +
+                " brushes [" + batchStart + ".." + (batchEnd - 1) + "] for planet seed " +
+                planetSeed + " max depth: " + lowestScannedIndex +
+                " (face " + faceIndex + "; zero-based execution-list index; " +
+                (newestFirst || deferredHeight ? "newest-first" : "forward-dependent") + ").");
+#endif
         }
 
 

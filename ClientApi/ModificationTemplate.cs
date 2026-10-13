@@ -341,6 +341,7 @@ namespace ProceduralCubemapApi.Api
         /// Adds a simple voxel material definition using a server-allocated map
         /// value and returns that value. This is the preferred registration path
         /// when the caller does not require a specific byte ID.
+        /// Reuses an existing simple material with the same subtype and depth.
         /// </summary>
         public byte AddMaterial(
             string materialSubtype,
@@ -351,8 +352,9 @@ namespace ProceduralCubemapApi.Api
 
 
         /// <summary>
-        /// Clones a complex material group and returns a map value unused by the
-        /// source maps and template definitions.
+        /// Reuses an existing complex material with identical ordered rules, or
+        /// clones the group into an unused map value. Group name/value are ignored
+        /// for reuse; material layers and placement constraints must match.
         /// </summary>
         public byte AddComplexMaterial(
             MyPlanetMaterialGroup materialGroup)

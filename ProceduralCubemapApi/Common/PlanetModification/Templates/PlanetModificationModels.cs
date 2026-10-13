@@ -107,6 +107,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
 
     internal sealed class BrushOperation
     {
+        // Replay-local union across faces. Never serialized into the recipe.
+        internal bool WasScanned;
         public int LayerIndex;
         public int FillValue;
         public bool UseNoise;

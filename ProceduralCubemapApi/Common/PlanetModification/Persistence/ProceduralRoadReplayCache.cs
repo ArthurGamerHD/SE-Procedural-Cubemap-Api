@@ -33,6 +33,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             {
                 SchemaVersion = recipe.SchemaVersion, Source = recipe.Source,
                 PlanetSeed = recipe.PlanetSeed, NoiseVersion = recipe.NoiseVersion,
+                SourceSignature = recipe.SourceSignature,
                 Revisions = recipe.Revisions.GetRange(0, entry.RevisionCount)
             };
             return RuntimeProceduralCache.ComputeRecipeSignature(prefix) == entry.RecipeSignature

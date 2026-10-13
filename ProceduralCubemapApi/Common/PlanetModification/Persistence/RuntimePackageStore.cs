@@ -64,6 +64,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         private readonly object _persistenceSync =
             new object();
 
+        private int _brushOptimizationVersion;
+        private int _savedBrushOptimizationVersion;
+        private int _brushOptimizationSaveRetryFrames;
+
         private readonly HashSet<string> _worldStorageCacheFiles =
             new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
@@ -106,6 +110,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         internal Func<RuntimePlanetBuilderEntry,
             RuntimeProceduralPlanetRecipe,
             byte[]> ProceduralArchiveBuilder { get; set; }
+
+        internal Func<RuntimePlanetBuilderEntry, RuntimeProceduralPlanetRecipe,
+            MyObjectBuilder_PlanetGeneratorDefinition, byte[]> CanonicalProceduralArchiveBuilder { get; set; }
+        internal Func<RuntimePlanetBuilderEntry, byte[], byte[]> SnapshotMaterialRemapper { get; set; }
+        internal Func<RuntimePlanetBuilderEntry, RuntimeProceduralPlanetRecipe,
+            MyObjectBuilder_PlanetGeneratorDefinition> OriginalMaterialSourceBuilder { get; set; }
 
         internal Func<RuntimePlanetBuilderEntry,
             RuntimeProceduralPlanetRecipe,
@@ -151,7 +161,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 if (persistenceType ==
                         RuntimePlanetPersistenceType.Procedural &&
-                    entry.RecipeSchemaVersion != 1)
+                    entry.RecipeSchemaVersion != 1 && entry.RecipeSchemaVersion != 2)
                 {
                     throw new Exception(
                         "Persisted procedural runtime entry has an unsupported " +
@@ -346,6 +356,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
                 foreach (var entry in Settings.PlanetBuilders)
                 {
+                    // Startup only: path rebinding must not change a palette
+                    // already registered on a live planet without replacing it.
+                    bool deduplicateMaterials = MyAPIGateway.Session.IsServer && !Generators.ContainsKey(entry.Subtype);
                     RestoreGeneratorCache(
                         entry.GeneratorFile,
                         allowLegacyMigration);
@@ -360,24 +373,89 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                         }
 
                         RuntimeProceduralPlanetRecipe recipe = LoadRuntimeRecipe(entry);
+                        MyObjectBuilder_PlanetGeneratorDefinition canonicalBuilder = LoadGeneratorBuilderFromWorldStorage(entry.GeneratorFile);
+                        bool changed = MyAPIGateway.Session.IsServer && recipe.SchemaVersion < 2;
+                        int previousRevisionCount = recipe.Revisions.Count;
+                        RuntimeMaterialCanonicalizer.Result materials = deduplicateMaterials
+                            ? RuntimeMaterialCanonicalizer.DeduplicateOwnedMaterials(canonicalBuilder, recipe,
+                                OriginalMaterialSourceBuilder(entry, recipe))
+                            : new RuntimeMaterialCanonicalizer.Result();
+                        List<RuntimeBrushOptimizer.Removal> removed =
+                            MyAPIGateway.Session.IsServer
+                                ? RuntimeBrushReplayPlanner.Compact(recipe)
+                                : new List<RuntimeBrushOptimizer.Removal>();
+                        changed |= materials.RemovedDefinitions > 0 || removed.Count > 0 || previousRevisionCount != recipe.Revisions.Count;
 
                         if (!_config.PersistentCache)
                         {
                             MyLog.Default.Log(MyLogSeverity.Info, "[RuntimePlanetGenerator] Persistent cache is disabled, rebuilding: " + entry.ArchiveFile + " (" + entry.Subtype + ").");
                         }
-                        else if (TryUsePersistentProceduralCache(entry, recipe))
+                        else if (!changed && TryUsePersistentProceduralCache(entry, recipe))
                             continue;
 
-                        byte[] archive = ProceduralArchiveBuilder(entry, recipe);
+                        // Keep live settings on the old schema until both the
+                        // replacement archive and recipe are ready to publish.
+                        RuntimePlanetBuilderEntry buildEntry = entry;
+                        if (recipe.SchemaVersion != entry.RecipeSchemaVersion)
+                        {
+                            buildEntry = MyAPIGateway.Utilities.SerializeFromXML<RuntimePlanetBuilderEntry>(
+                                MyAPIGateway.Utilities.SerializeToXML(entry));
+                            buildEntry.RecipeSchemaVersion = recipe.SchemaVersion;
+                        }
+                        int replaySize = recipe.Revisions.Count + recipe.Revisions.Sum(r => r.Brushes.Count);
+                        byte[] archive = changed
+                            ? CanonicalProceduralArchiveBuilder(buildEntry, recipe, canonicalBuilder)
+                            : ProceduralArchiveBuilder(buildEntry, recipe);
+                        changed |= MyAPIGateway.Session.IsServer &&
+                            replaySize != recipe.Revisions.Count + recipe.Revisions.Sum(r => r.Brushes.Count);
 
                         WriteWorldStorageBinaryCache(entry.ArchiveFile, archive);
                         TrackPersistentCacheFile(entry.ArchiveFile);
+
+                        // Publish the optimized XML only after its replacement
+                        // archive has been rebuilt successfully. The new recipe
+                        // signature also invalidates the session replay cache.
+                        if (changed)
+                        {
+                            SaveGeneratorBuilder(entry.GeneratorFile, canonicalBuilder);
+                            SaveRuntimeRecipe(buildEntry, recipe);
+                            if (entry.RecipeSchemaVersion != recipe.SchemaVersion)
+                            {
+                                entry.RecipeSchemaVersion = recipe.SchemaVersion;
+                                RuntimePersistencePackageEntry package = FindPersistenceManifestPackage(entry.ArchiveFile);
+                                if (package != null) package.RecipeSchemaVersion = recipe.SchemaVersion;
+                                SaveRuntimeSettings();
+                                SavePersistenceManifest();
+                            }
+                            RecordBrushOptimization(entry, removed);
+                            if (removed.Count == 0) _brushOptimizationVersion++;
+                            MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Canonicalized runtime materials for planet " +
+                                entry.SourceEntityId + ": removed " + materials.RemovedGroups +
+                                " complex groups and " + materials.RemovedCustomMaterials +
+                                " custom material entries; allocation history discarded.");
+                        }
                     }
                     else
                     {
                         RestoreArchiveCache(
                             entry.ArchiveFile,
                             allowLegacyMigration);
+                        if (deduplicateMaterials)
+                        {
+                            var builder = LoadGeneratorBuilderFromWorldStorage(entry.GeneratorFile);
+                            var materials = RuntimeMaterialCanonicalizer.DeduplicateOwnedMaterials(builder, null,
+                                OriginalMaterialSourceBuilder(entry, null));
+                            if (materials.RemovedDefinitions > 0)
+                            {
+                                byte[] archive = SnapshotMaterialRemapper(entry, materials.Map);
+                                SaveRuntimeArchive(entry.ArchiveFile, archive);
+                                SaveGeneratorBuilder(entry.GeneratorFile, builder);
+                                _brushOptimizationVersion++;
+                                MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Deduplicated " + materials.RemovedGroups +
+                                    " complex groups and " + materials.RemovedCustomMaterials +
+                                    " custom material entries for snapshot planet " + entry.SourceEntityId + ".");
+                            }
+                        }
                     }
                 }
             }
@@ -728,6 +806,70 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
         }
 
 
+        internal void RecordBrushOptimization(RuntimePlanetBuilderEntry entry,
+            List<RuntimeBrushOptimizer.Removal> removed)
+        {
+            if (removed.Count == 0) return;
+            lock (_persistenceSync)
+                _brushOptimizationVersion++;
+
+            foreach (RuntimeBrushOptimizer.Removal removal in removed)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Removed Brush " + removal.Material +
+                    " of index " + removal.Index + ", Reason: Occluded by brush " +
+                    removal.OccluderMaterial + " of index " + removal.OccluderIndex +
+                    " (planet " + entry.SourceEntityId + ", layer " + removal.LayerIndex +
+                    ", revision " + removal.RevisionIndex + ", brush " + removal.BrushIndex +
+                    "; indices are zero-based in the pre-optimization recipe).");
+            }
+        }
+
+
+        // Called on the simulation thread, after loading and active modification
+        // work have finished. Never save a half-prepared deferred push.
+        internal void SaveOptimizedRecipesIfNeeded()
+        {
+            if (MyAPIGateway.Session == null || !MyAPIGateway.Session.IsServer)
+                return;
+            if (_brushOptimizationSaveRetryFrames > 0)
+            {
+                _brushOptimizationSaveRetryFrames--;
+                return;
+            }
+
+            int version;
+            lock (_persistenceSync)
+            {
+                version = _brushOptimizationVersion;
+                if (version == _savedBrushOptimizationVersion ||
+                    _manifest.Packages.Any(package => package != null && package.Pending))
+                    return;
+            }
+
+            try
+            {
+                if (MyAPIGateway.Session.Save())
+                {
+                    lock (_persistenceSync)
+                        _savedBrushOptimizationVersion = version;
+                    MyLog.Default.WriteLineAndConsole(
+                        "[RuntimePlanetGenerator] Re-saved world after compacting runtime brushes, revisions and materials.");
+                    return;
+                }
+            }
+            catch (Exception error)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not re-save optimized recipes: " + error);
+            }
+
+            _brushOptimizationSaveRetryFrames = 300;
+            MyLog.Default.Log(MyLogSeverity.Warning,
+                "[RuntimePlanetGenerator] Optimized recipe re-save is pending; retrying in 300 frames.");
+        }
+
+
         internal RuntimeProceduralPlanetRecipe LoadRuntimeRecipe(
             RuntimePlanetBuilderEntry entry)
         {
@@ -738,6 +880,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     .SerializeFromXML<RuntimeProceduralPlanetRecipe>(xml);
 
             ValidateRuntimeRecipe(recipe, entry);
+            if (recipe.SchemaVersion == 2 && string.IsNullOrWhiteSpace(recipe.SourceSignature))
+                throw new Exception("Procedural recipe has no source signature.");
             return recipe;
         }
 
@@ -2720,13 +2864,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             RuntimeProceduralPlanetRecipe recipe,
             RuntimePlanetBuilderEntry entry)
         {
-            const int supportedSchemaVersion = 1;
             const int maximumOperationCount = 16384;
 
             if (recipe == null)
                 throw new Exception("Procedural planet recipe is null.");
 
-            if (recipe.SchemaVersion != supportedSchemaVersion)
+            if (recipe.SchemaVersion != 1 && recipe.SchemaVersion != 2)
             {
                 throw new Exception(
                     "Unsupported procedural planet recipe schema: " +
@@ -2785,6 +2928,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
             if (recipe.Revisions == null)
                 recipe.Revisions = new List<RuntimeProceduralRevision>();
+
+            if (recipe.SourceSignature != null && recipe.SourceSignature.Length > 128)
+                throw new Exception("Invalid procedural source signature.");
 
             if (recipe.Revisions.Count > 4096)
                 throw new Exception("Procedural recipe revision limit exceeded.");

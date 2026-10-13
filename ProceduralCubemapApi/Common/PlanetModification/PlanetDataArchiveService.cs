@@ -382,6 +382,17 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         }
 
 
+        private static bool IsIndependentPaintRevision(PlanetModificationSnapshot revision)
+        {
+            if (revision.FeatureOperations.Count != 0 || revision.BiomeReplacementOperations.Count != 0 ||
+                revision.FractalNoiseOperations.Count != 0 || !string.IsNullOrWhiteSpace(revision.EnvironmentPresetName))
+                return false;
+            foreach (BrushOperation brush in revision.BrushOperations)
+                if (brush.LayerIndex == 3 || brush.MaterialFilter >= 0 || brush.BiomeFilter >= 0)
+                    return false;
+            return true;
+        }
+
         internal Dictionary<string, byte[]> BuildProceduralRevisionFiles(
             List<PlanetModificationSnapshot> revisions,
             Dictionary<string, byte[]> sourceFiles)
@@ -449,7 +460,25 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             {
                 PlanetModificationSnapshot revision = revisions[revisionIndex];
                 pendingAllocations.AddRange(revision.AllocatedComplexMaterialValues);
-                bool haveBrushes = revision.BrushOperations.Count > 0;
+                List<BrushOperation> brushes = revision.BrushOperations;
+                if (IsIndependentPaintRevision(revision))
+                {
+                    // The replay planner has already proven removable allocation
+                    // checks against the saved history. Combine the remaining
+                    // independent paints so newest-first selection spans revisions
+                    // and each face is decoded/encoded only once for this batch.
+                    brushes = new List<BrushOperation>(brushes);
+                    while (revisionIndex + 1 < revisions.Count)
+                    {
+                        PlanetModificationSnapshot next = revisions[revisionIndex + 1];
+                        if (next.PlanetSeed != revision.PlanetSeed ||
+                            next.AllocatedComplexMaterialValues.Count != 0 ||
+                            !IsIndependentPaintRevision(next)) break;
+                        brushes.AddRange(next.BrushOperations);
+                        revisionIndex++;
+                    }
+                }
+                bool haveBrushes = brushes.Count > 0;
                 bool haveMaterialEdits = revision.BiomeReplacementOperations.Count > 0 ||
                                         revision.FractalNoiseOperations.Count > 0;
                 bool haveFeatures = revision.FeatureOperations.Count > 0;
@@ -487,7 +516,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         materialImage,
                         heightFileName,
                         revision.PlanetSeed,
-                        revision.BrushOperations);
+                        brushes);
 
                     for (int operationIndex = 0;
                         operationIndex < revision.BiomeReplacementOperations.Count;
@@ -1062,6 +1091,32 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 MinimalZip.WriteBytes(entries));
         }
 
+
+        internal byte[] RemapSnapshotMaterials(RuntimePlanetBuilderEntry entry, byte[] map)
+        {
+            Dictionary<string, byte[]> files = ReadRuntimeArchive(entry.ArchiveFile);
+            RemapMaterialFiles(files, map);
+            return BuildAuthoritativeImageArchive(files);
+        }
+
+        internal static void RemapMaterialFiles(Dictionary<string, byte[]> files, byte[] map)
+        {
+            foreach (string name in PlanetMapFileNames.All)
+            {
+                if (!name.EndsWith("_mat.png", StringComparison.OrdinalIgnoreCase)) continue;
+                PlanarPngBitmap image = PlanetMapOperations.DecodePlanetPng(name, files[name]);
+                byte[] materials = image.Planes[0];
+                bool changed = false;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    byte value = map[materials[i]];
+                    if (materials[i] == value) continue;
+                    materials[i] = value;
+                    changed = true;
+                }
+                if (changed) files[name] = image.Encode();
+            }
+        }
 
         internal byte[] BuildAuthoritativeImageArchive(
             IDictionary<string, byte[]> files)

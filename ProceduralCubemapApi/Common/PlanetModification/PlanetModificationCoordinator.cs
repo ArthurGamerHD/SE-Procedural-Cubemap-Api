@@ -1479,6 +1479,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     BuildAccumulatedProceduralRecipe(
                         snapshot);
 
+                List<RuntimeBrushOptimizer.Removal> removed =
+                    RuntimeBrushReplayPlanner.Compact(recipe);
+                pendingEntry.RecipeSchemaVersion = recipe.SchemaVersion;
+
                 byte[] archive =
                     BuildProceduralArchive(
                         recipe,
@@ -1494,6 +1498,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 _runtimePackages.SaveDerivedRuntimeArchive(
                     archiveFile,
                     archive);
+
+                _runtimePackages.RecordBrushOptimization(pendingEntry, removed);
             }
             else
             {
@@ -1694,6 +1700,33 @@ namespace ProceduralCubemapApi.Common.PlanetModification
         }
 
 
+        internal byte[] RebuildCanonicalProceduralArchive(RuntimePlanetBuilderEntry entry,
+            RuntimeProceduralPlanetRecipe recipe, MyObjectBuilder_PlanetGeneratorDefinition builder)
+        {
+            using (CubemapGenerationFileLock.Begin("canonicalize " + entry.Subtype))
+                return BuildProceduralArchive(recipe, builder, entry, null, "persisted-" + entry.Subtype);
+        }
+
+        internal MyObjectBuilder_PlanetGeneratorDefinition CaptureOriginalMaterialSource(
+            RuntimePlanetBuilderEntry entry, RuntimeProceduralPlanetRecipe recipe)
+        {
+            MyPlanetGeneratorDefinition source;
+            if (recipe != null)
+                source = ResolveProceduralSourceGenerator(recipe.Source);
+            else
+            {
+                string sourceSubtype;
+                source = ResolveOriginalSourceGenerator(null, entry.SourceSubtype, out sourceSubtype);
+            }
+            // Only read IDs here. The resolved definition includes inherited
+            // material IDs that might not be present in the source XML itself.
+            return new MyObjectBuilder_PlanetGeneratorDefinition
+            {
+                CustomMaterialTable = source.SurfaceMaterialTable,
+                ComplexMaterials = source.MaterialGroups
+            };
+        }
+
         private RuntimeProceduralPlanetRecipe
             BuildAccumulatedProceduralRecipe(
                 PlanetModificationSnapshot snapshot)
@@ -1871,6 +1904,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 sourceSignature = signature.Finish();
             }
 
+            RuntimeMaterialCanonicalizer.BindSource(recipe, sourceSignature);
+
             ProceduralRoadReplayCache.Entry cached =
                 _roadReplayCache.Find(entry.SourceEntityId, sourceSignature, recipe);
             DateTime sourceReady = DateTime.UtcNow;
@@ -1900,12 +1935,31 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 return result;
             }
 
+            var replaySourceFiles = new Dictionary<string, byte[]>(originalFiles, StringComparer.OrdinalIgnoreCase);
+
+            RuntimeBrushReplayPlanner.Plan replayPlan =
+                RuntimeBrushReplayPlanner.Create(recipe);
+            foreach (RuntimeBrushOptimizer.Removal skipped in replayPlan.SkippedBrushes)
+            {
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Skipped Brush " + skipped.Material +
+                    " of index " + skipped.Index + ", Reason: Occluded by brush " +
+                    skipped.OccluderMaterial + " of index " + skipped.OccluderIndex +
+                    " (planet " + entry.SourceEntityId + ", layer " + skipped.LayerIndex +
+                    "; zero-based history indices; saved history retained).");
+            }
+            MyLog.Default.WriteLineAndConsole(
+                "[RuntimePlanetGenerator] Brush replay plan for planet " + entry.SourceEntityId +
+                ": " + recipe.Revisions.Sum(r => r.Brushes.Count) + " recorded, " +
+                replayPlan.Revisions.Sum(r => r.Brushes.Count) + " executed; generator-owned material IDs.");
+
             Dictionary<string, byte[]> sourceFiles =
                 null;
 
             var pendingStages =
                 new List<PlanetModificationSnapshot>();
             var finalLines = new List<LineOperation>();
+            var replayStages = new List<PlanetModificationSnapshot>();
 
             for (int revisionIndex = 0;
                 revisionIndex < recipe.Revisions.Count;
@@ -1917,7 +1971,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 PlanetModificationSnapshot stage =
                     CreateProceduralRevisionSnapshot(
                         recipe,
-                        revision,
+                        replayPlan.Revisions[revisionIndex],
                         sourceGenerator,
                         builder,
                         targetPlanet,
@@ -1925,6 +1979,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                         sourceFiles);
 
                 finalLines.AddRange(stage.LineOperations);
+                replayStages.Add(stage);
 
                 pendingStages.Add(
                     stage);
@@ -1935,7 +1990,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     sourceFiles =
                         _planetDataArchives.BuildProceduralRevisionFiles(
                             pendingStages,
-                            sourceFiles ?? originalFiles);
+                            sourceFiles ?? replaySourceFiles);
 
                     pendingStages.Clear();
 
@@ -1976,7 +2031,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 sourceFiles =
                     _planetDataArchives.BuildProceduralRevisionFiles(
                         pendingStages,
-                        sourceFiles ?? originalFiles);
+                        sourceFiles ?? replaySourceFiles);
             }
 
             // Roads are absolute surface/material overrides. Apply all revisions'
@@ -1986,6 +2041,23 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             _planetDataArchives.ApplyFinalProceduralLines(
                 sourceFiles, finalLines, targetPlanet);
             DateTime roadsReady = DateTime.UtcNow;
+
+            if (MyAPIGateway.Session.IsServer && recipe.SchemaVersion >= 2)
+            {
+                int unscanned = 0;
+                // All faces, features and final roads succeeded. Never use a
+                // partial face/depth result to prune persisted history.
+                for (int r = 0; r < replayStages.Count; r++)
+                    for (int b = 0; b < replayStages[r].BrushOperations.Count; b++)
+                        if (!replayStages[r].BrushOperations[b].WasScanned &&
+                            recipe.Revisions[r].Brushes.Remove(replayPlan.Revisions[r].Brushes[b]))
+                            unscanned++;
+                int empty = RuntimeBrushReplayPlanner.RemoveEmptyRevisions(recipe);
+                if (unscanned > 0 || empty > 0)
+                    MyLog.Default.WriteLineAndConsole("[RuntimePlanetGenerator] Pruned " + unscanned +
+                        " never-scanned brushes and " + empty + " empty revisions for planet " + entry.SourceEntityId +
+                        " after complete six-face max-depth replay.");
+            }
 
             string generatorSignature =
                 BuildProceduralGeneratorSignature(

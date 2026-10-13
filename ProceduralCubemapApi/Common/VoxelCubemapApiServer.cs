@@ -23,7 +23,7 @@ namespace ProceduralCubemapApi.Common
 {
     [APIManager(0x5643584150490001L, Provider = nameof(_intermodApi))]
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation, -1000)]
-    internal sealed partial class CubemapApiServer : MySessionComponentBase
+    internal sealed partial class CubemapApiServer : MySessionComponentBase, ISingleton<CubemapApiServer>
     {
         private volatile bool _unloading;
         private volatile bool _worldStoragePathReady;
@@ -33,7 +33,6 @@ namespace ProceduralCubemapApi.Common
         private int _workshopStorageRetryFrames;
         private bool _worldStorageFirstFrameSelfTestPending;
         private bool _worldStorageVerificationFailed;
-        private bool _playerConnectedSubscribed;
         private CubemapIntermodApiServer _intermodApi;
 
         private CubemapApiConfig _config;
@@ -48,8 +47,6 @@ namespace ProceduralCubemapApi.Common
 
         private readonly VegetationClearScheduler _vegetationClearScheduler =
             new VegetationClearScheduler();
-
-        internal static CubemapApiServer Instance { get; private set; }
 
         internal bool IsUnloading => _unloading;
         internal PlanetModificationCoordinator Modifications => _modifications;
@@ -98,8 +95,7 @@ namespace ProceduralCubemapApi.Common
 
         public override void LoadData()
         {
-            Instance =
-                this;
+            RegisterSingleton();
 
             _unloading =
                 false;
@@ -125,14 +121,7 @@ namespace ProceduralCubemapApi.Common
 
             _worldStorageVerificationFailed =
                 false;
-
-            _playerConnectedSubscribed =
-                MyAPIGateway.Session != null &&
-                MyAPIGateway.Session.IsServer;
-
-            if (_playerConnectedSubscribed)
-                MyVisualScriptLogicProvider.PlayerConnected += OnPlayerConnected;
-
+            
             _config =
                 CubemapApiConfigStorage.LoadOrCreate();
 
@@ -155,8 +144,7 @@ namespace ProceduralCubemapApi.Common
             // ModPath whenever the engine's world-storage destination can already
             // be resolved. The first simulation frame performs the authoritative
             // second verification because workshop/Torch startup may rebind it.
-            if (MyAPIGateway.Session != null &&
-                MyAPIGateway.Session.IsServer)
+            if (MyAPIGateway.Session.IsServer)
             {
                 try
                 {
@@ -204,6 +192,9 @@ namespace ProceduralCubemapApi.Common
 
             _runtimePackages.ProceduralArchiveBuilder =
                 _modifications.RebuildProceduralArchive;
+            _runtimePackages.CanonicalProceduralArchiveBuilder = _modifications.RebuildCanonicalProceduralArchive;
+            _runtimePackages.SnapshotMaterialRemapper = _planetDataArchives.RemapSnapshotMaterials;
+            _runtimePackages.OriginalMaterialSourceBuilder = _modifications.CaptureOriginalMaterialSource;
 
             _runtimePackages.ProceduralGeneratorSignatureBuilder =
                 _modifications.BuildProceduralGeneratorSignature;
@@ -224,8 +215,7 @@ namespace ProceduralCubemapApi.Common
 
             RegisterApiManager();
 
-            if (MyAPIGateway.Session != null &&
-                (!MyAPIGateway.Session.IsServer ||
+            if ((!MyAPIGateway.Session.IsServer ||
                  !HasWorkshopSavePathTransition()))
             {
                 _worldStoragePathReady =
@@ -344,7 +334,8 @@ namespace ProceduralCubemapApi.Common
             {
                 if (!TryRunWorldStorageSelfTest(
                         currentPath,
-                        "workshop save-path normalization"))
+                        "workshop save-path normalization") &&
+                    !_runtimeGenerators.UnixPathDetected)
                 {
                     MyLog.Default.Log(MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] World storage could not be " +
@@ -449,11 +440,6 @@ namespace ProceduralCubemapApi.Common
                 true;
             CubemapGenerationFileLock.Reset();
 
-            if (_playerConnectedSubscribed)
-            {
-                MyVisualScriptLogicProvider.PlayerConnected -= OnPlayerConnected;
-                _playerConnectedSubscribed = false;
-            }
 
             if (_network != null)
             {
@@ -483,7 +469,7 @@ namespace ProceduralCubemapApi.Common
                 null;
 
             if (ReferenceEquals(Instance, this))
-                Instance = null;
+                UnregisterSingleton();
         }
 
 
@@ -518,8 +504,8 @@ namespace ProceduralCubemapApi.Common
                 {
                     ReportWorldStorageVerificationFailure(
                         _runtimeGenerators.UnixPathDetected
-                            ? "Linux-Compat plugin detected; path probing " +
-                              "cannot continue."
+                            ? "Unix/Linux-Compat path probing is unsupported; " +
+                              "the physical save folder remains unverified."
                             : "SentinelCanary.txt could not be located through " +
                               "the reported CurrentPath, enumerated saves, or " +
                               "SavesPath + Session.Name.");
@@ -582,6 +568,9 @@ namespace ProceduralCubemapApi.Common
                 _runtimePackages.BoundSavePath,
                 StringComparison.OrdinalIgnoreCase))
             {
+                // Path probing is diagnostic. Keen's save API owns the actual
+                // destination and does not require us to resolve it physically.
+                _runtimePackages.SaveOptimizedRecipesIfNeeded();
                 return;
             }
 
@@ -598,8 +587,8 @@ namespace ProceduralCubemapApi.Common
                     else
                         ReportWorldStorageVerificationFailure(
                             _runtimeGenerators.UnixPathDetected
-                                ? "Linux-Compat plugin detected; path probing " +
-                                  "cannot continue."
+                                ? "Unix/Linux-Compat path probing is unsupported; " +
+                                  "the physical save folder remains unverified."
                                 : "World-storage path could not be verified " +
                                   "after Save As.");
                 }
@@ -609,6 +598,8 @@ namespace ProceduralCubemapApi.Common
 
                 _modifications.EnsureEmptyPlanetRuntimeAssets(
                     savePath: currentPath);
+
+                _runtimePackages.SaveOptimizedRecipesIfNeeded();
             }
             catch (Exception e)
             {
@@ -641,6 +632,8 @@ namespace ProceduralCubemapApi.Common
         private void ReportWorldStorageVerificationFailure(
             string reason)
         {
+            // Keep the diagnostic banner/alerts on every platform. This state
+            // controls notifications only; it must not gate saving or API work.
             const string banner =
 @"/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
 \/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
@@ -655,8 +648,8 @@ namespace ProceduralCubemapApi.Common
                 MyLogSeverity.Warning,
                 Environment.NewLine + banner + Environment.NewLine +
                 "[RuntimePlanetGenerator] World-storage verification failed; " +
-                "initialization will continue, but the mod cannot guarantee " +
-                "that it will work. Reason: " + reason);
+                "initialization and saving remain enabled, but the physical " +
+                "save folder is unverified. Reason: " + reason);
 
             if (_worldStorageVerificationFailed)
                 return;
@@ -685,11 +678,12 @@ namespace ProceduralCubemapApi.Common
             }
         }
 
-
-        private void OnPlayerConnected(long playerId)
+        [NetworkCallback(typeof(Hello), NetworkCallbackFilter.IsServer | NetworkCallbackFilter.FromClient)]
+        public void OnRuntimeRevisionDecision(
+            ReceivedPacketEventArgs packet)
         {
             if (_worldStorageVerificationFailed)
-                SendVerificationWarning(playerId);
+                SendVerificationWarning(MyAPIGateway.Players.TryGetIdentityId(packet.SenderId));
         }
 
 
@@ -701,7 +695,7 @@ namespace ProceduralCubemapApi.Common
                     "World-storage verification failed. Procedural Cubemap API " +
                     "cannot guarantee that it will work on this server.",
                     Color.Red,
-                    "Procedural Cubemap API",
+                    "Procedural Cubemap API", 
                     playerId);
             }
             catch (Exception e)

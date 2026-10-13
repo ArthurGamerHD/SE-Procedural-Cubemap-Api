@@ -751,6 +751,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
         /// Each candidate is verified through ReadFileInModLocation().
         /// Matching the canary content avoids accepting a stale sentinel left in
         /// a previous save folder after a startup path transition.
+        /// False with UnixPathDetected means probing is unsupported, not that
+        /// saving or initialization failed. The reported path remains unverified.
         /// </summary>
         internal bool RunWorldStorageSelfTest(
             string reportedSavePath,
@@ -1191,8 +1193,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             _linuxCompatWarningLogged = true;
 
             MyLog.Default.Log(MyLogSeverity.Warning,
-                "[RuntimePlanetGenerator] Linux-Compat plugin detected, " +
-                "path probing cannot continue. SavePath='" + path + "'.");
+                "[RuntimePlanetGenerator] Unix/Linux-Compat paths do not support " +
+                "the rooted Windows-path probe, so the physical world-storage " +
+                "folder cannot be verified. Continuing with the reported save " +
+                "path/session-name fallback; initialization and saving remain " +
+                "enabled. SavePath='" + path + "'.");
         }
 
 
