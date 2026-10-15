@@ -164,6 +164,8 @@ namespace ProceduralCubemapApi.Common.Networking
                 RuntimeSubtype = committedEntry.Subtype,
                 GeneratorDefinitionXml = SerializeGenerator(snapshot),
                 PlanetSeed = snapshot.PlanetSeed,
+                ModificationId = snapshot.ModificationId,
+                CustomData = snapshot.CustomData,
                 FractalNoiseOperations = fractalOperations,
                 BiomeReplacementOperations = biomeReplacements,
                 BrushOperations = brushes,

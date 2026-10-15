@@ -181,6 +181,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
             internal int Layer;
             internal Vector3D[] SegmentDeltas;
             internal double[] SegmentLengthsSquared, SegmentAngles, SegmentPruneDots;
+            // Earthwork reach beyond each road edge, in metres, per centerline sample.
+            internal double[] LeftReach, RightReach;
 
             internal CellLine Intersect(Cell cell)
             {
@@ -202,7 +204,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
             {
                 road = false;
                 if (Vector3D.Dot(n, CapCenter) < CapDot) return old;
-                double best = double.MaxValue, desired = 0;
+                double best = double.MaxValue, desired = 0, reach = 0;
                 for (int candidate = 0; candidate < segments.Length; candidate++)
                 {
                     int i = segments[candidate];
@@ -218,6 +220,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                     {
                         best = meters;
                         desired = Profile[i] * (1 - t) + Profile[i + 1] * t;
+                        double[] side = Vector3D.Dot(n, Vector3D.Cross(Points[i], ab)) >= 0
+                            ? LeftReach : RightReach;
+                        reach = side[i] * (1 - t) + side[i + 1] * t;
                     }
                 }
                 if (best == double.MaxValue) return old;
@@ -227,7 +232,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                     target = desired;
                     road = true;
                 }
-                else if (Slope > 0)
+                else if (Slope > 0 && best - HalfWidth <= reach)
                 {
                     double deltaUnits = (best - HalfWidth) * Slope / MetersPerUnit;
                     if (desired > old) target = Math.Max(old, desired - deltaUnits);
@@ -424,7 +429,55 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Maps
                 prepared.SegmentPruneDots[i] = Math.Cos(Math.Min(Math.PI,
                     halfWidth / op.RadiusMeters + prepared.SegmentAngles[i] + 0.7));
             }
+            prepared.LeftReach = new double[count + 1];
+            prepared.RightReach = new double[count + 1];
+            if (slope > 0.0)
+            {
+                // About one height-map texel per step.
+                double step = op.RadiusMeters * Math.PI * 0.5 / resolution;
+                for (int i = 0; i <= count; i++)
+                {
+                    Vector3D tangent = points[Math.Min(count, i + 1)] - points[Math.Max(0, i - 1)];
+                    Vector3D left = Normalize(Vector3D.Cross(points[i], tangent));
+                    prepared.LeftReach[i] = MeasureEarthworkReach(heights, readHeight, points[i],
+                        left, profile[i], halfWidth, slope / metersPerUnit, step,
+                        maximumEarthworkWidth, op.RadiusMeters);
+                    prepared.RightReach[i] = MeasureEarthworkReach(heights, readHeight, points[i],
+                        -left, profile[i], halfWidth, slope / metersPerUnit, step,
+                        maximumEarthworkWidth, op.RadiusMeters);
+                }
+            }
             return prepared;
+        }
+
+        // Walk outward from the road edge until the fill/cut slope first meets
+        // the terrain. Earthwork stops there, so terrain beyond a ridge (e.g. a
+        // side ravine still below the slope) is left untouched.
+        private static double MeasureEarthworkReach(Dictionary<string, PlanarPngBitmap> heights,
+            Func<int, int, int, int> readHeight, Vector3D center, Vector3D side,
+            double profile, double halfWidth, double unitsPerMeter, double step,
+            double maximumWidth, double radiusMeters)
+        {
+            double edge = SampleHeight(heights, Offset(center, side, halfWidth / radiusMeters),
+                readHeight);
+            double sign = Math.Sign(profile - edge); // +1 fill, -1 cut
+            if (sign == 0.0) return 0.0;
+            double previousGap = (profile - edge) * sign;
+            for (double x = step; x <= maximumWidth; x += step)
+            {
+                double terrain = SampleHeight(heights,
+                    Offset(center, side, (halfWidth + x) / radiusMeters), readHeight);
+                double gap = (profile - sign * x * unitsPerMeter - terrain) * sign;
+                if (gap <= 0.0)
+                    return x - step * gap / (gap - previousGap);
+                previousGap = gap;
+            }
+            return maximumWidth;
+        }
+
+        private static Vector3D Offset(Vector3D center, Vector3D side, double angle)
+        {
+            return Normalize(center * Math.Cos(angle) + side * Math.Sin(angle));
         }
 
         private static void ConstrainGrade(double[] profile, double[] gradeSteps)

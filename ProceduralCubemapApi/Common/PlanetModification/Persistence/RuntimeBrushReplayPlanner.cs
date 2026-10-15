@@ -23,10 +23,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
         internal static int RemoveEmptyRevisions(RuntimeProceduralPlanetRecipe history)
         {
-            return history.Revisions.RemoveAll(r => r.Brushes.Count == 0 && r.Lines.Count == 0 &&
+            return history.Revisions.RemoveAll(IsEmpty);
+        }
+
+        internal static bool IsEmpty(RuntimeProceduralRevision r)
+        {
+            return r.Brushes.Count == 0 && r.Lines.Count == 0 &&
                 r.Features.Count == 0 && r.BiomeReplacements.Count == 0 && r.FractalNoise.Count == 0 &&
                 r.AllocatedComplexMaterialValues.Count == 0 && r.EnvironmentRemap.Count == 0 &&
-                string.IsNullOrWhiteSpace(r.EnvironmentPresetName));
+                string.IsNullOrWhiteSpace(r.EnvironmentPresetName);
         }
 
         internal static Plan Create(RuntimeProceduralPlanetRecipe history)
@@ -35,6 +40,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
             foreach (RuntimeProceduralRevision revision in history.Revisions)
                 replay.Revisions.Add(new RuntimeProceduralRevision
                 {
+                    ModificationId = revision.ModificationId,
+                    CustomData = revision.CustomData,
                     Brushes = new List<RuntimeProceduralBrushOperation>(revision.Brushes),
                     Lines = revision.Lines, Features = revision.Features,
                     BiomeReplacements = revision.BiomeReplacements,

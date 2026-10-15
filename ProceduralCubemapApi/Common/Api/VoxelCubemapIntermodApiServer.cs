@@ -16,7 +16,7 @@ namespace ProceduralCubemapApi.Common.Api
         ClientName = "ApiProvider")]
     internal partial class CubemapIntermodApiServer
     {
-        private static readonly Version ApiVersion = new Version(0, 0, 16);
+        private static readonly Version ApiVersion = new Version(0, 0, 17);
         private readonly PlanetModificationCoordinator _coordinator;
         private readonly ProceduralNoiseProvider _noiseProvider;
         private readonly WaterUtil _waterUtil;
@@ -102,6 +102,17 @@ namespace ProceduralCubemapApi.Common.Api
         public string GetPlanetRecipeXml(long entityId)
         {
             return _coordinator.GetPlanetRecipeXml(entityId);
+        }
+
+        /// <summary>
+        /// Returns the planet's committed modifications in replay order, with
+        /// stable ids and every road line's parameters, as XML. Null for a
+        /// PNG-backed planet (no procedural history).
+        /// </summary>
+        [ApiMethod]
+        public string GetPlanetModificationsXml(long entityId)
+        {
+            return _coordinator.GetPlanetModificationsXml(entityId);
         }
 
         /// <summary>

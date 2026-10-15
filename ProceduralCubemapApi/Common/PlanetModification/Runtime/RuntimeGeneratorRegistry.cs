@@ -16,16 +16,17 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 {
     internal sealed class RuntimeGeneratorRegistry
     {
-        private const string WORLD_STORAGE_SENTINEL_FILE =
-"SentinelCanary.txt";
+        private const string WORLD_STORAGE_SENTINEL_PREFIX =
+            "SentinelCanary_";
+
+        private const string WORLD_STORAGE_SENTINEL_EXTENSION =
+            ".txt";
 
         private readonly RuntimePackageStore _runtimePackages;
         private readonly MyModContext _modContext;
 
         private string _verifiedWorldSavePath;
         private string _verifiedReportedSavePath;
-        private bool _linuxCompatWarningLogged;
-        private bool _unixPathDetected;
 
 
         internal RuntimeGeneratorRegistry(
@@ -48,9 +49,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
         internal string VerifiedWorldSavePath =>
             _verifiedWorldSavePath;
-
-        internal bool UnixPathDetected =>
-            _unixPathDetected;
 
 
         internal MyObjectBuilder_PlanetGeneratorDefinition
@@ -207,21 +205,21 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             bool preferGameContent =
                 context.IsBaseGame ||
                 (!string.IsNullOrWhiteSpace(contentRoot) &&
-                    currentFile.StartsWith(
-                        contentRoot + "/",
-                        StringComparison.OrdinalIgnoreCase));
+                 currentFile.StartsWith(
+                     contentRoot + "/",
+                     StringComparison.OrdinalIgnoreCase));
 
 
             if (preferGameContent)
             {
                 for (int index = 0;
-                    index < relativeFiles.Count;
-                    index++)
+                     index < relativeFiles.Count;
+                     index++)
                 {
                     if (TryReadGameContentDefinition(
-                        relativeFiles[index],
-                        subtype,
-                        out xml))
+                            relativeFiles[index],
+                            subtype,
+                            out xml))
                     {
                         resolvedFile =
                             relativeFiles[index] +
@@ -234,14 +232,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             else
             {
                 for (int index = 0;
-                    index < relativeFiles.Count;
-                    index++)
+                     index < relativeFiles.Count;
+                     index++)
                 {
                     if (TryReadModDefinition(
-                        relativeFiles[index],
-                        context.ModItem,
-                        subtype,
-                        out xml))
+                            relativeFiles[index],
+                            context.ModItem,
+                            subtype,
+                            out xml))
                     {
                         resolvedFile =
                             relativeFiles[index] +
@@ -261,17 +259,17 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 MyAPIGateway.Session.Mods != null)
             {
                 for (int fileIndex = 0;
-                    fileIndex < relativeFiles.Count;
-                    fileIndex++)
+                     fileIndex < relativeFiles.Count;
+                     fileIndex++)
                 {
                     foreach (MyObjectBuilder_Checkpoint.ModItem mod in
-                        MyAPIGateway.Session.Mods)
+                             MyAPIGateway.Session.Mods)
                     {
                         if (!TryReadModDefinition(
-                            relativeFiles[fileIndex],
-                            mod,
-                            subtype,
-                            out xml))
+                                relativeFiles[fileIndex],
+                                mod,
+                                subtype,
+                                out xml))
                         {
                             continue;
                         }
@@ -291,13 +289,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             if (!preferGameContent)
             {
                 for (int index = 0;
-                    index < relativeFiles.Count;
-                    index++)
+                     index < relativeFiles.Count;
+                     index++)
                 {
                     if (TryReadGameContentDefinition(
-                        relativeFiles[index],
-                        subtype,
-                        out xml))
+                            relativeFiles[index],
+                            subtype,
+                            out xml))
                     {
                         resolvedFile =
                             relativeFiles[index] +
@@ -385,15 +383,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             try
             {
                 using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInGameContent(
-                        relativeFile))
+                       MyAPIGateway.Utilities.ReadFileInGameContent(
+                           relativeFile))
                 {
                     string candidate =
                         reader.ReadToEnd();
 
                     if (DeserializeSourceBuilder(
-                        candidate,
-                        subtype) == null)
+                            candidate,
+                            subtype) == null)
                     {
                         return false;
                     }
@@ -424,16 +422,16 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             try
             {
                 using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInModLocation(
-                        relativeFile,
-                        mod))
+                       MyAPIGateway.Utilities.ReadFileInModLocation(
+                           relativeFile,
+                           mod))
                 {
                     string candidate =
                         reader.ReadToEnd();
 
                     if (DeserializeSourceBuilder(
-                        candidate,
-                        subtype) == null)
+                            candidate,
+                            subtype) == null)
                     {
                         return false;
                     }
@@ -503,14 +501,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
             string normalized =
                 NormalizePath(
-                    relativeFile)
+                        relativeFile)
                     .TrimStart('/');
 
 
             if (!candidates.Any(x =>
-                x.Equals(
-                    normalized,
-                    StringComparison.OrdinalIgnoreCase)))
+                    x.Equals(
+                        normalized,
+                        StringComparison.OrdinalIgnoreCase)))
             {
                 candidates.Add(
                     normalized);
@@ -538,16 +536,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             string reportedSavePath =
                 ResolveWorldSavePath(savePath);
 
-            if (LooksLikeUnixPath(reportedSavePath))
-            {
-                WarnLinuxCompat(reportedSavePath);
-            }
-
-            if (_unixPathDetected)
-            {
-                worldSavePath = reportedSavePath;
-            }
-            else if (!string.IsNullOrWhiteSpace(_verifiedWorldSavePath) &&
+            if (!string.IsNullOrWhiteSpace(_verifiedWorldSavePath) &&
                 string.Equals(reportedSavePath, _verifiedReportedSavePath,
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -580,10 +569,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 return reportedSavePath;
 
             string enumeratedSavePath = ResolveEnumeratedWorldSavePath(
-                fileName, null);
-
-            if (_unixPathDetected)
-                return reportedSavePath;
+                fileName, false);
 
             if (!string.IsNullOrWhiteSpace(enumeratedSavePath))
             {
@@ -617,10 +603,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             return sessionSavePath;
         }
 
-
         private string ResolveEnumeratedWorldSavePath(
             string fileName,
-            string expectedToken)
+            bool uniqueFileName)
         {
             string savesRoot = null;
             try
@@ -641,11 +626,18 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     "Saves"));
                 string leafName = Path.GetFileName(fileName);
                 string storageSuffix = "/Storage/" +
-                    MyAPIGateway.Utilities.GamePaths.ModScopeName +
-                    "/" + leafName;
+                                       MyAPIGateway.Utilities.GamePaths.ModScopeName +
+                                       "/" + leafName;
 
                 string[] foundFiles = PathUtils.GetFilesRecursively(
                     savesRoot, leafName);
+
+                TraceProbe("Enumerate", savesRoot,
+                    savesRoot, leafName,
+                    foundFiles == null
+                        ? "enumeration returned null"
+                        : foundFiles.Length + " file(s) found");
+
                 if (foundFiles == null)
                     return null;
 
@@ -653,11 +645,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 foreach (string foundFile in foundFiles)
                 {
                     string normalized = NormalizePath(foundFile);
-                    if (LooksLikeUnixPath(normalized))
-                    {
-                        WarnLinuxCompat(normalized);
-                        return null;
-                    }
 
                     if (string.IsNullOrWhiteSpace(normalized) ||
                         !normalized.StartsWith(savesRoot + "/",
@@ -665,18 +652,27 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                         !normalized.EndsWith(storageSuffix,
                             StringComparison.OrdinalIgnoreCase))
                     {
+                        TraceProbe("Enumerate", savesRoot, foundFile,
+                            leafName, "skipped; outside '" + savesRoot +
+                                      "' or not under '" + storageSuffix + "'");
+
                         continue;
                     }
 
                     string candidate = normalized.Substring(
                         0, normalized.Length - storageSuffix.Length);
                     if (candidate.Length <= savesRoot.Length + 1 ||
-                        !(expectedToken == null
-                            ? WorldStorageFileExists(candidate, leafName)
-                            : WorldStorageSentinelMatches(candidate, expectedToken)))
+                        !(uniqueFileName ||
+                          WorldStorageFileExists(candidate, leafName)))
                     {
+                        TraceProbe("Enumerate", candidate, foundFile,
+                            leafName, "skipped; candidate rejected");
+
                         continue;
                     }
+
+                    TraceProbe("Enumerate", candidate, foundFile,
+                        leafName, "candidate accepted");
 
                     if (resolved != null &&
                         !string.Equals(resolved, candidate,
@@ -720,14 +716,26 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 return false;
             }
 
+            string probeMod = null;
             try
             {
-                return MyAPIGateway.Utilities.FileExistsInModLocation(
-                    Path.GetFileName(fileName),
-                    CreateWorldStorageProbeMod(savePath));
+                MyObjectBuilder_Checkpoint.ModItem mod =
+                    CreateWorldStorageProbeMod(savePath);
+                probeMod = mod.Name;
+
+                bool exists = MyAPIGateway.Utilities.FileExistsInModLocation(
+                    Path.GetFileName(fileName), mod);
+
+                TraceProbe("FileExistsInModLocation", savePath, probeMod,
+                    fileName, exists ? "found" : "missing");
+
+                return exists;
             }
-            catch
+            catch (Exception e)
             {
+                TraceProbe("FileExistsInModLocation", savePath, probeMod,
+                    fileName, "threw " + e.Message);
+
                 return false;
             }
         }
@@ -737,7 +745,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             string savePath)
         {
             string storageRoot =
-                NormalizePath(savePath).TrimEnd('/') +
+                NormalizePath(savePath) +
                 "/Storage/" +
                 MyAPIGateway.Utilities.GamePaths.ModScopeName;
 
@@ -747,13 +755,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
 
         /// <summary>
-        /// Writes a unique canary through Keen's world-storage API, then checks
-        /// the reported path, enumerated save folders, and session-name path.
-        /// Each candidate is verified through ReadFileInModLocation().
-        /// Matching the canary content avoids accepting a stale sentinel left in
-        /// a previous save folder after a startup path transition.
-        /// False with UnixPathDetected means probing is unsupported, not that
-        /// saving or initialization failed. The reported path remains unverified.
+        /// Writes a canary with a GUID-suffixed name through Keen's world-storage
+        /// API, then checks the reported path, enumerated save folders, and
+        /// session-name path by file name only. The unique name avoids accepting
+        /// a stale sentinel left in a previous save folder after a startup path
+        /// transition, The canary is deleted once the self-test finishes.
+        /// False means the reported path remains unverified (the mod *could still theoretically work*)
         /// </summary>
         internal bool RunWorldStorageSelfTest(
             string reportedSavePath,
@@ -772,32 +779,20 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
             string reported = ResolveWorldSavePath(reportedSavePath);
 
-            if (LooksLikeUnixPath(reported))
-            {
-                WarnLinuxCompat(reported);
-            }
-
-            if (_unixPathDetected)
-            {
-                _verifiedWorldSavePath = null;
-                _verifiedReportedSavePath = null;
-                return false;
-            }
-
-            string token =
-                (phase ?? "startup") +
-"|" +
-                DateTime.UtcNow.Ticks;
+            string sentinelFile =
+                WORLD_STORAGE_SENTINEL_PREFIX +
+                Guid.NewGuid().ToString("N") +
+                WORLD_STORAGE_SENTINEL_EXTENSION;
 
             try
             {
                 using (TextWriter writer =
-                    MyAPIGateway.Utilities.WriteFileInWorldStorage(
-                        WORLD_STORAGE_SENTINEL_FILE,
-                        typeof(CubemapApiServer)))
+                       MyAPIGateway.Utilities.WriteFileInWorldStorage(
+                           sentinelFile,
+                           typeof(CubemapApiServer)))
                 {
                     writer.Write(
-                        token);
+                        phase ?? "startup");
                 }
             }
             catch (Exception e)
@@ -809,25 +804,44 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
                 MyLog.Default.Log(
                     MyLogSeverity.Warning,
-"[RuntimePlanetGenerator] World-storage self-test '" +
+                    "[RuntimePlanetGenerator] World-storage self-test '" +
                     phase +
-"' could not write " +
-                    WORLD_STORAGE_SENTINEL_FILE +
-": " +
+                    "' could not write " +
+                    sentinelFile +
+                    ": " +
                     e.Message);
 
                 return false;
             }
 
-            string resolved =
-                null;
+            try
+            {
+                return ResolveWorldStorageSentinel(
+                    reported,
+                    phase,
+                    sentinelFile);
+            }
+            finally
+            {
+                DeleteWorldStorageSentinel(
+                    sentinelFile);
+            }
+        }
+
+
+        private bool ResolveWorldStorageSentinel(
+            string reported,
+            string phase,
+            string sentinelFile)
+        {
+            string resolved;
 
             string resolutionSource =
                 null;
 
-            if (WorldStorageSentinelMatches(
+            if (WorldStorageSentinelExists(
                     reported,
-                    token))
+                    sentinelFile))
             {
                 resolved =
                     reported;
@@ -837,16 +851,9 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
             else
             {
                 resolved = ResolveEnumeratedWorldSavePath(
-                    WORLD_STORAGE_SENTINEL_FILE, token);
+                    sentinelFile, true);
                 if (resolved != null)
                     resolutionSource = "enumerated";
-            }
-
-            if (_unixPathDetected)
-            {
-                _verifiedWorldSavePath = null;
-                _verifiedReportedSavePath = null;
-                return false;
             }
 
             string sessionNamed = resolved == null
@@ -856,7 +863,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 !string.IsNullOrWhiteSpace(sessionNamed) &&
                 !string.Equals(reported, sessionNamed,
                     StringComparison.OrdinalIgnoreCase) &&
-                WorldStorageSentinelMatches(sessionNamed, token))
+                WorldStorageSentinelExists(sessionNamed, sentinelFile))
             {
                 resolved = sessionNamed;
                 resolutionSource = "session-name";
@@ -872,14 +879,14 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
 
                 MyLog.Default.Log(
                     MyLogSeverity.Warning,
-"[RuntimePlanetGenerator] World-storage self-test '" +
+                    "[RuntimePlanetGenerator] World-storage self-test '" +
                     phase +
-"' could not locate the freshly written canary. " +
-"ReportedPath='" +
+                    "' could not locate the freshly written canary. " +
+                    "ReportedPath='" +
                     (reported ?? "<null>") +
-"', SessionPath='" +
+                    "', SessionPath='" +
                     (sessionNamed ?? "<null>") +
-"'.");
+                    "'.");
 
                 return false;
             }
@@ -899,58 +906,111 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                     _verifiedWorldSavePath,
                     StringComparison.OrdinalIgnoreCase)
                     ? MyLogSeverity.Info
-                    : MyLogSeverity.Warning,
-"[RuntimePlanetGenerator] World-storage self-test '" +
-                phase +
-"' resolved physical save path via " +
-                resolutionSource +
-                " lookup: '" +
-                _verifiedWorldSavePath +
-"'." +
-                (string.IsNullOrWhiteSpace(previous) ||
-                 string.Equals(
-                     previous,
-                     _verifiedWorldSavePath,
-                     StringComparison.OrdinalIgnoreCase)
-                    ? string.Empty
-                    : " Previous verified path was '" +
-                      previous +
-"'." ));
+                    : MyLogSeverity.Warning, "[RuntimePlanetGenerator] World-storage self-test '" +
+                                             phase + "' resolved physical save path via " +
+                                             resolutionSource +
+                                             " lookup: '" +
+                                             _verifiedWorldSavePath + "'." +
+                                             (string.IsNullOrWhiteSpace(previous) ||
+                                              string.Equals(
+                                                  previous,
+                                                  _verifiedWorldSavePath,
+                                                  StringComparison.OrdinalIgnoreCase)
+                                                 ? string.Empty
+                                                 : " Previous verified path was '" +
+                                                   previous + "'."));
 
             return true;
         }
 
 
-        private static bool WorldStorageSentinelMatches(
+        /// <summary>
+        /// Looks for the uniquely named canary under the candidate's
+        /// world-storage folder by file name only.
+        /// </summary>
+        private static bool WorldStorageSentinelExists(
             string savePath,
-            string expectedToken)
+            string sentinelFile)
         {
             if (MyAPIGateway.Utilities == null ||
                 MyAPIGateway.Utilities.GamePaths == null ||
                 string.IsNullOrWhiteSpace(savePath) ||
-                string.IsNullOrWhiteSpace(expectedToken) ||
+                string.IsNullOrWhiteSpace(sentinelFile) ||
                 string.IsNullOrWhiteSpace(
                     MyAPIGateway.Utilities.GamePaths.ModScopeName))
             {
                 return false;
             }
 
+            string storageRoot =
+                NormalizePath(savePath) +
+                "/Storage/" +
+                MyAPIGateway.Utilities.GamePaths.ModScopeName;
+            string expected =
+                storageRoot + "/" + sentinelFile;
+
             try
             {
-                using (TextReader reader =
-                    MyAPIGateway.Utilities.ReadFileInModLocation(
-                        WORLD_STORAGE_SENTINEL_FILE,
-                        CreateWorldStorageProbeMod(savePath)))
+                string[] foundFiles = PathUtils.GetFilesRecursively(
+                    storageRoot, sentinelFile);
+                if (foundFiles == null)
                 {
-                    return string.Equals(
-                        reader.ReadToEnd(),
-                        expectedToken,
-                        StringComparison.Ordinal);
+                    TraceProbe("Sentinel", savePath,
+                        storageRoot, sentinelFile,
+                        "enumeration returned null");
+
+                    return false;
+                }
+
+                foreach (string foundFile in foundFiles)
+                {
+                    if (string.Equals(NormalizePath(foundFile), expected,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        TraceProbe("Sentinel", savePath,
+                            storageRoot, sentinelFile,
+                            "found at '" + foundFile + "'");
+
+                        return true;
+                    }
+                }
+
+                TraceProbe("Sentinel", savePath,
+                    storageRoot, sentinelFile,
+                    "missing; expected '" + expected + "', found [" +
+                    string.Join(", ", foundFiles) + "]");
+
+                return false;
+            }
+            catch (Exception e)
+            {
+                TraceProbe("Sentinel", savePath, storageRoot, sentinelFile,
+                    "threw " + e.Message);
+
+                return false;
+            }
+        }
+
+
+        private static void DeleteWorldStorageSentinel(
+            string sentinelFile)
+        {
+            try
+            {
+                if (MyAPIGateway.Utilities.FileExistsInWorldStorage(
+                        sentinelFile,
+                        typeof(CubemapApiServer)))
+                {
+                    MyAPIGateway.Utilities.DeleteFileInWorldStorage(
+                        sentinelFile,
+                        typeof(CubemapApiServer));
                 }
             }
-            catch
+            catch (Exception e)
             {
-                return false;
+                MyLog.Default.Log(MyLogSeverity.Warning,
+                    "[RuntimePlanetGenerator] Could not delete world-storage " +
+                    "canary '" + sentinelFile + "': " + e.Message);
             }
         }
 
@@ -980,7 +1040,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 }
 
                 const string workshopPrefix =
-"(Workshop) ";
+                    "(Workshop) ";
 
                 saveName =
                     saveName.StartsWith(workshopPrefix,
@@ -1158,7 +1218,6 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
                 absoluteArchivePath);
 
             generator.Postprocess();
-
         }
 
 
@@ -1174,32 +1233,24 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Runtime
         }
 
 
-        private static bool LooksLikeUnixPath(
-            string path)
+        /// <summary>
+        /// Debug-only trace of one world-storage path check; LogHelper drops
+        /// Debug severity outside DEBUG builds.
+        /// </summary>
+        private static void TraceProbe(
+            string check,
+            string savePath,
+            string probePath,
+            string fileName,
+            string result)
         {
-            string normalized = NormalizePath(path);
-
-            return !string.IsNullOrWhiteSpace(normalized) &&
-                normalized.StartsWith("/", StringComparison.Ordinal) &&
-                !normalized.StartsWith("//", StringComparison.Ordinal);
-        }
-
-
-        private void WarnLinuxCompat(string path)
-        {
-            _unixPathDetected = true;
-
-            if (_linuxCompatWarningLogged)
-                return;
-
-            _linuxCompatWarningLogged = true;
-
-            MyLog.Default.Log(MyLogSeverity.Warning,
-                "[RuntimePlanetGenerator] Unix/Linux-Compat paths do not support " +
-                "the rooted Windows-path probe, so the physical world-storage " +
-                "folder cannot be verified. Continuing with the reported save " +
-                "path/session-name fallback; initialization and saving remain " +
-                "enabled. SavePath='" + path + "'.");
+            LogHelper.Log(
+                MyLogSeverity.Debug,
+                "[RuntimePlanetGenerator] Path probe (" + check + "): " +
+                "SavePath='" + (savePath ?? "<null>") +
+                "', ProbePath='" + (probePath ?? "<null>") +
+                "', File='" + (fileName ?? "<null>") +
+                "' -> " + result);
         }
 
 

@@ -341,6 +341,40 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             return _runtimePackages.LoadRuntimeRecipeXml(entry);
         }
 
+        internal string GetPlanetModificationsXml(long planetEntityId)
+        {
+            RuntimePlanetBuilderEntry entry = _runtimePackages.Settings == null ||
+                _runtimePackages.Settings.PlanetBuilders == null
+                    ? null
+                    : _runtimePackages.Settings.PlanetBuilders
+                        .Where(x => x != null && x.SourceEntityId == planetEntityId)
+                        .OrderByDescending(x => x.RuntimeRevision)
+                        .FirstOrDefault();
+            if (entry == null || RuntimePackageStore.GetPersistenceType(entry) !=
+                RuntimePlanetPersistenceType.Procedural)
+                return null;
+
+            RuntimeProceduralPlanetRecipe recipe = _runtimePackages.LoadRuntimeRecipe(entry);
+            var listing = new PlanetModificationListing();
+            for (int i = 0; i < recipe.Revisions.Count; i++)
+            {
+                RuntimeProceduralRevision revision = recipe.Revisions[i];
+                listing.Modifications.Add(new PlanetModificationInfo
+                {
+                    Id = revision.ModificationId,
+                    Index = i,
+                    CustomData = revision.CustomData,
+                    Lines = new List<RuntimeProceduralLineOperation>(revision.Lines),
+                    BrushCount = revision.Brushes.Count,
+                    FeatureCount = revision.Features.Count,
+                    BiomeReplacementCount = revision.BiomeReplacements.Count,
+                    FractalNoiseCount = revision.FractalNoise.Count,
+                    EnvironmentPresetName = revision.EnvironmentPresetName
+                });
+            }
+            return MyAPIGateway.Utilities.SerializeToXML(listing);
+        }
+
 
         private string BuildApiPlanetDetails(
             RuntimePlanetBuilderEntry entry)
@@ -1115,6 +1149,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
 
             if (!snapshot.RequiresAuthoritativeImageSync &&
+                snapshot.ModificationEdits.Count == 0 &&
                 !snapshot.IsCreation)
             {
                 try
@@ -1242,6 +1277,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                 null;
 
             if (!snapshot.RequiresAuthoritativeImageSync &&
+                snapshot.ModificationEdits.Count == 0 &&
                 !snapshot.IsCreation)
             {
                 PlanetDataArchiveService.ResolveFractalThresholds(
@@ -1505,6 +1541,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             }
             else
             {
+                if (snapshot.ModificationEdits.Count > 0)
+                    throw new Exception(
+                        "This planet has no procedural history; its modifications cannot be edited.");
+
                 _planetDataArchives.CreateModifiedArchive(
                     snapshot,
                     archiveFile);
@@ -1625,18 +1665,37 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             result.RequestedPlanetName =
                 snapshot.RequestedPlanetName;
 
+            // Clients apply operations on top of their current images, which
+            // cannot undo committed modifications. Edit pushes therefore send
+            // the rebuilt map images, like an authoritative image push.
             result.RuntimeSyncPacket =
                 !snapshot.IsCreation &&
-                snapshot.RequiresAuthoritativeImageSync
+                (snapshot.RequiresAuthoritativeImageSync ||
+                 snapshot.ModificationEdits.Count > 0)
                     ? (Generated.NetworkPackage)
                         RuntimeSyncBuilder.BuildImages(
                             snapshot,
                             pendingEntry,
-                            _planetDataArchives.ReadRuntimeArchive(
-                                archiveFile))
+                            SelectMapImages(
+                                _planetDataArchives.ReadRuntimeArchive(
+                                    archiveFile)))
                     : null;
 
             return result;
+        }
+
+
+        private static Dictionary<string, byte[]> SelectMapImages(
+            Dictionary<string, byte[]> archiveFiles)
+        {
+            var images = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in PlanetMapFileNames.All)
+            {
+                byte[] data;
+                if (archiveFiles.TryGetValue(name, out data))
+                    images.Add(name, data);
+            }
+            return images;
         }
 
 
@@ -1760,9 +1819,15 @@ namespace ProceduralCubemapApi.Common.PlanetModification
                     ".");
             }
 
+            RuntimeModificationIds.Ensure(recipe);
             var revision =
                 new RuntimeProceduralRevision
                 {
+                    ModificationId =
+                        string.IsNullOrWhiteSpace(snapshot.ModificationId)
+                            ? Guid.NewGuid().ToString("N")
+                            : snapshot.ModificationId,
+                    CustomData = snapshot.CustomData,
                     EnvironmentPresetName =
                         snapshot.EnvironmentPresetName
                 };
@@ -1865,14 +1930,67 @@ namespace ProceduralCubemapApi.Common.PlanetModification
             revision.AllocatedComplexMaterialValues.AddRange(
                 snapshot.AllocatedComplexMaterialValues);
 
-            recipe.Revisions.Add(
-                revision);
+            ApplyModificationEdits(
+                recipe,
+                snapshot.ModificationEdits);
+
+            // An edit-only push (e.g. removing roads) adds no revision of its own.
+            if (snapshot.ModificationEdits.Count == 0 ||
+                !RuntimeBrushReplayPlanner.IsEmpty(revision))
+            {
+                recipe.Revisions.Add(
+                    revision);
+            }
 
             RuntimePackageStore.ValidateRuntimeRecipe(
                 recipe,
                 null);
 
             return recipe;
+        }
+
+
+        /// <summary>
+        /// Applies line removals and deletions to committed modifications. All
+        /// ids and indices are validated before anything changes. A
+        /// modification left without operations is deleted, so the ones after
+        /// it move up in replay order.
+        /// </summary>
+        private static void ApplyModificationEdits(
+            RuntimeProceduralPlanetRecipe recipe,
+            List<ModificationEdit> edits)
+        {
+            if (edits == null || edits.Count == 0)
+                return;
+
+            var targets = new List<RuntimeProceduralRevision>(edits.Count);
+            foreach (ModificationEdit edit in edits)
+            {
+                RuntimeProceduralRevision target = recipe.Revisions.FirstOrDefault(
+                    r => string.Equals(r.ModificationId, edit.ModificationId, StringComparison.Ordinal));
+                if (target == null)
+                    throw new Exception("Modification " + edit.ModificationId +
+                        " no longer exists. Create a new template and retry.");
+                foreach (int index in edit.RemovedLineIndices)
+                    if (index < 0 || index >= target.Lines.Count)
+                        throw new Exception("Modification " + edit.ModificationId +
+                            " has no line " + index + ".");
+                targets.Add(target);
+            }
+
+            for (int i = 0; i < edits.Count; i++)
+            {
+                ModificationEdit edit = edits[i];
+                RuntimeProceduralRevision target = targets[i];
+                if (!edit.Delete)
+                {
+                    foreach (int index in edit.RemovedLineIndices
+                                 .Distinct().OrderByDescending(x => x))
+                        target.Lines.RemoveAt(index);
+                }
+                if (edit.Delete || RuntimeBrushReplayPlanner.IsEmpty(target))
+                    recipe.Revisions.Remove(target);
+            }
         }
 
 
@@ -3062,6 +3180,12 @@ namespace ProceduralCubemapApi.Common.PlanetModification
 
             snapshot.LineOperations =
                 ConvertLineOperations(packet.LineOperations);
+
+            snapshot.ModificationId =
+                packet.ModificationId;
+
+            snapshot.CustomData =
+                packet.CustomData;
 
             snapshot.FeatureOperations =
                 ConvertFeatureOperations(packet.FeatureOperations);

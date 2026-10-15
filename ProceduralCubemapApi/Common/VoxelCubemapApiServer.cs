@@ -341,8 +341,7 @@ namespace ProceduralCubemapApi.Common
             {
                 if (!TryRunWorldStorageSelfTest(
                         currentPath,
-                        "workshop save-path normalization") &&
-                    !_runtimeGenerators.UnixPathDetected)
+                        "workshop save-path normalization"))
                 {
                     MyLog.Default.Log(MyLogSeverity.Warning,
                         "[RuntimePlanetGenerator] World storage could not be " +
@@ -512,12 +511,9 @@ namespace ProceduralCubemapApi.Common
                 if (!selfTestPassed)
                 {
                     ReportWorldStorageVerificationFailure(
-                        _runtimeGenerators.UnixPathDetected
-                            ? "Unix/Linux-Compat path probing is unsupported; " +
-                              "the physical save folder remains unverified."
-                            : "SentinelCanary.txt could not be located through " +
-                              "the reported CurrentPath, enumerated saves, or " +
-                              "SavesPath + Session.Name.");
+                        "The world-storage canary could not be located through " +
+                        "the reported CurrentPath, enumerated saves, or " +
+                        "SavesPath + Session.Name.");
                 }
                 else
                 {
@@ -595,11 +591,8 @@ namespace ProceduralCubemapApi.Common
                         _worldStorageVerificationFailed = false;
                     else
                         ReportWorldStorageVerificationFailure(
-                            _runtimeGenerators.UnixPathDetected
-                                ? "Unix/Linux-Compat path probing is unsupported; " +
-                                  "the physical save folder remains unverified."
-                                : "World-storage path could not be verified " +
-                                  "after Save As.");
+                            "World-storage path could not be verified " +
+                            "after Save As.");
                 }
 
                 _runtimeGenerators.RebindToSavePath(

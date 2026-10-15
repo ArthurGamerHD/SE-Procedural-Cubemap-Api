@@ -75,6 +75,13 @@ namespace ProceduralCubemapApi.Common.Networking
 
         [ProtoMember(21)]
         public List<SyncedLineOperation> LineOperations;
+
+        // Same modification identity as the server's recipe revision.
+        [ProtoMember(22)]
+        public string ModificationId;
+
+        [ProtoMember(23)]
+        public string CustomData;
     }
 
     [ProtoContract]

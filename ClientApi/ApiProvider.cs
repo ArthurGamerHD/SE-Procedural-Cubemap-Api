@@ -15,6 +15,7 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<string[]> _getApiPlanetDetails;
         private readonly Func<long, string> _getPlanetRecipeXml;
+        private readonly Func<long, string> _getPlanetModificationsXml;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<ApiData> _getEnvironmentPresets;
@@ -51,6 +52,11 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<long, string>>(
                     api,
                     "GetPlanetRecipeXml");
+
+            _getPlanetModificationsXml =
+                GetRequired<Func<long, string>>(
+                    api,
+                    "GetPlanetModificationsXml");
 
             _getNoiseProvider =
                 GetRequired<Func<ApiData>>(
@@ -147,6 +153,18 @@ namespace ProceduralCubemapApi.Api
             long entityId)
         {
             return _getPlanetRecipeXml(entityId);
+        }
+
+
+        /// <summary>
+        /// Returns the planet's committed modifications in replay order, with
+        /// stable ids and every road line's parameters, as XML. Null for a
+        /// PNG-backed planet (no procedural history).
+        /// </summary>
+        public string GetPlanetModificationsXml(
+            long entityId)
+        {
+            return _getPlanetModificationsXml(entityId);
         }
 
 

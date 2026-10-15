@@ -1049,6 +1049,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
                     .SerializeFromXML<RuntimeProceduralPlanetRecipe>(xml);
 
             ValidateRuntimeRecipe(recipe, entry);
+            RuntimeModificationIds.Ensure(recipe);
             return recipe;
         }
 

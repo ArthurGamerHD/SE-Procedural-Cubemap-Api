@@ -239,6 +239,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
     }
 
 
+    internal sealed class ModificationEdit
+    {
+        public string ModificationId;
+        public bool Delete;
+        public List<int> RemovedLineIndices = new List<int>();
+    }
+
     internal sealed class PlanetModificationSnapshot
     {
         public MyPlanet TargetPlanet;
@@ -251,6 +258,10 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public ulong BaseRuntimeRevision;
         public long PlanetSeed;
         public string TemplateId;
+        public string ModificationId;
+        public string CustomData;
+        // Edits to already committed modifications, applied before this one is appended.
+        public List<ModificationEdit> ModificationEdits = new List<ModificationEdit>();
         public string RequestedGeneratorName;
         public string RequestedPlanetName;
         public MyObjectBuilder_PlanetGeneratorDefinition Builder;

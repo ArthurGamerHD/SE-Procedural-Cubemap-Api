@@ -50,6 +50,13 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Persistence
 
     public class RuntimeProceduralRevision
     {
+        // Stable identity of one committed modification (one push). Recipes
+        // written before identities existed receive deterministic legacy ids.
+        public string ModificationId;
+
+        // Caller-defined, opaque to the API (ModificationTemplate.SetCustomData).
+        public string CustomData;
+
         public List<RuntimeProceduralBrushOperation> Brushes =
             new List<RuntimeProceduralBrushOperation>();
 

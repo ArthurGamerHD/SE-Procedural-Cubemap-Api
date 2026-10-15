@@ -66,6 +66,11 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         private readonly EnvironmentPresetCatalog _environmentPresetCatalog;
         private string _environmentCarrierSubtype;
         private string _environmentPresetName;
+        private string _customData;
+        // Edits to committed modifications, keyed by modification id.
+        private readonly Dictionary<string, ModificationEdit> _modificationEdits =
+            new Dictionary<string, ModificationEdit>(StringComparer.Ordinal);
+        internal const int MaximumCustomDataLength = 65536;
         private string _requestedGeneratorName;
         private string _requestedPlanetName;
         private bool _requiresAuthoritativeImageSync;
@@ -90,6 +95,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
         public readonly ulong BaseRuntimeRevision;
         public readonly long PlanetSeed;
         public readonly string TemplateId;
+        // Identity the committed modification will carry in the recipe.
+        public readonly string ModificationId = Guid.NewGuid().ToString("N");
         public MyObjectBuilder_PlanetGeneratorDefinition Builder;
         public readonly bool IsCreation;
         public readonly float CreationDiameter;
@@ -306,6 +313,7 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                 BaseRuntimeRevision = BaseRuntimeRevision,
                 PlanetSeed = PlanetSeed,
                 TemplateId = TemplateId,
+                ModificationId = ModificationId,
                 RequestedGeneratorName = _requestedGeneratorName,
                 RequestedPlanetName = _requestedPlanetName,
                 Builder = Builder,
@@ -319,6 +327,8 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
                 AllocatedComplexMaterialValues = allocatedComplexValues,
                 EnvironmentCarrierSubtype = _environmentCarrierSubtype,
                 EnvironmentPresetName = _environmentPresetName,
+                CustomData = _customData,
+                ModificationEdits = CopyModificationEdits(),
                 RequiresAuthoritativeImageSync =
                     _requiresAuthoritativeImageSync,
                 ChangeMaterials =
@@ -1935,6 +1945,131 @@ namespace ProceduralCubemapApi.Common.PlanetModification.Templates
             }
 
             return removed;
+        }
+
+
+        /// <summary>
+        /// Returns the identifier the committed modification will carry. It is
+        /// listed by GetPlanetModificationsXml once Push succeeds.
+        /// </summary>
+        [ApiMethod]
+        private string GetModificationId()
+        {
+            return ModificationId;
+        }
+
+
+        /// <summary>
+        /// Stores caller-defined data with the committed modification. It is
+        /// persisted, synced to clients and returned by GetPlanetModificationsXml;
+        /// the API never interprets it. Serialize your own format (XML, JSON,
+        /// base64). Null clears it. At most 65536 characters.
+        /// </summary>
+        [ApiMethod]
+        private void SetCustomData(string customData)
+        {
+            EnsureEditable();
+            if (customData != null && customData.Length > MaximumCustomDataLength)
+                throw new ArgumentException(
+                    "CustomData exceeds " + MaximumCustomDataLength + " characters.",
+                    nameof(customData));
+            _customData = customData;
+        }
+
+
+        [ApiMethod]
+        private string GetCustomData()
+        {
+            return _customData;
+        }
+
+
+        /// <summary>
+        /// Ids of the planet's committed modifications in replay order, as of
+        /// this template's creation. Empty for planets without procedural history.
+        /// </summary>
+        [ApiMethod]
+        private string[] GetModificationIds()
+        {
+            if (_inheritedProceduralRecipe == null)
+                return new string[0];
+            var ids = new string[_inheritedProceduralRecipe.Revisions.Count];
+            for (int i = 0; i < ids.Length; i++)
+                ids[i] = _inheritedProceduralRecipe.Revisions[i].ModificationId;
+            return ids;
+        }
+
+
+        /// <summary>
+        /// On Push, removes line <paramref name="lineIndex"/> (as listed by
+        /// GetPlanetModificationsXml) from a committed modification. A
+        /// modification left with no operations is deleted. Removals and this
+        /// template's own operations commit together in one push.
+        /// </summary>
+        [ApiMethod]
+        private void RemoveModificationLine(string modificationId, int lineIndex)
+        {
+            EnsureEditable();
+            RuntimeProceduralRevision revision = FindCommittedModification(modificationId);
+            if (lineIndex < 0 || lineIndex >= revision.Lines.Count)
+                throw new ArgumentException(
+                    "Modification " + modificationId + " has " + revision.Lines.Count + " lines.",
+                    nameof(lineIndex));
+            ModificationEdit edit = GetOrCreateEdit(modificationId);
+            if (!edit.RemovedLineIndices.Contains(lineIndex))
+                edit.RemovedLineIndices.Add(lineIndex);
+        }
+
+
+        /// <summary>
+        /// On Push, deletes a committed modification completely; later
+        /// modifications move up one place in replay order.
+        /// </summary>
+        [ApiMethod]
+        private void DeleteModification(string modificationId)
+        {
+            EnsureEditable();
+            FindCommittedModification(modificationId);
+            GetOrCreateEdit(modificationId).Delete = true;
+        }
+
+
+        private RuntimeProceduralRevision FindCommittedModification(string modificationId)
+        {
+            if (_inheritedProceduralRecipe == null || !_proceduralPersistenceEligible)
+                throw new InvalidOperationException(
+                    "This planet has no procedural history; its modifications cannot be edited.");
+            foreach (RuntimeProceduralRevision revision in _inheritedProceduralRecipe.Revisions)
+                if (string.Equals(revision.ModificationId, modificationId, StringComparison.Ordinal))
+                    return revision;
+            throw new ArgumentException("Unknown modification id: " + modificationId,
+                nameof(modificationId));
+        }
+
+
+        private ModificationEdit GetOrCreateEdit(string modificationId)
+        {
+            ModificationEdit edit;
+            if (!_modificationEdits.TryGetValue(modificationId, out edit))
+            {
+                edit = new ModificationEdit { ModificationId = modificationId };
+                _modificationEdits.Add(modificationId, edit);
+            }
+            return edit;
+        }
+
+
+        private List<ModificationEdit> CopyModificationEdits()
+        {
+            var edits = new List<ModificationEdit>(_modificationEdits.Count);
+            foreach (ModificationEdit edit in _modificationEdits.Values)
+                edits.Add(new ModificationEdit
+                {
+                    ModificationId = edit.ModificationId,
+                    Delete = edit.Delete,
+                    RemovedLineIndices = new List<int>(edit.RemovedLineIndices)
+                });
+            return edits;
         }
 
 

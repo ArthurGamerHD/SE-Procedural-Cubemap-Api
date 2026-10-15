@@ -38,6 +38,12 @@ namespace ProceduralCubemapApi.Api
         private readonly Action<string, int, double[], double, double, bool, double, double, double> _drawLineSmooth;
         private readonly Func<ApiData> _addFeature;
         private readonly Func<byte, bool> _removeMaterial;
+        private readonly Func<string> _getModificationId;
+        private readonly Action<string> _setCustomData;
+        private readonly Func<string> _getCustomData;
+        private readonly Func<string[]> _getModificationIds;
+        private readonly Action<string, int> _removeModificationLine;
+        private readonly Action<string> _deleteModification;
         private readonly Action<Action<bool, string>> _push;
         private readonly Func<Action> _pushNoCommit;
         private readonly Action<Action<bool, string>> _commitPendingPush;
@@ -184,6 +190,36 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<byte, bool>>(
                     api,
                     "RemoveMaterial");
+
+            _getModificationId =
+                GetRequired<Func<string>>(
+                    api,
+                    "GetModificationId");
+
+            _setCustomData =
+                GetRequired<Action<string>>(
+                    api,
+                    "SetCustomData");
+
+            _getCustomData =
+                GetRequired<Func<string>>(
+                    api,
+                    "GetCustomData");
+
+            _getModificationIds =
+                GetRequired<Func<string[]>>(
+                    api,
+                    "GetModificationIds");
+
+            _removeModificationLine =
+                GetRequired<Action<string, int>>(
+                    api,
+                    "RemoveModificationLine");
+
+            _deleteModification =
+                GetRequired<Action<string>>(
+                    api,
+                    "DeleteModification");
 
             _push =
                 GetRequired<Action<Action<bool, string>>>(
@@ -575,6 +611,70 @@ namespace ProceduralCubemapApi.Api
             byte mapValue)
         {
             return _removeMaterial(mapValue);
+        }
+
+
+        /// <summary>
+        /// Returns the identifier the committed modification will carry. It is
+        /// listed by GetPlanetModificationsXml once Push succeeds.
+        /// </summary>
+        public string GetModificationId()
+        {
+            return _getModificationId();
+        }
+
+
+        /// <summary>
+        /// Stores caller-defined data with the committed modification. It is
+        /// persisted, synced to clients and returned by GetPlanetModificationsXml;
+        /// the API never interprets it. Serialize your own format (XML, JSON,
+        /// base64). Null clears it. At most 65536 characters.
+        /// </summary>
+        public void SetCustomData(
+            string customData)
+        {
+            _setCustomData(customData);
+        }
+
+
+        public string GetCustomData()
+        {
+            return _getCustomData();
+        }
+
+
+        /// <summary>
+        /// Ids of the planet's committed modifications in replay order, as of
+        /// this template's creation. Empty for planets without procedural history.
+        /// </summary>
+        public string[] GetModificationIds()
+        {
+            return _getModificationIds();
+        }
+
+
+        /// <summary>
+        /// On Push, removes line <paramref name="lineIndex"/> (as listed by
+        /// GetPlanetModificationsXml) from a committed modification. A
+        /// modification left with no operations is deleted. Removals and this
+        /// template's own operations commit together in one push.
+        /// </summary>
+        public void RemoveModificationLine(
+            string modificationId,
+            int lineIndex)
+        {
+            _removeModificationLine(modificationId, lineIndex);
+        }
+
+
+        /// <summary>
+        /// On Push, deletes a committed modification completely; later
+        /// modifications move up one place in replay order.
+        /// </summary>
+        public void DeleteModification(
+            string modificationId)
+        {
+            _deleteModification(modificationId);
         }
 
 
