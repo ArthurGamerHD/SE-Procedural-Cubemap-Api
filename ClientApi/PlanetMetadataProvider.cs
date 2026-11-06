@@ -14,8 +14,10 @@ namespace ProceduralCubemapApi.Api
         private readonly Func<string, int[]> _getFaceSize;
         private readonly Func<string, ushort[]> _loadHeightFace;
         private readonly Func<string, byte[]> _loadMaterialFace;
-        private readonly Func<string, byte[]> _loadBiomeFace;
         private readonly Func<string, byte[]> _loadOreFace;
+        private readonly Func<string, byte[]> _loadBiomeFace;
+        private readonly Func<string, byte[]> _loadHeightFacePng;
+        private readonly Func<string, byte[]> _loadMaterialFacePng;
         private readonly Action _close;
 
 
@@ -50,15 +52,25 @@ namespace ProceduralCubemapApi.Api
                     api,
                     "LoadMaterialFace");
 
+            _loadOreFace =
+                GetRequired<Func<string, byte[]>>(
+                    api,
+                    "LoadOreFace");
+
             _loadBiomeFace =
                 GetRequired<Func<string, byte[]>>(
                     api,
                     "LoadBiomeFace");
 
-            _loadOreFace =
+            _loadHeightFacePng =
                 GetRequired<Func<string, byte[]>>(
                     api,
-                    "LoadOreFace");
+                    "LoadHeightFacePng");
+
+            _loadMaterialFacePng =
+                GetRequired<Func<string, byte[]>>(
+                    api,
+                    "LoadMaterialFacePng");
 
             _close =
                 GetRequired<Action>(
@@ -121,6 +133,16 @@ namespace ProceduralCubemapApi.Api
 
 
         /// <summary>
+        /// Loads the ore (blue) channel of one material-map face.
+        /// </summary>
+        public byte[] LoadOreFace(
+            string face)
+        {
+            return _loadOreFace(face);
+        }
+
+
+        /// <summary>
         /// Loads the biome (green) channel of one material-map face.
         /// </summary>
         public byte[] LoadBiomeFace(
@@ -131,12 +153,26 @@ namespace ProceduralCubemapApi.Api
 
 
         /// <summary>
-        /// Loads the ore (blue) channel of one material-map face.
+        /// Copies the original 16-bit grayscale PNG for a cubemap height face.
+        /// Unlike LoadHeightFace, this returns encoded PNG bytes (not samples).
+        /// The caller owns the returned array; no mutable internal buffer escapes.
         /// </summary>
-        public byte[] LoadOreFace(
+        public byte[] LoadHeightFacePng(
             string face)
         {
-            return _loadOreFace(face);
+            return _loadHeightFacePng(face);
+        }
+
+
+        /// <summary>
+        /// Copies the original material-map PNG for a cubemap face. The PNG
+        /// includes the original channels; LoadMaterialFace/LoadBiomeFace
+        /// remain available for consumers that only need decoded channels.
+        /// </summary>
+        public byte[] LoadMaterialFacePng(
+            string face)
+        {
+            return _loadMaterialFacePng(face);
         }
 
 

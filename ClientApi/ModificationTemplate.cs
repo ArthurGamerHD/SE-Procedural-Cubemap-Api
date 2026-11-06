@@ -34,8 +34,16 @@ namespace ProceduralCubemapApi.Api
         private readonly Action<string, int, bool, double, int, int, double, double, int, int, double, double, int, int> _applyBrush;
         private readonly Action<string, int, int, int, int, double, int, int, double, double, int, int, double, double, int, int> _applyNoiseBrush;
         private readonly Action<string, int, double, double, double, double, int, int, int, int, double, double, int, int> _applyRadialBrush;
+        private readonly Action<string, int, double[], double, double, bool, double, double> _drawLine;
+        private readonly Action<string, int, double[], double, double, bool, double, double, double> _drawLineSmooth;
         private readonly Func<ApiData> _addFeature;
         private readonly Func<byte, bool> _removeMaterial;
+        private readonly Func<string> _getModificationId;
+        private readonly Action<string> _setCustomData;
+        private readonly Func<string> _getCustomData;
+        private readonly Func<string[]> _getModificationIds;
+        private readonly Action<string, int> _removeModificationLine;
+        private readonly Action<string> _deleteModification;
         private readonly Action<Action<bool, string>> _push;
         private readonly Func<Action> _pushNoCommit;
         private readonly Action<Action<bool, string>> _commitPendingPush;
@@ -163,6 +171,16 @@ namespace ProceduralCubemapApi.Api
                     api,
                     "ApplyRadialBrush");
 
+            _drawLine =
+                GetRequired<Action<string, int, double[], double, double, bool, double, double>>(
+                    api,
+                    "DrawLine");
+
+            _drawLineSmooth =
+                GetRequired<Action<string, int, double[], double, double, bool, double, double, double>>(
+                    api,
+                    "DrawLineSmooth");
+
             _addFeature =
                 GetRequired<Func<ApiData>>(
                     api,
@@ -172,6 +190,36 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<byte, bool>>(
                     api,
                     "RemoveMaterial");
+
+            _getModificationId =
+                GetRequired<Func<string>>(
+                    api,
+                    "GetModificationId");
+
+            _setCustomData =
+                GetRequired<Action<string>>(
+                    api,
+                    "SetCustomData");
+
+            _getCustomData =
+                GetRequired<Func<string>>(
+                    api,
+                    "GetCustomData");
+
+            _getModificationIds =
+                GetRequired<Func<string[]>>(
+                    api,
+                    "GetModificationIds");
+
+            _removeModificationLine =
+                GetRequired<Action<string, int>>(
+                    api,
+                    "RemoveModificationLine");
+
+            _deleteModification =
+                GetRequired<Action<string>>(
+                    api,
+                    "DeleteModification");
 
             _push =
                 GetRequired<Action<Action<bool, string>>>(
@@ -329,6 +377,7 @@ namespace ProceduralCubemapApi.Api
         /// Adds a simple voxel material definition using a server-allocated map
         /// value and returns that value. This is the preferred registration path
         /// when the caller does not require a specific byte ID.
+        /// Reuses an existing simple material with the same subtype and depth.
         /// </summary>
         public byte AddMaterial(
             string materialSubtype,
@@ -339,8 +388,9 @@ namespace ProceduralCubemapApi.Api
 
 
         /// <summary>
-        /// Clones a complex material group and returns a map value unused by the
-        /// source maps and template definitions.
+        /// Reuses an existing complex material with identical ordered rules, or
+        /// clones the group into an unused map value. Group name/value are ignored
+        /// for reuse; material layers and placement constraints must match.
         /// </summary>
         public byte AddComplexMaterial(
             MyPlanetMaterialGroup materialGroup)
@@ -502,6 +552,43 @@ namespace ProceduralCubemapApi.Api
         }
 
 
+        /// <summary>Queues a spherical line; geometry is 12 planet-local components:
+        /// start XYZ, end XYZ, start tangent XYZ, end tangent XYZ.
+        /// Endpoints are unit sphere directions. Width and radius are meters.
+        /// The line is baked into authoritative image data (not a procedural replay recipe).
+        /// </summary>
+        public void DrawLine(
+            string layer,
+            int material,
+            double[] geometry,
+            double radiusMeters,
+            double widthMeters,
+            bool averageHeight,
+            double fillAngleDegrees,
+            double maximumSlopeDegrees)
+        {
+            _drawLine(layer, material, geometry, radiusMeters, widthMeters, averageHeight, fillAngleDegrees, maximumSlopeDegrees);
+        }
+
+
+        /// <summary>Queues a spherical line with longitudinal grade smoothing.
+        /// Segment distance is the half-width, in meters, of the smoothing window;
+        /// zero preserves the original unsmoothed DrawLine behavior.</summary>
+        public void DrawLineSmooth(
+            string layer,
+            int material,
+            double[] geometry,
+            double radiusMeters,
+            double widthMeters,
+            bool averageHeight,
+            double fillAngleDegrees,
+            double maximumSlopeDegrees,
+            double segmentDistanceMeters)
+        {
+            _drawLineSmooth(layer, material, geometry, radiusMeters, widthMeters, averageHeight, fillAngleDegrees, maximumSlopeDegrees, segmentDistanceMeters);
+        }
+
+
         /// <summary>
         /// Adds one reusable procedural feature pass and returns its nested template.
         /// Feature generators are stored compactly and expanded only while baking.
@@ -524,6 +611,70 @@ namespace ProceduralCubemapApi.Api
             byte mapValue)
         {
             return _removeMaterial(mapValue);
+        }
+
+
+        /// <summary>
+        /// Returns the identifier the committed modification will carry. It is
+        /// listed by GetPlanetModificationsXml once Push succeeds.
+        /// </summary>
+        public string GetModificationId()
+        {
+            return _getModificationId();
+        }
+
+
+        /// <summary>
+        /// Stores caller-defined data with the committed modification. It is
+        /// persisted, synced to clients and returned by GetPlanetModificationsXml;
+        /// the API never interprets it. Serialize your own format (XML, JSON,
+        /// base64). Null clears it. At most 65536 characters.
+        /// </summary>
+        public void SetCustomData(
+            string customData)
+        {
+            _setCustomData(customData);
+        }
+
+
+        public string GetCustomData()
+        {
+            return _getCustomData();
+        }
+
+
+        /// <summary>
+        /// Ids of the planet's committed modifications in replay order, as of
+        /// this template's creation. Empty for planets without procedural history.
+        /// </summary>
+        public string[] GetModificationIds()
+        {
+            return _getModificationIds();
+        }
+
+
+        /// <summary>
+        /// On Push, removes line <paramref name="lineIndex"/> (as listed by
+        /// GetPlanetModificationsXml) from a committed modification. A
+        /// modification left with no operations is deleted. Removals and this
+        /// template's own operations commit together in one push.
+        /// </summary>
+        public void RemoveModificationLine(
+            string modificationId,
+            int lineIndex)
+        {
+            _removeModificationLine(modificationId, lineIndex);
+        }
+
+
+        /// <summary>
+        /// On Push, deletes a committed modification completely; later
+        /// modifications move up one place in replay order.
+        /// </summary>
+        public void DeleteModification(
+            string modificationId)
+        {
+            _deleteModification(modificationId);
         }
 
 

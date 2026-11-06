@@ -11,9 +11,11 @@ namespace ProceduralCubemapApi.Api
     public sealed class ApiProvider
     {
         private readonly Func<long, ApiData> _getModificationTemplate;
-        private readonly Func<string, float, int, Vector3D, int, ApiData> _createPlanetAtCenter;
+        private readonly Func<string, float, int, Vector3D, ApiData> _createPlanetAtCenter;
         private readonly Func<long, bool, ApiData> _getPlanetMetadata;
         private readonly Func<string[]> _getApiPlanetDetails;
+        private readonly Func<long, string> _getPlanetRecipeXml;
+        private readonly Func<long, string> _getPlanetModificationsXml;
         private readonly Func<ApiData> _getNoiseProvider;
         private readonly Func<ApiData> _getWaterUtil;
         private readonly Func<ApiData> _getEnvironmentPresets;
@@ -32,7 +34,7 @@ namespace ProceduralCubemapApi.Api
                     "GetModificationTemplate");
 
             _createPlanetAtCenter =
-                GetRequired<Func<string, float, int, Vector3D, int, ApiData>>(
+                GetRequired<Func<string, float, int, Vector3D, ApiData>>(
                     api,
                     "CreatePlanetAtCenter");
 
@@ -45,6 +47,16 @@ namespace ProceduralCubemapApi.Api
                 GetRequired<Func<string[]>>(
                     api,
                     "GetApiPlanetDetails");
+
+            _getPlanetRecipeXml =
+                GetRequired<Func<long, string>>(
+                    api,
+                    "GetPlanetRecipeXml");
+
+            _getPlanetModificationsXml =
+                GetRequired<Func<long, string>>(
+                    api,
+                    "GetPlanetModificationsXml");
 
             _getNoiseProvider =
                 GetRequired<Func<ApiData>>(
@@ -92,17 +104,15 @@ namespace ProceduralCubemapApi.Api
         /// Creates a deferred planet template centered at the requested world
         /// position. The planet is not spawned until Push commits the final
         /// runtime generator, so the live planet is initialized only once.
-        /// Texture size controls the generated cubemap faces and defaults to 16.
         /// </summary>
         public ModificationTemplate CreatePlanetAtCenter(
             string generatorSubtype,
             float diameter,
             int seed,
-            Vector3D center,
-            int textureSize = 2048)
+            Vector3D center)
         {
             ApiData nestedApi =
-                _createPlanetAtCenter(generatorSubtype, diameter, seed, center, textureSize);
+                _createPlanetAtCenter(generatorSubtype, diameter, seed, center);
 
             return nestedApi == null
                 ? null
@@ -135,6 +145,26 @@ namespace ProceduralCubemapApi.Api
         public string[] GetApiPlanetDetails()
         {
             return _getApiPlanetDetails();
+        }
+
+
+        /// <summary>Returns the committed procedural recipe XML, or null for a PNG-backed planet.</summary>
+        public string GetPlanetRecipeXml(
+            long entityId)
+        {
+            return _getPlanetRecipeXml(entityId);
+        }
+
+
+        /// <summary>
+        /// Returns the planet's committed modifications in replay order, with
+        /// stable ids and every road line's parameters, as XML. Null for a
+        /// PNG-backed planet (no procedural history).
+        /// </summary>
+        public string GetPlanetModificationsXml(
+            long entityId)
+        {
+            return _getPlanetModificationsXml(entityId);
         }
 
 
